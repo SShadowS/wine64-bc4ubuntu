@@ -1,7 +1,7 @@
 @ stub HttpAddFragmentToCache
 @ stdcall HttpAddUrl(ptr wstr ptr)
 @ stdcall HttpAddUrlToUrlGroup(int64 wstr int64 long)
-@ stub HttpCancelHttpRequest
+@ stdcall HttpCancelHttpRequest(ptr int64 ptr)
 @ stdcall HttpCloseRequestQueue(ptr)
 @ stdcall HttpCloseServerSession(int64)
 @ stdcall HttpCloseUrlGroup(int64)
@@ -33,5 +33,5 @@
 @ stub HttpShutdownRequestQueue
 @ stdcall HttpTerminate(long ptr)
 @ stub HttpWaitForDemandStart
-@ stub HttpWaitForDisconnect
-@ stub HttpWaitForDisconnectEx
+@ stdcall HttpWaitForDisconnect(ptr int64 ptr)
+@ stdcall HttpWaitForDisconnectEx(ptr int64 long ptr)

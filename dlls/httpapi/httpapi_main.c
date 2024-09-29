@@ -24,8 +24,18 @@
 #include "winternl.h"
 #include "wine/debug.h"
 #include "wine/list.h"
+#include "winhttp.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(http);
+
+struct http_cancel_request_params
+{
+    HTTP_REQUEST_ID RequestId;
+    ULONG Bits;
+};
+
+#define IOCTL_HTTP_CANCEL_REQUEST CTL_CODE(FILE_DEVICE_NETWORK, 0x31, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
 
 /***********************************************************************
  *        HttpInitialize       (HTTPAPI.@)
@@ -75,6 +85,90 @@ ULONG WINAPI HttpInitialize(HTTPAPI_VERSION version, ULONG flags, void *reserved
     CloseServiceHandle(service);
     CloseServiceHandle(manager);
     return ERROR_SUCCESS;
+}
+
+ULONG WINAPI HttpWaitForDisconnect(HANDLE ReqQueueHandle, HTTP_CONNECTION_ID ConnectionId, LPOVERLAPPED pOverlapped)
+{
+    struct http_wait_for_disconnect_params params;
+    ULONG ret = NO_ERROR;
+
+    TRACE("ReqQueueHandle %p, ConnectionId %s, pOverlapped %p.\n", ReqQueueHandle, wine_dbgstr_longlong(ConnectionId), pOverlapped);
+
+    if (!pOverlapped)
+    {
+        FIXME("Synchronous calls are not implemented.\n");
+        return ERROR_CALL_NOT_IMPLEMENTED;
+    }
+
+    params.connection_id = ConnectionId;
+    params.bits = sizeof(void *) * 8;
+    params.flags = 0;
+
+    if (!DeviceIoControl(ReqQueueHandle, IOCTL_HTTP_WAIT_FOR_DISCONNECT, &params, sizeof(params), NULL, 0, NULL, pOverlapped))
+        ret = GetLastError();
+
+    return ret;
+}
+
+ULONG WINAPI HttpWaitForDisconnectEx(HANDLE ReqQueueHandle, HTTP_CONNECTION_ID ConnectionId, ULONG Flags, LPOVERLAPPED pOverlapped)
+{
+    struct http_wait_for_disconnect_params params;
+    ULONG ret = ERROR_SUCCESS;
+
+    TRACE("ReqQueueHandle %p, ConnectionId %s, Flags %#lx, pOverlapped %p.\n",
+          ReqQueueHandle, wine_dbgstr_longlong(ConnectionId), Flags, pOverlapped);
+
+    if (!pOverlapped)
+    {
+        FIXME("Synchronous calls are not implemented.\n");
+        return ERROR_CALL_NOT_IMPLEMENTED;
+    }
+
+    if (Flags != 0)
+        FIXME("Unhandled Flags %#lx.\n", Flags);
+
+    params.connection_id = ConnectionId;
+    params.bits = sizeof(void *) * 8;
+    params.flags = Flags;
+
+    if (!DeviceIoControl(ReqQueueHandle, IOCTL_HTTP_WAIT_FOR_DISCONNECT_EX, &params, sizeof(params), NULL, 0, NULL, pOverlapped))
+        ret = GetLastError();
+
+    return ret;
+}
+
+ULONG WINAPI HttpCancelHttpRequest(HANDLE RequestQueueHandle, HTTP_REQUEST_ID RequestId, LPOVERLAPPED pOverlapped)
+{
+    struct http_cancel_request_params params;
+    ULONG ret = NO_ERROR;
+    OVERLAPPED sync_ovl;
+
+    TRACE("RequestQueueHandle %p, RequestId %s, pOverlapped %p.\n", RequestQueueHandle, wine_dbgstr_longlong(RequestId), pOverlapped);
+
+    params.RequestId = RequestId;
+    params.Bits = sizeof(void *) * 8;
+
+    if (!pOverlapped)
+    {
+        sync_ovl.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+        pOverlapped = &sync_ovl;
+    }
+
+    if (!DeviceIoControl(RequestQueueHandle, IOCTL_HTTP_CANCEL_REQUEST, &params, sizeof(params), NULL, 0, NULL, pOverlapped))
+        ret = GetLastError();
+
+    if (pOverlapped == &sync_ovl)
+    {
+        if (ret == ERROR_IO_PENDING)
+        {
+            ret = ERROR_SUCCESS;
+            if (!GetOverlappedResult(RequestQueueHandle, pOverlapped, NULL, TRUE))
+                ret = GetLastError();
+        }
+        CloseHandle(sync_ovl.hEvent);
+    }
+
+    return ret;
 }
 
 /***********************************************************************
