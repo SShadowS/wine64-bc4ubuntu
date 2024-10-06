@@ -78,7 +78,7 @@ void init_monitors( int width, int height )
     monitor_rc_work = virtual_screen_rect;
 
     if (!hwnd || !NtUserIsWindowVisible( hwnd )) return;
-    if (!NtUserGetWindowRect( hwnd, &rect, NtUserGetWinMonitorDpi( hwnd ) )) return;
+    if (!NtUserGetWindowRect( hwnd, &rect, NtUserGetWinMonitorDpi( hwnd, MDT_DEFAULT ) )) return;
     if (rect.top) monitor_rc_work.bottom = rect.top;
     else monitor_rc_work.top = rect.bottom;
     TRACE( "found tray %p %s work area %s\n", hwnd,
@@ -294,29 +294,6 @@ UINT ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device_manag
 }
 
 
-/***********************************************************************
- *           ANDROID_GetCurrentDisplaySettings
- */
-BOOL ANDROID_GetCurrentDisplaySettings( LPCWSTR name, BOOL is_primary, LPDEVMODEW devmode )
-{
-    devmode->dmDisplayFlags = 0;
-    devmode->dmPosition.x = 0;
-    devmode->dmPosition.y = 0;
-    devmode->dmDisplayOrientation = 0;
-    devmode->dmDisplayFixedOutput = 0;
-    devmode->dmPelsWidth = screen_width;
-    devmode->dmPelsHeight = screen_height;
-    devmode->dmBitsPerPel = screen_bpp;
-    devmode->dmDisplayFrequency = 60;
-    devmode->dmFields = DM_POSITION | DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT |
-                        DM_BITSPERPEL | DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY;
-    TRACE( "current mode -- %dx%d %d bpp @%d Hz\n",
-           (int)devmode->dmPelsWidth, (int)devmode->dmPelsHeight,
-           (int)devmode->dmBitsPerPel, (int)devmode->dmDisplayFrequency );
-    return TRUE;
-}
-
-
 /**********************************************************************
  *           ANDROID_wine_get_wgl_driver
  */
@@ -338,7 +315,6 @@ static const struct user_driver_funcs android_drv_funcs =
     .pVkKeyScanEx = ANDROID_VkKeyScanEx,
     .pSetCursor = ANDROID_SetCursor,
     .pChangeDisplaySettings = ANDROID_ChangeDisplaySettings,
-    .pGetCurrentDisplaySettings = ANDROID_GetCurrentDisplaySettings,
     .pUpdateDisplayDevices = ANDROID_UpdateDisplayDevices,
     .pCreateDesktop = ANDROID_CreateDesktop,
     .pCreateWindow = ANDROID_CreateWindow,

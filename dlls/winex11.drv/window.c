@@ -1460,9 +1460,9 @@ static void move_window_bits( HWND hwnd, Window window, const RECT *old_rect, co
             /* map region to client rect since we are using DCX_WINDOW */
             NtGdiOffsetRgn( rgn, new_window_rect->left - new_client_rect->left,
                        new_window_rect->top - new_client_rect->top );
-            redraw_window( hwnd, NULL, rgn, RDW_INVALIDATE | RDW_FRAME | RDW_ERASE | RDW_ALLCHILDREN );
+            NtUserRedrawWindow( hwnd, NULL, rgn, RDW_INVALIDATE | RDW_FRAME | RDW_ERASE | RDW_ALLCHILDREN );
         }
-        else redraw_window( hwnd, NULL, rgn, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
+        else NtUserRedrawWindow( hwnd, NULL, rgn, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
         NtGdiDeleteObjectApp( rgn );
     }
 }
@@ -1601,7 +1601,7 @@ Window create_client_window( HWND hwnd, const XVisualInfo *visual, Colormap colo
         HWND parent = NtUserGetAncestor( hwnd, GA_PARENT );
         if (parent == NtUserGetDesktopWindow() || NtUserGetAncestor( parent, GA_PARENT )) return 0;
         if (!(data = alloc_win_data( thread_init_display(), hwnd ))) return 0;
-        NtUserGetClientRect( hwnd, &data->rects.client, NtUserGetWinMonitorDpi( hwnd ) );
+        NtUserGetClientRect( hwnd, &data->rects.client, NtUserGetWinMonitorDpi( hwnd, MDT_DEFAULT ) );
         data->rects.window = data->rects.visible = data->rects.client;
     }
 
@@ -1911,7 +1911,7 @@ void X11DRV_SetDesktopWindow( HWND hwnd )
 
     if (!width && !height)  /* not initialized yet */
     {
-        RECT rect = NtUserGetVirtualScreenRect();
+        RECT rect = NtUserGetVirtualScreenRect( MDT_DEFAULT );
 
         SERVER_START_REQ( set_window_pos )
         {
@@ -2370,7 +2370,7 @@ void X11DRV_ReleaseDC( HWND hwnd, HDC hdc )
     escape.code = X11DRV_SET_DRAWABLE;
     escape.drawable = root_window;
     escape.mode = IncludeInferiors;
-    escape.dc_rect = NtUserGetVirtualScreenRect();
+    escape.dc_rect = NtUserGetVirtualScreenRect( MDT_DEFAULT );
     OffsetRect( &escape.dc_rect, -2 * escape.dc_rect.left, -2 * escape.dc_rect.top );
     NtGdiExtEscape( hdc, NULL, 0, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
 }
@@ -2515,30 +2515,28 @@ BOOL X11DRV_WindowPosChanging( HWND hwnd, UINT swp_flags, BOOL shaped, const str
 /***********************************************************************
  *      MoveWindowBits   (X11DRV.@)
  */
-void X11DRV_MoveWindowBits( HWND hwnd, const struct window_rects *new_rects, const RECT *valid_rects )
+void X11DRV_MoveWindowBits( HWND hwnd, const struct window_rects *old_rects,
+                            const struct window_rects *new_rects, const RECT *valid_rects )
 {
-    RECT old_visible_rect, old_client_rect;
     struct x11drv_win_data *data;
     Window window;
 
     if (!(data = get_win_data( hwnd ))) return;
-    old_visible_rect = data->rects.visible;
-    old_client_rect = data->rects.client;
     window = data->whole_window;
     release_win_data( data );
 
     /* if all that happened is that the whole window moved, copy everything */
-    if (EqualRect( &valid_rects[0], &new_rects->visible ) && EqualRect( &valid_rects[1], &old_visible_rect ))
+    if (EqualRect( &valid_rects[0], &new_rects->visible ) && EqualRect( &valid_rects[1], &old_rects->visible ))
     {
         /* if we have an X window the bits will be moved by the X server */
         if (!window && (valid_rects[0].left - valid_rects[1].left || valid_rects[0].top - valid_rects[1].top))
-            move_window_bits( hwnd, 0, &old_visible_rect, &new_rects->visible,
-                              &old_client_rect, &new_rects->client, &new_rects->window );
+            move_window_bits( hwnd, 0, &old_rects->visible, &new_rects->visible,
+                              &old_rects->client, &new_rects->client, &new_rects->window );
     }
     else
     {
         move_window_bits( hwnd, window, &valid_rects[1], &valid_rects[0],
-                          &old_client_rect, &new_rects->client, &new_rects->window );
+                          &old_rects->client, &new_rects->client, &new_rects->window );
     }
 }
 

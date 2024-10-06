@@ -222,7 +222,7 @@ BOOL WCMD_ReadFile(const HANDLE hIn, WCHAR *intoBuf, const DWORD maxChars, LPDWO
     char *buffer;
 
     /* Try to read from console as Unicode */
-    if (ReadConsoleW(hIn, intoBuf, maxChars, charsRead, NULL)) return TRUE;
+    if (VerifyConsoleIoHandle(hIn) && ReadConsoleW(hIn, intoBuf, maxChars, charsRead, NULL)) return TRUE;
 
     /* We assume it's a file handle and read then convert from assumed OEM codepage */
     if (!(buffer = get_file_buffer()))
@@ -1620,8 +1620,8 @@ static RETURN_CODE search_command(WCHAR *command, struct search_command *sc, BOO
             DWORD attribs = GetFileAttributesW(sc->path);
             found = attribs != INVALID_FILE_ATTRIBUTES && !(attribs & FILE_ATTRIBUTE_DIRECTORY);
         }
-        else
-            found = search_in_pathext(sc->path);
+        /* if foo.bat was given but not found, try to match foo.bat.bat (or any valid ext) */
+        if (!found) found = search_in_pathext(sc->path);
         if (found) return NO_ERROR;
     }
     return RETURN_CODE_CANT_LAUNCH;

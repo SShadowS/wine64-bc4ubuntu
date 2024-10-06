@@ -47,7 +47,7 @@ typedef struct tagMSGTHREADINFO
 static DWORD CALLBACK DPL_MSG_ThreadMain( LPVOID lpContext );
 static HRESULT DP_MSG_ExpectReply( IDirectPlayImpl *This, DPSP_SENDEXDATA *data, DWORD dwWaitTime,
         WORD *replyCommandIds, DWORD replyCommandIdCount, void **lplpReplyMsg,
-        DWORD *lpdwMsgBodySize );
+        DWORD *lpdwMsgBodySize, void **replyMsgHeader );
 
 
 /* Create the message reception thread to allow the application to receive
@@ -209,12 +209,13 @@ void DP_MSG_UnlinkReplyStruct( IDirectPlayImpl *This, DP_MSG_REPLY_STRUCT_LIST *
 
 static
 void DP_MSG_CleanReplyStruct( LPDP_MSG_REPLY_STRUCT_LIST lpReplyStructList,
-                              LPVOID* lplpReplyMsg, LPDWORD lpdwMsgBodySize )
+                              LPVOID* lplpReplyMsg, LPDWORD lpdwMsgBodySize, void **replyMsgHeader )
 {
   CloseHandle( lpReplyStructList->replyExpected.hReceipt );
 
   *lplpReplyMsg    = lpReplyStructList->replyExpected.lpReplyMsg;
   *lpdwMsgBodySize = lpReplyStructList->replyExpected.dwMsgBodySize;
+  *replyMsgHeader  = lpReplyStructList->replyExpected.replyMsgHeader;
 }
 
 DWORD DP_MSG_ComputeMessageSize( SGBUFFER *buffers, DWORD bufferCount )
@@ -229,6 +230,7 @@ DWORD DP_MSG_ComputeMessageSize( SGBUFFER *buffers, DWORD bufferCount )
 HRESULT DP_MSG_SendRequestPlayerId( IDirectPlayImpl *This, DWORD dwFlags, DPID *lpdpidAllocatedId )
 {
   LPVOID                     lpMsg;
+  void                      *msgHeader;
   DPMSG_REQUESTNEWPLAYERID   msgBody;
   DWORD                      dwMsgSize;
   HRESULT                    hr = DP_OK;
@@ -264,7 +266,7 @@ HRESULT DP_MSG_SendRequestPlayerId( IDirectPlayImpl *This, DWORD dwFlags, DPID *
            msgBody.dwFlags );
 
     hr = DP_MSG_ExpectReply( This, &data, DPMSG_DEFAULT_WAIT_TIME, &replyCommand, 1,
-                             &lpMsg, &dwMsgSize );
+                             &lpMsg, &dwMsgSize, &msgHeader );
   }
 
   /* Need to examine the data and extract the new player id */
@@ -286,10 +288,165 @@ HRESULT DP_MSG_SendRequestPlayerId( IDirectPlayImpl *This, DWORD dwFlags, DPID *
      *        for several different messages?
      */
 
+    free( msgHeader );
     free( lpMsg );
   }
 
   return hr;
+}
+
+static HRESULT DP_MSG_ReadString( char *data, DWORD *inoutOffset, DWORD maxSize, WCHAR **string )
+{
+    DWORD offset = *inoutOffset;
+    DWORD maxLength;
+    DWORD length;
+
+    if( maxSize - offset < sizeof( WCHAR ) )
+      return DPERR_GENERIC;
+
+    maxLength = (maxSize - offset) / sizeof( WCHAR );
+    length = wcsnlen( (WCHAR *) &data[ offset ], maxLength );
+    if( length == maxLength )
+      return DPERR_GENERIC;
+
+    *string = (WCHAR *) &data[ offset ];
+    *inoutOffset = offset + (length + 1) * sizeof( WCHAR );
+
+    return DP_OK;
+}
+
+static HRESULT DP_MSG_ReadInteger( char *data, DWORD *inoutOffset, DWORD maxSize, DWORD size,
+                                   DWORD *value )
+{
+  DWORD offset = *inoutOffset;
+
+  switch ( size )
+  {
+  case 0:
+    *value = 0;
+    break;
+  case 1:
+    if( maxSize - offset < 1 )
+      return DPERR_GENERIC;
+    *value = *(BYTE *) &data[ offset ];
+    *inoutOffset = offset + 1;
+    break;
+  case 2:
+    if( maxSize - offset < 2 )
+      return DPERR_GENERIC;
+    *value = *(WORD *) &data[ offset ];
+    *inoutOffset = offset + 2;
+    break;
+  case 3:
+    if( maxSize - offset < 4 )
+      return DPERR_GENERIC;
+    *value = *(DWORD *) &data[ offset ];
+    *inoutOffset = offset + 4;
+    break;
+  }
+
+  return DP_OK;
+}
+
+static HRESULT DP_MSG_ReadSuperPackedPlayer( char *data, DWORD *inoutOffset, DWORD maxSize,
+                                             DPPLAYERINFO *playerInfo )
+{
+  DPLAYI_SUPERPACKEDPLAYER *packedPlayer;
+  DWORD offset = *inoutOffset;
+  HRESULT hr;
+
+  memset( playerInfo, 0, sizeof( DPPLAYERINFO ) );
+
+  if( maxSize - offset < sizeof( DPLAYI_SUPERPACKEDPLAYER ) )
+    return DPERR_GENERIC;
+  packedPlayer = (DPLAYI_SUPERPACKEDPLAYER *) &data[ offset ];
+  offset += sizeof( DPLAYI_SUPERPACKEDPLAYER );
+
+  playerInfo->flags = packedPlayer->flags;
+  playerInfo->id = packedPlayer->id;
+  playerInfo->versionOrSystemPlayerId = packedPlayer->versionOrSystemPlayerId;
+
+  if( packedPlayer->infoMask & DPLAYI_SUPERPACKEDPLAYER_SHORT_NAME_PRESENT )
+  {
+    hr = DP_MSG_ReadString( data, &offset, maxSize, &playerInfo->name.lpszShortName );
+    if ( FAILED( hr ) )
+      return hr;
+  }
+
+  if( packedPlayer->infoMask & DPLAYI_SUPERPACKEDPLAYER_LONG_NAME_PRESENT )
+  {
+    hr = DP_MSG_ReadString( data, &offset, maxSize, &playerInfo->name.lpszLongName );
+    if ( FAILED( hr ) )
+      return hr;
+  }
+
+  hr = DP_MSG_ReadInteger( data, &offset, maxSize,
+                           DPLAYI_SUPERPACKEDPLAYER_PLAYER_DATA_LENGTH_SIZE( packedPlayer->infoMask ),
+                           &playerInfo->playerDataLength );
+  if ( FAILED( hr ) )
+    return hr;
+
+  if( playerInfo->playerDataLength )
+  {
+    if( maxSize - offset < playerInfo->playerDataLength )
+      return DPERR_GENERIC;
+    playerInfo->playerData = &data[ offset ];
+    offset += playerInfo->playerDataLength;
+  }
+
+  hr = DP_MSG_ReadInteger( data, &offset, maxSize,
+                           DPLAYI_SUPERPACKEDPLAYER_SP_DATA_LENGTH_SIZE( packedPlayer->infoMask ),
+                           &playerInfo->spDataLength );
+  if ( FAILED( hr ) )
+    return hr;
+
+  if( playerInfo->spDataLength )
+  {
+    if( maxSize - offset < playerInfo->spDataLength )
+      return DPERR_GENERIC;
+    playerInfo->spData = &data[ offset ];
+    offset += playerInfo->spDataLength;
+  }
+
+  hr = DP_MSG_ReadInteger( data, &offset, maxSize,
+                           DPLAYI_SUPERPACKEDPLAYER_PLAYER_COUNT_SIZE( packedPlayer->infoMask ),
+                           &playerInfo->playerCount );
+  if ( FAILED( hr ) )
+    return hr;
+
+  if( playerInfo->playerCount )
+  {
+    if( maxSize - offset < playerInfo->playerCount * sizeof( DPID ) )
+      return DPERR_GENERIC;
+    playerInfo->playerIds = (DPID *) &data[ offset ];
+    offset += playerInfo->playerCount * sizeof( DPID );
+  }
+
+  if( packedPlayer->infoMask & DPLAYI_SUPERPACKEDPLAYER_PARENT_ID_PRESENT )
+  {
+    if( maxSize - offset < sizeof( DPID ) )
+      return DPERR_GENERIC;
+    playerInfo->parentId = *(DPID *) &data[ offset ];
+    offset += sizeof( DPID );
+  }
+
+  hr = DP_MSG_ReadInteger( data, &offset, maxSize,
+                           DPLAYI_SUPERPACKEDPLAYER_SHORTCUT_COUNT_SIZE( packedPlayer->infoMask ),
+                           &playerInfo->shortcutCount );
+  if ( FAILED( hr ) )
+    return hr;
+
+  if( playerInfo->shortcutCount )
+  {
+    if( maxSize - offset < playerInfo->shortcutCount * sizeof( DPID ) )
+      return DPERR_GENERIC;
+    playerInfo->shortcutIds = (DPID *) &data[ offset ];
+    offset += playerInfo->shortcutCount * sizeof( DPID );
+  }
+
+  *inoutOffset = offset;
+
+  return S_OK;
 }
 
 HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlayImpl *This, DPID dpidServer )
@@ -301,6 +458,7 @@ HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlayImpl *This, DPID dpidServer )
   void                    *spPlayerData;
   DWORD                    spPlayerDataSize;
   const WCHAR             *password = L"";
+  void                    *msgHeader;
   HRESULT                  hr;
 
   hr = IDirectPlaySP_GetSPPlayerData( This->dp2->spData.lpISP, dpidServer,
@@ -362,13 +520,71 @@ HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlayImpl *This, DPID dpidServer )
     hr = DP_MSG_ExpectReply( This, &data,
                              DPMSG_WAIT_60_SECS,
                              replyCommands, ARRAYSIZE( replyCommands ),
-                             &lpMsg, &dwMsgSize );
+                             &lpMsg, &dwMsgSize, &msgHeader );
   }
 
   /* Need to examine the data and extract the new player id */
   if( lpMsg != NULL )
   {
-    FIXME( "Name Table reply received: stub\n" );
+    DPMSG_SENDENVELOPE *envelope;
+
+    if( dwMsgSize < sizeof( DPMSG_SENDENVELOPE ) )
+    {
+      free( msgHeader );
+      free( lpMsg );
+      return DPERR_GENERIC;
+    }
+    envelope = (DPMSG_SENDENVELOPE *) lpMsg;
+
+    if( envelope->wCommandId == DPMSGCMD_SUPERENUMPLAYERSREPLY )
+    {
+      DPSP_MSG_SUPERENUMPLAYERSREPLY *enumPlayersReply;
+      DWORD offset;
+      int i;
+
+      if( dwMsgSize < sizeof( DPSP_MSG_SUPERENUMPLAYERSREPLY ) )
+      {
+        free( msgHeader );
+        free( lpMsg );
+        return DPERR_GENERIC;
+      }
+      enumPlayersReply = (DPSP_MSG_SUPERENUMPLAYERSREPLY *) envelope;
+
+      offset = enumPlayersReply->packedOffset;
+      for( i = 0; i < enumPlayersReply->playerCount; ++i )
+      {
+        DPPLAYERINFO playerInfo;
+
+        hr = DP_MSG_ReadSuperPackedPlayer( (char *) enumPlayersReply, &offset, dwMsgSize,
+                                           &playerInfo );
+        if( FAILED( hr ) )
+        {
+          free( msgHeader );
+          free( lpMsg );
+          return hr;
+        }
+
+        if ( playerInfo.id == dpidServer )
+          continue;
+
+        hr = DP_CreatePlayer( This, msgHeader, &playerInfo.id, &playerInfo.name,
+            playerInfo.playerData, playerInfo.playerDataLength, playerInfo.spData,
+            playerInfo.spDataLength, playerInfo.flags & ~DPLAYI_PLAYER_PLAYERLOCAL, NULL,
+            FALSE );
+        if( FAILED( hr ) )
+        {
+          free( msgHeader );
+          free( lpMsg );
+          return hr;
+        }
+      }
+    }
+    else if( envelope->wCommandId == DPMSGCMD_GETNAMETABLEREPLY )
+    {
+      FIXME( "Name Table reply received: stub\n" );
+    }
+    free( msgHeader );
+    free( lpMsg );
   }
 
   return hr;
@@ -382,7 +598,7 @@ HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlayImpl *This, DPID dpidServer )
  */
 static HRESULT DP_MSG_ExpectReply( IDirectPlayImpl *This, DPSP_SENDEXDATA *lpData, DWORD dwWaitTime,
         WORD *replyCommandIds, DWORD replyCommandIdCount, void **lplpReplyMsg,
-        DWORD *lpdwMsgBodySize )
+        DWORD *lpdwMsgBodySize, void **replyMsgHeader )
 {
   HRESULT                  hr;
   HANDLE                   hMsgReceipt;
@@ -400,7 +616,7 @@ static HRESULT DP_MSG_ExpectReply( IDirectPlayImpl *This, DPSP_SENDEXDATA *lpDat
   {
     ERR( "Send failed: %s\n", DPLAYX_HresultToString( hr ) );
     DP_MSG_UnlinkReplyStruct( This, &replyStructList );
-    DP_MSG_CleanReplyStruct( &replyStructList, lplpReplyMsg, lpdwMsgBodySize );
+    DP_MSG_CleanReplyStruct( &replyStructList, lplpReplyMsg, lpdwMsgBodySize, replyMsgHeader );
     return hr;
   }
 
@@ -412,12 +628,12 @@ static HRESULT DP_MSG_ExpectReply( IDirectPlayImpl *This, DPSP_SENDEXDATA *lpDat
   {
     ERR( "Wait failed 0x%08lx\n", dwWaitReturn );
     DP_MSG_UnlinkReplyStruct( This, &replyStructList );
-    DP_MSG_CleanReplyStruct( &replyStructList, lplpReplyMsg, lpdwMsgBodySize );
+    DP_MSG_CleanReplyStruct( &replyStructList, lplpReplyMsg, lpdwMsgBodySize, replyMsgHeader );
     return DPERR_TIMEOUT;
   }
 
   /* Clean Up */
-  DP_MSG_CleanReplyStruct( &replyStructList, lplpReplyMsg, lpdwMsgBodySize );
+  DP_MSG_CleanReplyStruct( &replyStructList, lplpReplyMsg, lpdwMsgBodySize, replyMsgHeader );
   return DP_OK;
 }
 
@@ -426,7 +642,7 @@ static HRESULT DP_MSG_ExpectReply( IDirectPlayImpl *This, DPSP_SENDEXDATA *lpDat
  * indicate that a copy is taken. Silly really.
  */
 void DP_MSG_ReplyReceived( IDirectPlayImpl *This, WORD wCommandId, const void *lpcMsgBody,
-        DWORD dwMsgBodySize )
+        DWORD dwMsgBodySize, const void *msgHeader )
 {
   LPDP_MSG_REPLY_STRUCT_LIST lpReplyList;
 
@@ -446,8 +662,11 @@ void DP_MSG_ReplyReceived( IDirectPlayImpl *This, WORD wCommandId, const void *l
   {
     lpReplyList->replyExpected.dwMsgBodySize = dwMsgBodySize;
     lpReplyList->replyExpected.lpReplyMsg = malloc( dwMsgBodySize );
+    lpReplyList->replyExpected.replyMsgHeader = malloc( This->dp2->spData.dwSPHeaderSize );
     CopyMemory( lpReplyList->replyExpected.lpReplyMsg,
                 lpcMsgBody, dwMsgBodySize );
+    CopyMemory( lpReplyList->replyExpected.replyMsgHeader,
+                msgHeader, This->dp2->spData.dwSPHeaderSize );
 
     /* Signal the thread which sent the message that it has a reply */
     SetEvent( lpReplyList->replyExpected.hReceipt );
@@ -462,6 +681,7 @@ void DP_MSG_ReplyReceived( IDirectPlayImpl *This, WORD wCommandId, const void *l
 void DP_MSG_ToSelf( IDirectPlayImpl *This, DPID dpidSelf )
 {
   LPVOID                   lpMsg;
+  void                    *msgHeader;
   DPMSG_SENDENVELOPE       msgBody;
   DWORD                    dwMsgSize;
 
@@ -492,7 +712,7 @@ void DP_MSG_ToSelf( IDirectPlayImpl *This, DPID dpidSelf )
     DP_MSG_ExpectReply( This, &data,
                         DPMSG_WAIT_5_SECS,
                         &replyCommand, 1,
-                        &lpMsg, &dwMsgSize );
+                        &lpMsg, &dwMsgSize, &msgHeader );
   }
 }
 

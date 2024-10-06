@@ -864,6 +864,7 @@ echo bar| cmd /v:on /c "set /p WINE_FOO=prompt & echo X!WINE_FOO!X"
 echo:| cmd /v:on /c "set /p WINE_FOO=prompt & echo Y!WINE_FOO!Y"
 echo:| cmd /v:on /c "set /p WINE_FOO='prompt' & echo Y!WINE_FOO!Y"
 echo:| cmd /v:on /c "set /p WINE_FOO="prompt" & echo Y!WINE_FOO!Y"
+set =
 
 echo ------------ Testing 'choice' ------------
 
@@ -3164,6 +3165,13 @@ call echo %1 %2 %3
 exit /b 0
 
 :call_expand_done
+
+echo --- search with dots
+echo @echo a> .bat
+call .bat
+echo @echo b> f00.bat.bat
+call f00.bat || echo fail1
+call f00 2> nul || echo fail2
 
 cd .. & rd /s/q foobar
 

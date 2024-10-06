@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Zhiyi Zhang for CodeWeavers
+ * Copyright 2024 Zhiyi Zhang for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,23 +16,36 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <windef.h>
+#ifdef __WIDL__
+#pragma winrt ns_prefix
+#endif
 
-#define MAXSTRING 8192
+import "inspectable.idl";
+import "asyncinfo.idl";
+import "eventtoken.idl";
+import "windowscontracts.idl";
+import "windows.foundation.idl";
 
-#define STRING_USAGE            101
-#define STRING_BAD_COMMAND_LINE 102
-#define STRING_CANNOT_OPEN      103
-#define STRING_IGNORED          104
+namespace Windows.UI.Xaml.Interop {
+    typedef enum TypeKind TypeKind;
+    typedef struct TypeName TypeName;
 
-struct findstr_string
-{
-    const char *string;
-    struct findstr_string *next;
-};
+    [
+        contract(Windows.Foundation.UniversalApiContract, 1.0)
+    ]
+    enum TypeKind
+    {
+        Primitive = 0,
+        Metadata  = 1,
+        Custom    = 2
+    };
 
-struct findstr_file
-{
-    FILE *file;
-    struct findstr_file *next;
-};
+    [
+        contract(Windows.Foundation.UniversalApiContract, 1.0)
+    ]
+    struct TypeName
+    {
+        HSTRING Name;
+        Windows.UI.Xaml.Interop.TypeKind Kind;
+    };
+}
