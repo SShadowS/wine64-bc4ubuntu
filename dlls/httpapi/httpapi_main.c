@@ -126,14 +126,15 @@ ULONG WINAPI HttpWaitForDisconnectEx(HANDLE ReqQueueHandle, HTTP_CONNECTION_ID C
 {
     struct http_wait_for_disconnect_params params;
     ULONG ret = ERROR_SUCCESS;
+    OVERLAPPED sync_ovl;
 
     TRACE("ReqQueueHandle %p, ConnectionId %s, Flags %#lx, pOverlapped %p.\n",
           ReqQueueHandle, wine_dbgstr_longlong(ConnectionId), Flags, pOverlapped);
 
     if (!pOverlapped)
     {
-        FIXME("Synchronous calls are not implemented.\n");
-        return ERROR_CALL_NOT_IMPLEMENTED;
+        sync_ovl.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+        pOverlapped = &sync_ovl;
     }
 
     if (Flags != 0)
@@ -145,6 +146,17 @@ ULONG WINAPI HttpWaitForDisconnectEx(HANDLE ReqQueueHandle, HTTP_CONNECTION_ID C
 
     if (!DeviceIoControl(ReqQueueHandle, IOCTL_HTTP_WAIT_FOR_DISCONNECT_EX, &params, sizeof(params), NULL, 0, NULL, pOverlapped))
         ret = GetLastError();
+
+    if (pOverlapped == &sync_ovl)
+    {
+        if (ret == ERROR_IO_PENDING)
+        {
+            ret = ERROR_SUCCESS;
+            if (!GetOverlappedResult(ReqQueueHandle, pOverlapped, NULL, TRUE))
+                ret = GetLastError();
+        }
+        CloseHandle(sync_ovl.hEvent);
+    }
 
     return ret;
 }
