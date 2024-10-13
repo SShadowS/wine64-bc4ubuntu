@@ -5170,7 +5170,7 @@ void destroy_thread_windows(void)
         if (win->tid != GetCurrentThreadId()) continue;
         free_dce( win->dce, win->obj.handle );
         set_user_handle_ptr( handle, NULL );
-        win->obj.handle = free_list;
+        win->userdata = (UINT_PTR)free_list;
         free_list = win;
     }
     if (free_list)
@@ -5186,9 +5186,10 @@ void destroy_thread_windows(void)
 
     while ((win = free_list))
     {
-        free_list = win->obj.handle;
+        free_list = (WND *)win->userdata;
         TRACE( "destroying %p\n", win );
 
+        user_driver->pDestroyWindow( win->obj.handle );
         vulkan_detach_surfaces( &win->vulkan_surfaces );
 
         if ((win->dwStyle & (WS_CHILD | WS_POPUP)) != WS_CHILD && win->wIDmenu)
@@ -5717,6 +5718,24 @@ static BOOL set_dialog_info( HWND hwnd, void *info )
     return TRUE;
 }
 
+static BOOL set_raw_window_pos( HWND hwnd, RECT rect, UINT flags, BOOL internal )
+{
+    UINT dpi, raw_dpi;
+
+    TRACE( "hwnd %p, rect %s, flags %#x, internal %u\n", hwnd, wine_dbgstr_rect(&rect), flags, internal );
+
+    dpi = get_win_monitor_dpi( hwnd, &raw_dpi );
+    rect = map_dpi_rect( rect, dpi, get_thread_dpi() );
+
+    if (internal)
+    {
+        NtUserSetInternalWindowPos( hwnd, SW_SHOW, &rect, NULL );
+        return TRUE;
+    }
+
+    return NtUserSetWindowPos( hwnd, 0, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, flags );
+}
+
 /*****************************************************************************
  *           NtUserCallHwnd (win32u.@)
  */
@@ -5920,6 +5939,12 @@ ULONG_PTR WINAPI NtUserCallHwndParam( HWND hwnd, DWORD_PTR param, DWORD code )
     {
         UINT raw_dpi, dpi = get_win_monitor_dpi( hwnd, &raw_dpi );
         return param == MDT_EFFECTIVE_DPI ? dpi : raw_dpi;
+    }
+
+    case NtUserCallHwndParam_SetRawWindowPos:
+    {
+        struct set_raw_window_pos_params *params = (void *)param;
+        return set_raw_window_pos( hwnd, params->rect, params->flags, params->internal );
     }
 
     /* temporary exports */

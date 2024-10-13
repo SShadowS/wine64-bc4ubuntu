@@ -383,6 +383,7 @@ HRESULT DP_HandleMessage( IDirectPlayImpl *This, const void *lpcMessageBody,
 
     case DPMSGCMD_GETNAMETABLEREPLY:
     case DPMSGCMD_NEWPLAYERIDREPLY:
+    case DPMSGCMD_FORWARDADDPLAYERNACK:
     case DPMSGCMD_SUPERENUMPLAYERSREPLY:
       DP_MSG_ReplyReceived( This, wCommandId, lpcMessageBody, dwMessageBodySize, lpcMessageHeader );
       break;
@@ -397,13 +398,8 @@ HRESULT DP_HandleMessage( IDirectPlayImpl *This, const void *lpcMessageBody,
       DP_MSG_ToSelf( This, 1 ); /* This is a hack right now */
       break;
 
-    case DPMSGCMD_FORWARDADDPLAYERNACK:
-      DP_MSG_ErrorReceived( This, wCommandId, lpcMessageBody, dwMessageBodySize );
-      break;
-
     default:
       FIXME( "Unknown wCommandId %u. Ignoring message\n", wCommandId );
-      DebugBreak();
       break;
   }
 
@@ -1779,7 +1775,7 @@ static HRESULT DP_IF_CreatePlayer( IDirectPlayImpl *This, void *lpMsgHdr, DPID *
     DP_MSG_ToSelf( This, *lpidPlayer ); /* This is a hack right now */
 #endif
 
-    hr = DP_MSG_ForwardPlayerCreation( This, *lpidPlayer);
+    hr = DP_MSG_ForwardPlayerCreation( This, *lpidPlayer, NULL );
   }
 #else
   /* Inform all other peers of the creation of a new player. If there are
@@ -3301,7 +3297,7 @@ static HRESULT DP_SecureOpen( IDirectPlayImpl *This, const DPSESSIONDESC2 *lpsd,
         const DPSECURITYDESC *lpSecurity, const DPCREDENTIALS *lpCredentials, BOOL bAnsi )
 {
   void *spMessageHeader = NULL;
-  HRESULT hr = DP_OK;
+  HRESULT hr;
 
   FIXME( "(%p)->(%p,0x%08lx,%p,%p): partial stub\n",
          This, lpsd, dwFlags, lpSecurity, lpCredentials );
@@ -3360,6 +3356,7 @@ static HRESULT DP_SecureOpen( IDirectPlayImpl *This, const DPSESSIONDESC2 *lpsd,
         break;
     }
 
+    free( This->dp2->lpSessionDesc );
     This->dp2->lpSessionDesc = DP_DuplicateSessionDesc( sessionDesc, bAnsi, bAnsi );
     if ( !This->dp2->lpSessionDesc )
       return DPERR_OUTOFMEMORY;
@@ -3393,12 +3390,35 @@ static HRESULT DP_SecureOpen( IDirectPlayImpl *This, const DPSESSIONDESC2 *lpsd,
 
     hr = DP_IF_CreateGroup( This, NULL, &systemGroup, NULL,
                             NULL, 0, 0, TRUE );
-
+    if ( FAILED( hr ) )
+    {
+      if( This->dp2->spData.lpCB->CloseEx )
+      {
+        DPSP_CLOSEDATA data;
+        data.lpISP = This->dp2->spData.lpISP;
+        (*This->dp2->spData.lpCB->CloseEx)( &data );
+      }
+    }
   }
 
   if( dwFlags & DPOPEN_JOIN )
   {
+    DWORD createFlags = DPLAYI_PLAYER_SYSPLAYER | DPLAYI_PLAYER_PLAYERLOCAL;
     DPID dpidServerId = DPID_UNKNOWN;
+    WCHAR *password;
+
+    password = DP_DuplicateString( lpsd->lpszPassword, FALSE, bAnsi );
+    if ( !password && lpsd->lpszPassword )
+    {
+      DP_IF_DestroyGroup( This, NULL, DPID_SYSTEM_GROUP, TRUE );
+      if( This->dp2->spData.lpCB->CloseEx )
+      {
+        DPSP_CLOSEDATA data;
+        data.lpISP = This->dp2->spData.lpISP;
+        (*This->dp2->spData.lpCB->CloseEx)( &data );
+      }
+      return DPERR_OUTOFMEMORY;
+    }
 
     /* Create the server player for this interface. This way we can receive
      * messages for this session.
@@ -3408,26 +3428,72 @@ static HRESULT DP_SecureOpen( IDirectPlayImpl *This, const DPSESSIONDESC2 *lpsd,
      *        up. DPlay would then trigger the hEvent for the player the
      *        message is directed to.
      */
-    hr = DP_IF_CreatePlayer( This, NULL, &dpidServerId, NULL, 0, NULL,
-                             0,
-                             DPPLAYER_SERVERPLAYER | DPPLAYER_LOCAL , bAnsi );
+    hr = DP_MSG_SendRequestPlayerId( This, createFlags, &dpidServerId );
+    if( FAILED( hr ) )
+    {
+      ERR( "Request for ID failed: %s\n", DPLAYX_HresultToString( hr ) );
+      free( password );
+      DP_IF_DestroyGroup( This, NULL, DPID_SYSTEM_GROUP, TRUE );
+      if( This->dp2->spData.lpCB->CloseEx )
+      {
+        DPSP_CLOSEDATA data;
+        data.lpISP = This->dp2->spData.lpISP;
+        (*This->dp2->spData.lpCB->CloseEx)( &data );
+      }
+      return hr;
+    }
 
+    hr = DP_CreatePlayer( This, NULL, &dpidServerId, NULL, NULL, 0, NULL, 0, createFlags, NULL,
+                          bAnsi );
+    if( FAILED( hr ) )
+    {
+      free( password );
+      DP_IF_DestroyGroup( This, NULL, DPID_SYSTEM_GROUP, TRUE );
+      if( This->dp2->spData.lpCB->CloseEx )
+      {
+        DPSP_CLOSEDATA data;
+        data.lpISP = This->dp2->spData.lpISP;
+        (*This->dp2->spData.lpCB->CloseEx)( &data );
+      }
+      return hr;
+    }
+
+    hr = DP_MSG_ForwardPlayerCreation( This, dpidServerId, password );
+    free( password );
+    if( FAILED( hr ) )
+    {
+      DP_DeletePlayer( This, dpidServerId );
+      DP_IF_DestroyGroup( This, NULL, DPID_SYSTEM_GROUP, TRUE );
+      if( This->dp2->spData.lpCB->CloseEx )
+      {
+        DPSP_CLOSEDATA data;
+        data.lpISP = This->dp2->spData.lpISP;
+        (*This->dp2->spData.lpCB->CloseEx)( &data );
+      }
+      return hr;
+    }
   }
   else if( dwFlags & DPOPEN_CREATE )
   {
-    DPID dpidNameServerId = DPID_NAME_SERVER;
+    DWORD createFlags = DPLAYI_PLAYER_APPSERVER | DPLAYI_PLAYER_PLAYERLOCAL;
+    DPID dpidNameServerId = DP_NextObjectId();
 
-    hr = DP_IF_CreatePlayer( This, NULL, &dpidNameServerId, NULL, 0, NULL,
-                             0, DPPLAYER_SERVERPLAYER, bAnsi );
+    hr = DP_CreatePlayer( This, NULL, &dpidNameServerId, NULL, NULL, 0, NULL, 0, createFlags, NULL,
+                          bAnsi );
+    if( FAILED( hr ) )
+    {
+      DP_IF_DestroyGroup( This, NULL, DPID_SYSTEM_GROUP, TRUE );
+      if( This->dp2->spData.lpCB->CloseEx )
+      {
+        DPSP_CLOSEDATA data;
+        data.lpISP = This->dp2->spData.lpISP;
+        (*This->dp2->spData.lpCB->CloseEx)( &data );
+      }
+      return hr;
+    }
   }
 
-  if( FAILED(hr) )
-  {
-    ERR( "Couldn't create name server/system player: %s\n",
-         DPLAYX_HresultToString(hr) );
-  }
-
-  return hr;
+  return DP_OK;
 }
 
 static HRESULT WINAPI IDirectPlay2AImpl_Open( IDirectPlay2A *iface, DPSESSIONDESC2 *sdesc,

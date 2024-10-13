@@ -274,19 +274,25 @@ HRESULT DP_MSG_SendRequestPlayerId( IDirectPlayImpl *This, DWORD dwFlags, DPID *
   {
     LPCDPMSG_NEWPLAYERIDREPLY lpcReply;
 
+    if ( dwMsgSize < sizeof( DPMSG_NEWPLAYERIDREPLY ) )
+    {
+      free( msgHeader );
+      free( lpMsg );
+      return DPERR_GENERIC;
+    }
     lpcReply = lpMsg;
+
+    if ( FAILED( lpcReply->result ) )
+    {
+      hr = lpcReply->result;
+      free( msgHeader );
+      free( lpMsg );
+      return hr;
+    }
 
     *lpdpidAllocatedId = lpcReply->dpidNewPlayerId;
 
     TRACE( "Received reply for id = 0x%08lx\n", lpcReply->dpidNewPlayerId );
-
-    /* FIXME: I think that the rest of the message has something to do
-     *        with remote data for the player that perhaps I need to setup.
-     *        However, with the information that is passed, all that it could
-     *        be used for is a standardized initialization value, which I'm
-     *        guessing we can do without. Unless the message content is the same
-     *        for several different messages?
-     */
 
     free( msgHeader );
     free( lpMsg );
@@ -449,7 +455,7 @@ static HRESULT DP_MSG_ReadSuperPackedPlayer( char *data, DWORD *inoutOffset, DWO
   return S_OK;
 }
 
-HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlayImpl *This, DPID dpidServer )
+HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlayImpl *This, DPID dpidServer, WCHAR *password )
 {
   LPVOID                   lpMsg;
   DPMSG_FORWARDADDPLAYER   msgBody;
@@ -457,7 +463,6 @@ HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlayImpl *This, DPID dpidServer )
   DPLAYI_PACKEDPLAYER      playerInfo;
   void                    *spPlayerData;
   DWORD                    spPlayerDataSize;
-  const WCHAR             *password = L"";
   void                    *msgHeader;
   HRESULT                  hr;
 
@@ -490,7 +495,8 @@ HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlayImpl *This, DPID dpidServer )
 
   /* Send the message */
   {
-    WORD replyCommands[] = { DPMSGCMD_GETNAMETABLEREPLY, DPMSGCMD_SUPERENUMPLAYERSREPLY };
+    WORD replyCommands[] = { DPMSGCMD_GETNAMETABLEREPLY, DPMSGCMD_SUPERENUMPLAYERSREPLY,
+                             DPMSGCMD_FORWARDADDPLAYERNACK };
     SGBUFFER buffers[ 6 ] = { 0 };
     DPSP_SENDEXDATA data = { 0 };
 
@@ -501,8 +507,8 @@ HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlayImpl *This, DPID dpidServer )
     buffers[ 2 ].pData = (UCHAR *) &playerInfo;
     buffers[ 3 ].len = spPlayerDataSize;
     buffers[ 3 ].pData = (UCHAR *) spPlayerData;
-    buffers[ 4 ].len = (lstrlenW( password ) + 1) * sizeof( WCHAR );
-    buffers[ 4 ].pData = (UCHAR *) password;
+    buffers[ 4 ].len = (password ? (lstrlenW( password ) + 1) : 1) * sizeof( WCHAR );
+    buffers[ 4 ].pData = (UCHAR *) (password ? password : L"");
     buffers[ 5 ].len = sizeof( This->dp2->lpSessionDesc->dwReserved1 );
     buffers[ 5 ].pData = (UCHAR *) &This->dp2->lpSessionDesc->dwReserved1;
 
@@ -582,6 +588,25 @@ HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlayImpl *This, DPID dpidServer )
     else if( envelope->wCommandId == DPMSGCMD_GETNAMETABLEREPLY )
     {
       FIXME( "Name Table reply received: stub\n" );
+    }
+    else if( envelope->wCommandId == DPMSGCMD_FORWARDADDPLAYERNACK )
+    {
+      DPSP_MSG_ADDFORWARDREPLY *addForwardReply;
+
+      if( dwMsgSize < sizeof( DPSP_MSG_ADDFORWARDREPLY ) )
+      {
+        free( msgHeader );
+        free( lpMsg );
+        return DPERR_GENERIC;
+      }
+      addForwardReply = (DPSP_MSG_ADDFORWARDREPLY *) envelope;
+
+      hr = addForwardReply->error;
+
+      free( msgHeader );
+      free( lpMsg );
+
+      return hr;
     }
     free( msgHeader );
     free( lpMsg );
@@ -714,16 +739,4 @@ void DP_MSG_ToSelf( IDirectPlayImpl *This, DPID dpidSelf )
                         &replyCommand, 1,
                         &lpMsg, &dwMsgSize, &msgHeader );
   }
-}
-
-void DP_MSG_ErrorReceived( IDirectPlayImpl *This, WORD wCommandId, const void *lpMsgBody,
-        DWORD dwMsgBodySize )
-{
-  LPCDPMSG_FORWARDADDPLAYERNACK lpcErrorMsg;
-
-  lpcErrorMsg = lpMsgBody;
-
-  ERR( "Received error message %u. Error is %s\n",
-       wCommandId, DPLAYX_HresultToString( lpcErrorMsg->errorCode) );
-  DebugBreak();
 }

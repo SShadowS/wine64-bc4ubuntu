@@ -355,6 +355,8 @@ static D3DFORMAT dds_indexed_to_d3dformat(const struct dds_pixel_format *pixel_f
 {
     if (pixel_format->bpp == 8)
         return D3DFMT_P8;
+    if (pixel_format->bpp == 16 && pixel_format->amask == 0xff00)
+        return D3DFMT_A8P8;
 
     WARN("Unknown indexed pixel format (bpp %lu).\n", pixel_format->bpp);
     return D3DFMT_UNKNOWN;
@@ -457,7 +459,7 @@ static HRESULT d3dx_calculate_pixels_size(D3DFORMAT format, uint32_t width, uint
 {
     const struct pixel_format_desc *format_desc = get_format_info(format);
 
-    if (format_desc->type == FORMAT_UNKNOWN)
+    if (is_unknown_format(format_desc))
         return E_NOTIMPL;
 
     if (format_desc->block_width != 1 || format_desc->block_height != 1)
@@ -539,7 +541,7 @@ static HRESULT save_dds_surface_to_memory(ID3DXBuffer **dst_buffer, IDirect3DSur
     if (FAILED(hr)) return hr;
 
     pixel_format = get_format_info(src_desc.Format);
-    if (pixel_format->type == FORMAT_UNKNOWN) return E_NOTIMPL;
+    if (is_unknown_format(pixel_format)) return E_NOTIMPL;
 
     file_size = calculate_dds_file_size(src_desc.Format, src_desc.Width, src_desc.Height, 1, 1, 1);
     if (!file_size)
@@ -588,17 +590,22 @@ static HRESULT save_dds_surface_to_memory(ID3DXBuffer **dst_buffer, IDirect3DSur
     return D3D_OK;
 }
 
+#define DDS_PALETTE_SIZE (sizeof(PALETTEENTRY) * 256)
 static HRESULT d3dx_initialize_image_from_dds(const void *src_data, uint32_t src_data_size,
         struct d3dx_image *image, uint32_t starting_mip_level)
 {
+    uint32_t expected_src_data_size, header_size;
     const struct dds_header *header = src_data;
-    uint32_t expected_src_data_size;
+    BOOL is_indexed_fmt;
     HRESULT hr;
 
     if (src_data_size < sizeof(*header) || header->pixel_format.size != sizeof(header->pixel_format))
         return D3DXERR_INVALIDDATA;
 
     TRACE("File type is DDS.\n");
+    is_indexed_fmt = !!(header->pixel_format.flags & DDS_PF_INDEXED);
+    header_size = is_indexed_fmt ? sizeof(*header) + DDS_PALETTE_SIZE : sizeof(*header);
+
     set_volume_struct(&image->size, header->width, header->height, 1);
     image->mip_levels = header->miplevels ? header->miplevels : 1;
     image->format = dds_pixel_format_to_d3dformat(&header->pixel_format);
@@ -631,14 +638,15 @@ static HRESULT d3dx_initialize_image_from_dds(const void *src_data, uint32_t src
             image->size.depth, image->mip_levels);
     if (!image->layer_pitch)
         return D3DXERR_INVALIDDATA;
-    expected_src_data_size = (image->layer_pitch * image->layer_count) + sizeof(*header);
+    expected_src_data_size = (image->layer_pitch * image->layer_count) + header_size;
     if (src_data_size < expected_src_data_size)
     {
         WARN("File is too short %u, expected at least %u bytes.\n", src_data_size, expected_src_data_size);
         return D3DXERR_INVALIDDATA;
     }
 
-    image->pixels = ((BYTE *)src_data) + sizeof(*header);
+    image->palette = (is_indexed_fmt) ? (PALETTEENTRY *)(((uint8_t *)src_data) + sizeof(*header)) : NULL;
+    image->pixels = ((BYTE *)src_data) + header_size;
     image->image_file_format = D3DXIFF_DDS;
     if (starting_mip_level && (image->mip_levels > 1))
     {
@@ -847,7 +855,7 @@ static HRESULT d3dx_image_wic_frame_decode(struct d3dx_image *image,
         return hr;
     }
 
-    if (fmt_desc->type == FORMAT_INDEX)
+    if (is_index_format(fmt_desc))
     {
         uint32_t nb_colors, i;
 
@@ -886,13 +894,13 @@ static HRESULT d3dx_image_wic_frame_decode(struct d3dx_image *image,
     }
 
     image->image_buf = image->pixels = buffer;
-    image->palette = palette;
+    image->image_palette = image->palette = palette;
 
 exit:
     free(colors);
     if (image->image_buf != buffer)
         free(buffer);
-    if (image->palette != palette)
+    if (image->image_palette != palette)
         free(palette);
     if (wic_palette)
         IWICPalette_Release(wic_palette);
@@ -1028,7 +1036,7 @@ HRESULT d3dx_image_init(const void *src_data, uint32_t src_data_size, struct d3d
 void d3dx_image_cleanup(struct d3dx_image *image)
 {
     free(image->image_buf);
-    free(image->palette);
+    free(image->image_palette);
 }
 
 HRESULT d3dx_image_get_pixels(struct d3dx_image *image, uint32_t layer, uint32_t mip_level,
@@ -1505,32 +1513,40 @@ static DWORD make_argb_color(const struct argb_conversion_info *info, const DWOR
     return val;
 }
 
+static enum range get_range_for_component_type(enum component_type type)
+{
+    switch (type)
+    {
+        case CTYPE_SNORM:
+            return RANGE_SNORM;
+
+        case CTYPE_LUMA:
+        case CTYPE_INDEX:
+        case CTYPE_UNORM:
+            return RANGE_UNORM;
+
+        case CTYPE_EMPTY:
+        case CTYPE_FLOAT:
+            return RANGE_FULL;
+
+        default:
+            assert(0);
+            return RANGE_FULL;
+    }
+}
+
 /* It doesn't work for components bigger than 32 bits (or somewhat smaller but unaligned). */
-void format_to_d3dx_color(const struct pixel_format_desc *format, const BYTE *src, struct d3dx_color *dst)
+void format_to_d3dx_color(const struct pixel_format_desc *format, const BYTE *src, const PALETTEENTRY *palette,
+        struct d3dx_color *dst)
 {
     DWORD mask, tmp;
     unsigned int c;
 
-    switch (format->type)
-    {
-    case FORMAT_ARGBF16:
-    case FORMAT_ARGBF:
-        dst->range = RANGE_FULL;
-        break;
-    case FORMAT_ARGB:
-    case FORMAT_INDEX:
-        dst->range = RANGE_UNORM;
-        break;
-    case FORMAT_ARGB_SNORM:
-        dst->range = RANGE_SNORM;
-        break;
-    default: /* Shouldn't pass FORMAT_DXT/FORMAT_UNKNOWN into here. */
-        assert(0);
-        break;
-    }
-
+    dst->rgb_range = get_range_for_component_type(format->rgb_type);
+    dst->a_range = get_range_for_component_type(format->a_type);
     for (c = 0; c < 4; ++c)
     {
+        const enum component_type dst_ctype = !c ? format->a_type : format->rgb_type;
         static const unsigned int component_offsets[4] = {3, 0, 1, 2};
         float *dst_component = &dst->value.x + component_offsets[c];
 
@@ -1540,36 +1556,55 @@ void format_to_d3dx_color(const struct pixel_format_desc *format, const BYTE *sr
 
             memcpy(&tmp, src + format->shift[c] / 8,
                     min(sizeof(DWORD), (format->shift[c] % 8 + format->bits[c] + 7) / 8));
+            tmp = (tmp >> (format->shift[c] % 8)) & mask;
 
-            if (format->type == FORMAT_ARGBF16)
-                *dst_component = float_16_to_32(tmp);
-            else if (format->type == FORMAT_ARGBF)
-                *dst_component = *(float *)&tmp;
-            else if (format->type == FORMAT_ARGB_SNORM)
+            switch (dst_ctype)
+            {
+            case CTYPE_FLOAT:
+                if (format->bits[c] == 16)
+                    *dst_component = float_16_to_32(tmp);
+                else
+                    *dst_component = *(float *)&tmp;
+                break;
+
+            case CTYPE_INDEX:
+                *dst_component = (&palette[tmp].peRed)[component_offsets[c]] / 255.0f;
+                break;
+
+            case CTYPE_LUMA:
+            case CTYPE_UNORM:
+                *dst_component = (float)tmp / mask;
+                break;
+
+            case CTYPE_SNORM:
             {
                 const uint32_t sign_bit = (1u << (format->bits[c] - 1));
-                uint32_t tmp_extended, tmp_masked = (tmp >> format->shift[c] % 8) & mask;
+                uint32_t tmp_extended = (tmp & sign_bit) ? (tmp | ~(sign_bit - 1)) : tmp;
 
-                tmp_extended = tmp_masked;
-                if (tmp_masked & sign_bit)
-                {
-                    tmp_extended |= ~(sign_bit - 1);
-
-                    /*
-                     * In order to clamp to an even range, we need to ignore
-                     * the maximum negative value.
-                     */
-                    if (tmp_masked == sign_bit)
-                        tmp_extended |= 1;
-                }
+                /*
+                 * In order to clamp to an even range, we need to ignore
+                 * the maximum negative value.
+                 */
+                if (tmp == sign_bit)
+                    tmp_extended |= 1;
 
                 *dst_component = (float)(((int32_t)tmp_extended)) / (sign_bit - 1);
+                break;
             }
-            else
-                *dst_component = (float)((tmp >> format->shift[c] % 8) & mask) / mask;
+
+            default:
+                break;
+            }
+        }
+        else if (dst_ctype == CTYPE_LUMA)
+        {
+            assert(format->bits[1]);
+            *dst_component = dst->value.x;
         }
         else
+        {
             *dst_component = 1.0f;
+        }
     }
 }
 
@@ -1583,36 +1618,67 @@ void format_from_d3dx_color(const struct pixel_format_desc *format, const struct
 
     for (c = 0; c < 4; ++c)
     {
+        const enum component_type dst_ctype = !c ? format->a_type : format->rgb_type;
         static const unsigned int component_offsets[4] = {3, 0, 1, 2};
-        const float src_component = *((const float *)src + component_offsets[c]);
+        const float src_component = *(&src->value.x + component_offsets[c]);
+        const enum range src_range = !c ? src->a_range : src->rgb_range;
 
         if (!format->bits[c])
             continue;
 
         mask32 = ~0u >> (32 - format->bits[c]);
 
-        if (format->type == FORMAT_ARGBF16)
-            v = float_32_to_16(src_component);
-        else if (format->type == FORMAT_ARGBF)
-            v = *(DWORD *)&src_component;
-        else if (format->type == FORMAT_ARGB_SNORM)
+        switch (dst_ctype)
+        {
+        case CTYPE_FLOAT:
+            if (format->bits[c] == 16)
+                v = float_32_to_16(src_component);
+            else
+                v = *(DWORD *)&src_component;
+            break;
+
+        case CTYPE_LUMA:
+        {
+            float val = src->value.x * 0.2125f + src->value.y * 0.7154f + src->value.z * 0.0721f;
+
+            if (src_range == RANGE_SNORM)
+                val = (val + 1.0f) / 2.0f;
+
+            v = d3dx_clamp(val, 0.0f, 1.0f) * ((1u << format->bits[c]) - 1) + 0.5f;
+            break;
+        }
+
+        case CTYPE_UNORM:
+        {
+            float val = src_component;
+
+            if (src_range == RANGE_SNORM)
+                val = (val + 1.0f) / 2.0f;
+
+            v = d3dx_clamp(val, 0.0f, 1.0f) * ((1u << format->bits[c]) - 1) + 0.5f;
+            break;
+        }
+
+        case CTYPE_SNORM:
         {
             const uint32_t max_value = (1u << (format->bits[c] - 1)) - 1;
             float val = src_component;
 
-            if (src->range == RANGE_UNORM)
+            if (src_range == RANGE_UNORM)
                 val = (val * 2.0f) - 1.0f;
 
             v = d3dx_clamp(val, -1.0f, 1.0f) * max_value + 0.5f;
+            break;
         }
-        else
-        {
-            float val = src_component;
 
-            if (src->range == RANGE_SNORM)
-                val = (val + 1.0f) / 2.0f;
+        /* We shouldn't be trying to output to CTYPE_INDEX. */
+        case CTYPE_INDEX:
+            assert(0);
+            break;
 
-            v = d3dx_clamp(val, 0.0f, 1.0f) * ((1u << format->bits[c]) - 1) + 0.5f;
+        default:
+            v = 0;
+            break;
         }
 
         for (i = format->shift[c] / 8 * 8; i < format->shift[c] + format->bits[c]; i += 8)
@@ -1711,8 +1777,7 @@ void convert_argb_pixels(const BYTE *src, UINT src_row_pitch, UINT src_slice_pit
             BYTE *dst_ptr = dst_slice_ptr + y * dst_row_pitch;
 
             for (x = 0; x < min_width; x++) {
-                if (!src_format->to_rgba && !dst_format->from_rgba
-                        && src_format->type == dst_format->type
+                if (format_types_match(src_format, dst_format)
                         && src_format->bytes_per_pixel <= 4 && dst_format->bytes_per_pixel <= 4)
                 {
                     DWORD val;
@@ -1735,10 +1800,8 @@ void convert_argb_pixels(const BYTE *src, UINT src_row_pitch, UINT src_slice_pit
                 {
                     struct d3dx_color color, tmp;
 
-                    format_to_d3dx_color(src_format, src_ptr, &color);
+                    format_to_d3dx_color(src_format, src_ptr, palette, &color);
                     tmp = color;
-                    if (src_format->to_rgba)
-                        src_format->to_rgba(&color.value, &tmp.value, palette);
 
                     if (color_key)
                     {
@@ -1750,9 +1813,6 @@ void convert_argb_pixels(const BYTE *src, UINT src_row_pitch, UINT src_slice_pit
                     }
 
                     color = tmp;
-                    if (dst_format->from_rgba)
-                        dst_format->from_rgba(&tmp.value, &color.value);
-
                     format_from_d3dx_color(dst_format, &color, dst_ptr);
                 }
 
@@ -1817,8 +1877,7 @@ void point_filter_argb_pixels(const BYTE *src, UINT src_row_pitch, UINT src_slic
             {
                 const BYTE *src_ptr = src_row_ptr + (x * src_size->width / dst_size->width) * src_format->bytes_per_pixel;
 
-                if (!src_format->to_rgba && !dst_format->from_rgba
-                        && src_format->type == dst_format->type
+                if (format_types_match(src_format, dst_format)
                         && src_format->bytes_per_pixel <= 4 && dst_format->bytes_per_pixel <= 4)
                 {
                     DWORD val;
@@ -1841,10 +1900,8 @@ void point_filter_argb_pixels(const BYTE *src, UINT src_row_pitch, UINT src_slic
                 {
                     struct d3dx_color color, tmp;
 
-                    format_to_d3dx_color(src_format, src_ptr, &color);
+                    format_to_d3dx_color(src_format, src_ptr, palette, &color);
                     tmp = color;
-                    if (src_format->to_rgba)
-                        src_format->to_rgba(&color.value, &tmp.value, palette);
 
                     if (color_key)
                     {
@@ -1856,9 +1913,6 @@ void point_filter_argb_pixels(const BYTE *src, UINT src_row_pitch, UINT src_slic
                     }
 
                     color = tmp;
-                    if (dst_format->from_rgba)
-                        dst_format->from_rgba(&tmp.value, &color.value);
-
                     format_from_d3dx_color(dst_format, &color, dst_ptr);
                 }
 
@@ -1963,7 +2017,7 @@ HRESULT d3dx_pixels_init(const void *data, uint32_t row_pitch, uint32_t slice_pi
     RECT unaligned_rect;
 
     memset(pixels, 0, sizeof(*pixels));
-    if (fmt_desc->type == FORMAT_UNKNOWN)
+    if (is_unknown_format(fmt_desc))
     {
         FIXME("Unsupported format %#x.\n", format);
         return E_NOTIMPL;
@@ -1973,7 +2027,7 @@ HRESULT d3dx_pixels_init(const void *data, uint32_t row_pitch, uint32_t slice_pi
     ptr += (top / fmt_desc->block_height) * row_pitch;
     ptr += (left / fmt_desc->block_width) * fmt_desc->block_byte_count;
 
-    if (fmt_desc->type == FORMAT_DXT)
+    if (is_compressed_format(fmt_desc))
     {
         uint32_t left_aligned, top_aligned;
 
@@ -2013,14 +2067,14 @@ HRESULT d3dx_load_pixels_from_pixels(struct d3dx_pixels *dst_pixels,
             debug_d3dx_pixels(dst_pixels), dst_desc, debug_d3dx_pixels(src_pixels), src_desc,
             filter_flags, color_key);
 
-    if (src_desc->type == FORMAT_DXT)
+    if (is_compressed_format(src_desc))
         set_volume_struct(&src_size, (src_pixels->unaligned_rect.right - src_pixels->unaligned_rect.left),
                 (src_pixels->unaligned_rect.bottom - src_pixels->unaligned_rect.top), src_pixels->size.depth);
     else
         src_size = src_pixels->size;
 
     dst_size_aligned = dst_pixels->size;
-    if (dst_desc->type == FORMAT_DXT)
+    if (is_compressed_format(dst_desc))
         set_volume_struct(&dst_size, (dst_pixels->unaligned_rect.right - dst_pixels->unaligned_rect.left),
                 (dst_pixels->unaligned_rect.bottom - dst_pixels->unaligned_rect.top), dst_pixels->size.depth);
     else
@@ -2055,7 +2109,7 @@ HRESULT d3dx_load_pixels_from_pixels(struct d3dx_pixels *dst_pixels,
      * If the source is a compressed image, we need to decompress it first
      * before doing any modifications.
      */
-    if (src_desc->type == FORMAT_DXT)
+    if (is_compressed_format(src_desc))
     {
         uint32_t uncompressed_row_pitch, uncompressed_slice_pitch;
         const struct pixel_format_desc *uncompressed_desc;
@@ -2079,7 +2133,7 @@ HRESULT d3dx_load_pixels_from_pixels(struct d3dx_pixels *dst_pixels,
     }
 
     /* Same as the above, need to decompress the destination prior to modifying. */
-    if (dst_desc->type == FORMAT_DXT)
+    if (is_compressed_format(dst_desc))
     {
         uint32_t uncompressed_row_pitch, uncompressed_slice_pitch;
         const struct pixel_format_desc *uncompressed_desc;
@@ -2238,7 +2292,7 @@ HRESULT WINAPI D3DXLoadSurfaceFromMemory(IDirect3DSurface9 *dst_surface,
     }
 
     srcformatdesc = get_format_info(src_format);
-    if (srcformatdesc->type == FORMAT_UNKNOWN)
+    if (is_unknown_format(srcformatdesc))
     {
         FIXME("Unsupported format %#x.\n", src_format);
         return E_NOTIMPL;

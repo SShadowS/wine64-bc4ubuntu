@@ -205,7 +205,7 @@ extern INT X11DRV_ToUnicodeEx( UINT virtKey, UINT scanCode, const BYTE *lpKeySta
                                LPWSTR bufW, int bufW_size, UINT flags, HKL hkl );
 extern SHORT X11DRV_VkKeyScanEx( WCHAR wChar, HKL hkl );
 extern void X11DRV_NotifyIMEStatus( HWND hwnd, UINT status );
-extern BOOL X11DRV_SetIMECompositionWindowPos( HWND hwnd, const POINT *point );
+extern BOOL X11DRV_SetIMECompositionRect( HWND hwnd, RECT rect );
 extern void X11DRV_DestroyCursorIcon( HCURSOR handle );
 extern void X11DRV_SetCursor( HWND hwnd, HCURSOR handle );
 extern BOOL X11DRV_SetCursorPos( INT x, INT y );
@@ -871,15 +871,6 @@ static inline LRESULT send_message_timeout( HWND hwnd, UINT msg, WPARAM wparam, 
 static inline BOOL send_notify_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
 {
     return NtUserMessageCall( hwnd, msg, wparam, lparam, 0, NtUserSendNotifyMessage, FALSE );
-}
-
-/* per-monitor DPI aware NtUserSetWindowPos call */
-static inline BOOL set_window_pos( HWND hwnd, HWND after, INT x, INT y, INT cx, INT cy, UINT flags )
-{
-    UINT context = NtUserSetThreadDpiAwarenessContext( NTUSER_DPI_PER_MONITOR_AWARE_V2 );
-    BOOL ret = NtUserSetWindowPos( hwnd, after, x, y, cx, cy, flags );
-    NtUserSetThreadDpiAwarenessContext( context );
-    return ret;
 }
 
 /* per-monitor DPI aware NtUserChildWindowFromPointEx call */

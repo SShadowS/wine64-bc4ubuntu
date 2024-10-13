@@ -521,6 +521,7 @@ enum wine_internal_message
     WM_WINE_SETACTIVEWINDOW,
     WM_WINE_KEYBOARD_LL_HOOK,
     WM_WINE_MOUSE_LL_HOOK,
+    WM_WINE_IME_NOTIFY,
     WM_WINE_UPDATEWINDOWSTATE,
     WM_WINE_FIRST_DRIVER_MSG = 0x80001000,  /* range of messages reserved for the USER driver */
     WM_WINE_CLIPCURSOR = 0x80001ff0, /* internal driver notification messages */
@@ -1071,7 +1072,7 @@ enum
     NtUserCallTwoParam_MonitorFromRect,
     NtUserCallTwoParam_SetCaretPos,
     NtUserCallTwoParam_SetIconParam,
-    NtUserCallTwoParam_SetIMECompositionWindowPos,
+    NtUserCallTwoParam_SetIMECompositionRect,
     NtUserCallTwoParam_UnhookWindowsHook,
     NtUserCallTwoParam_AdjustWindowRect,
     NtUserCallTwoParam_GetVirtualScreenRect,
@@ -1319,6 +1320,7 @@ enum
     NtUserCallHwndParam_SendHardwareInput,
     NtUserCallHwndParam_ExposeWindowSurface,
     NtUserCallHwndParam_GetWinMonitorDpi,
+    NtUserCallHwndParam_SetRawWindowPos,
     /* temporary exports */
     NtUserSetWindowStyle,
 };
@@ -1547,6 +1549,19 @@ static inline BOOL NtUserExposeWindowSurface( HWND hwnd, UINT flags, const RECT 
 static inline UINT NtUserGetWinMonitorDpi( HWND hwnd, MONITOR_DPI_TYPE type )
 {
     return NtUserCallHwndParam( hwnd, type, NtUserCallHwndParam_GetWinMonitorDpi );
+}
+
+struct set_raw_window_pos_params
+{
+    RECT rect;
+    UINT flags;
+    BOOL internal;
+};
+
+static inline BOOL NtUserSetRawWindowPos( HWND hwnd, RECT rect, UINT flags, BOOL internal )
+{
+    struct set_raw_window_pos_params params = {.rect = rect, .flags = flags, .internal = internal};
+    return NtUserCallHwndParam( hwnd, (UINT_PTR)&params, NtUserCallHwndParam_SetRawWindowPos );
 }
 
 #endif /* _NTUSER_ */
