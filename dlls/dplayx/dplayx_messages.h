@@ -50,13 +50,11 @@ DWORD CreateLobbyMessageReceptionThread( HANDLE hNotifyEvent, HANDLE hStart,
 
 HRESULT DP_MSG_SendRequestPlayerId( IDirectPlayImpl *This, DWORD dwFlags,
                                     LPDPID lpdipidAllocatedId );
-HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlayImpl *This, DPID dpidServer );
+HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlayImpl *This, DPID dpidServer, WCHAR *password );
 
 void DP_MSG_ReplyReceived( IDirectPlayImpl *This, WORD wCommandId,
                            LPCVOID lpMsgBody, DWORD dwMsgBodySize,
                            const void *msgHeader );
-void DP_MSG_ErrorReceived( IDirectPlayImpl *This, WORD wCommandId,
-                           LPCVOID lpMsgBody, DWORD dwMsgBodySize );
 void DP_MSG_ToSelf( IDirectPlayImpl *This, DPID dpidSelf );
 
 /* Timings -> 1000 ticks/sec */
@@ -209,10 +207,10 @@ typedef struct tagDPMSG_NEWPLAYERIDREPLY
 
   DPID dpidNewPlayerId;
 
-  /* Assume that this is data that is tacked on to the end of the message
-   * that comes from the SP remote data stored that needs to be propagated.
-   */
-  BYTE unknown[36];     /* This appears to always be 0 - not sure though */
+  DPSECURITYDESC secDesc;
+  DWORD sspiProviderOffset;
+  DWORD capiProviderOffset;
+  HRESULT result;
 } DPMSG_NEWPLAYERIDREPLY, *LPDPMSG_NEWPLAYERIDREPLY;
 typedef const DPMSG_NEWPLAYERIDREPLY* LPCDPMSG_NEWPLAYERIDREPLY;
 
@@ -254,6 +252,12 @@ typedef struct
 #define DPLAYI_SUPERPACKEDPLAYER_PLAYER_COUNT_SIZE( mask )       (((mask) >> 6) & 0x3)
 #define DPLAYI_SUPERPACKEDPLAYER_PARENT_ID_PRESENT               0x100
 #define DPLAYI_SUPERPACKEDPLAYER_SHORTCUT_COUNT_SIZE( mask )     (((mask) >> 9) & 0x3)
+
+typedef struct
+{
+  DPMSG_SENDENVELOPE envelope;
+  HRESULT error;
+} DPSP_MSG_ADDFORWARDREPLY;
 
 typedef struct
 {
