@@ -1903,3 +1903,81 @@ START_TEST(httpapi)
     else
         win_skip("Version 2 is not supported.\n");
 }
+#include <stdarg.h>
+#include <stdio.h>
+#include <windef.h>
+#include <winbase.h>
+#include "wine/test.h"
+#include "wine/http.h"
+
+static void test_HttpAddFragmentToCache(void)
+{
+    ULONG ret;
+    HANDLE queue;
+    HTTP_DATA_CHUNK chunk;
+    HTTP_CACHE_POLICY policy;
+    const WCHAR url[] = L"/test_fragment";
+    const char data[] = "Test fragment data";
+
+    ret = HttpCreateRequestQueue(HTTPAPI_VERSION_1, NULL, NULL, 0, &queue);
+    ok(ret == NO_ERROR, "HttpCreateRequestQueue failed with %lu\n", ret);
+
+    chunk.DataChunkType = HttpDataChunkFromMemory;
+    chunk.FromMemory.pBuffer = (void*)data;
+    chunk.FromMemory.BufferLength = sizeof(data) - 1;
+
+    policy.Policy = HttpCachePolicyTimeToLive;
+    policy.SecondsToLive = 60;
+
+    ret = HttpAddFragmentToCache(queue, url, &chunk, 1, &policy, NULL);
+    ok(ret == NO_ERROR, "HttpAddFragmentToCache failed with %lu\n", ret);
+
+    ret = HttpAddFragmentToCache(NULL, url, &chunk, 1, &policy, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "HttpAddFragmentToCache should fail with ERROR_INVALID_PARAMETER, got %lu\n", ret);
+
+    ret = HttpAddFragmentToCache(queue, NULL, &chunk, 1, &policy, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "HttpAddFragmentToCache should fail with ERROR_INVALID_PARAMETER, got %lu\n", ret);
+
+    ret = HttpAddFragmentToCache(queue, url, NULL, 1, &policy, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "HttpAddFragmentToCache should fail with ERROR_INVALID_PARAMETER, got %lu\n", ret);
+
+    ret = HttpCloseRequestQueue(queue);
+    ok(ret == NO_ERROR, "HttpCloseRequestQueue failed with %lu\n", ret);
+}
+
+static void test_HttpFlushResponseCache(void)
+{
+    ULONG ret;
+    HANDLE queue;
+    const WCHAR url[] = L"/test_fragment";
+
+    ret = HttpCreateRequestQueue(HTTPAPI_VERSION_1, NULL, NULL, 0, &queue);
+    ok(ret == NO_ERROR, "HttpCreateRequestQueue failed with %lu\n", ret);
+
+    ret = HttpFlushResponseCache(queue, url, 0, NULL);
+    ok(ret == NO_ERROR, "HttpFlushResponseCache failed with %lu\n", ret);
+
+    ret = HttpFlushResponseCache(queue, NULL, 0, NULL);
+    ok(ret == NO_ERROR, "HttpFlushResponseCache failed with %lu\n", ret);
+
+    ret = HttpFlushResponseCache(NULL, url, 0, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "HttpFlushResponseCache should fail with ERROR_INVALID_PARAMETER, got %lu\n", ret);
+
+    ret = HttpCloseRequestQueue(queue);
+    ok(ret == NO_ERROR, "HttpCloseRequestQueue failed with %lu\n", ret);
+}
+
+START_TEST(httpapi)
+{
+    HTTPAPI_VERSION version = HTTPAPI_VERSION_1;
+    ULONG ret;
+
+    ret = HttpInitialize(version, HTTP_INITIALIZE_SERVER, NULL);
+    ok(ret == NO_ERROR, "HttpInitialize failed with %lu\n", ret);
+
+    test_HttpAddFragmentToCache();
+    test_HttpFlushResponseCache();
+
+    ret = HttpTerminate(HTTP_INITIALIZE_SERVER, NULL);
+    ok(ret == NO_ERROR, "HttpTerminate failed with %lu\n", ret);
+}
