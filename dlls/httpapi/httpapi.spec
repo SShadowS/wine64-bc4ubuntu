@@ -1,4 +1,4 @@
-@ stub HttpAddFragmentToCache
+@ stdcall HttpAddFragmentToCache(ptr wstr ptr long ptr ptr)
 @ stdcall HttpAddUrl(ptr wstr ptr)
 @ stdcall HttpAddUrlToUrlGroup(int64 wstr int64 long)
 @ stdcall HttpCancelHttpRequest(ptr int64 ptr)
@@ -11,7 +11,7 @@
 @ stdcall HttpCreateServerSession(long ptr long)
 @ stdcall HttpCreateUrlGroup(int64 ptr long)
 @ stdcall HttpDeleteServiceConfiguration(ptr long ptr long ptr)
-@ stub HttpFlushResponseCache
+@ stdcall HttpFlushResponseCache(ptr wstr long ptr)
 @ stub HttpGetCounters
 @ stdcall HttpInitialize(long long ptr)
 @ stub HttpQueryRequestQueueProperty
@@ -30,7 +30,7 @@
 @ stdcall HttpSetServerSessionProperty(int64 long ptr long)
 @ stdcall HttpSetServiceConfiguration(ptr long ptr long ptr)
 @ stdcall HttpSetUrlGroupProperty(int64 long ptr long)
-@ stub HttpShutdownRequestQueue
+@ stdcall HttpShutdownRequestQueue(ptr)
 @ stdcall HttpTerminate(long ptr)
 @ stub HttpWaitForDemandStart
 @ stdcall HttpWaitForDisconnect(ptr int64 ptr)

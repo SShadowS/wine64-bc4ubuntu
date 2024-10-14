@@ -28,6 +28,18 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(http);
 
+#define MAX_CACHE_ENTRIES 1000
+
+struct cache_entry {
+    struct list entry;
+    WCHAR *url;
+    void *data;
+    ULONG data_length;
+};
+
+static struct list cache_list = LIST_INIT(cache_list);
+static ULONG cache_count = 0;
+
 struct http_cancel_request_params
 {
     HTTP_REQUEST_ID RequestId;
@@ -974,6 +986,123 @@ ULONG WINAPI HttpCloseRequestQueue(HANDLE handle)
     if (!CloseHandle(handle))
         return GetLastError();
     return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *        HttpAddFragmentToCache     (HTTPAPI.@)
+ */
+ULONG WINAPI HttpAddFragmentToCache(HANDLE queue, const WCHAR *url, const HTTP_DATA_CHUNK *data_chunks,
+                                    ULONG chunk_count, const HTTP_CACHE_POLICY *cache_policy, void *reserved)
+{
+    struct cache_entry *entry;
+    ULONG total_length = 0;
+    ULONG i;
+
+    TRACE("queue %p, url %s, data_chunks %p, chunk_count %lu, cache_policy %p, reserved %p.\n",
+          queue, debugstr_w(url), data_chunks, chunk_count, cache_policy, reserved);
+
+    if (!url || !data_chunks || chunk_count == 0)
+        return ERROR_INVALID_PARAMETER;
+
+    if (cache_count >= MAX_CACHE_ENTRIES)
+        return ERROR_CACHE_FULL;
+
+    for (i = 0; i < chunk_count; i++)
+    {
+        if (data_chunks[i].DataChunkType != HttpDataChunkFromMemory)
+        {
+            FIXME("Unsupported data chunk type %d.\n", data_chunks[i].DataChunkType);
+            return ERROR_NOT_SUPPORTED;
+        }
+        total_length += data_chunks[i].FromMemory.BufferLength;
+    }
+
+    entry = malloc(sizeof(*entry));
+    if (!entry)
+        return ERROR_OUTOFMEMORY;
+
+    entry->url = wcsdup(url);
+    entry->data = malloc(total_length);
+    entry->data_length = total_length;
+
+    if (!entry->url || !entry->data)
+    {
+        free(entry->url);
+        free(entry->data);
+        free(entry);
+        return ERROR_OUTOFMEMORY;
+    }
+
+    total_length = 0;
+    for (i = 0; i < chunk_count; i++)
+    {
+        memcpy((char *)entry->data + total_length,
+               data_chunks[i].FromMemory.pBuffer,
+               data_chunks[i].FromMemory.BufferLength);
+        total_length += data_chunks[i].FromMemory.BufferLength;
+    }
+
+    list_add_tail(&cache_list, &entry->entry);
+    cache_count++;
+
+    return NO_ERROR;
+}
+
+/***********************************************************************
+ *        HttpFlushResponseCache     (HTTPAPI.@)
+ */
+ULONG WINAPI HttpFlushResponseCache(HANDLE queue, const WCHAR *url, ULONG flags, OVERLAPPED *overlapped)
+{
+    struct cache_entry *entry, *next;
+
+    TRACE("queue %p, url %s, flags %#lx, overlapped %p.\n",
+          queue, debugstr_w(url), flags, overlapped);
+
+    if (flags)
+        FIXME("Ignoring flags %#lx.\n", flags);
+
+    if (url)
+    {
+        LIST_FOR_EACH_ENTRY_SAFE(entry, next, &cache_list, struct cache_entry, entry)
+        {
+            if (!wcscmp(entry->url, url))
+            {
+                list_remove(&entry->entry);
+                free(entry->url);
+                free(entry->data);
+                free(entry);
+                cache_count--;
+                break;
+            }
+        }
+    }
+    else
+    {
+        LIST_FOR_EACH_ENTRY_SAFE(entry, next, &cache_list, struct cache_entry, entry)
+        {
+            list_remove(&entry->entry);
+            free(entry->url);
+            free(entry->data);
+            free(entry);
+        }
+        cache_count = 0;
+    }
+
+    return NO_ERROR;
+}
+
+/***********************************************************************
+ *        HttpShutdownRequestQueue     (HTTPAPI.@)
+ */
+ULONG WINAPI HttpShutdownRequestQueue(HANDLE queue)
+{
+    TRACE("queue %p.\n", queue);
+
+    /* Mark the queue as shutting down */
+    if (!DeviceIoControl(queue, IOCTL_HTTP_SHUTDOWN_REQUEST_QUEUE, NULL, 0, NULL, 0, NULL, NULL))
+        return GetLastError();
+
+    return NO_ERROR;
 }
 
 /***********************************************************************
