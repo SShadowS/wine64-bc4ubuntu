@@ -990,6 +990,19 @@ ULONG WINAPI HttpCloseRequestQueue(HANDLE handle)
 
 /***********************************************************************
  *        HttpAddFragmentToCache     (HTTPAPI.@)
+ *
+ * Adds a data fragment to the response cache.
+ *
+ * PARAMS
+ *   queue       [I] Handle to the request queue.
+ *   url         [I] The URL prefix to associate with the cached fragment.
+ *   data_chunks [I] Pointer to the data chunks to cache.
+ *   chunk_count [I] Number of data chunks.
+ *   cache_policy [I] Pointer to the cache policy.
+ *   reserved    [I] Reserved, must be NULL.
+ *
+ * RETURNS
+ *   NO_ERROR on success, or an error code on failure.
  */
 ULONG WINAPI HttpAddFragmentToCache(HANDLE queue, const WCHAR *url, const HTTP_DATA_CHUNK *data_chunks,
                                     ULONG chunk_count, const HTTP_CACHE_POLICY *cache_policy, void *reserved)
@@ -1050,6 +1063,17 @@ ULONG WINAPI HttpAddFragmentToCache(HANDLE queue, const WCHAR *url, const HTTP_D
 
 /***********************************************************************
  *        HttpFlushResponseCache     (HTTPAPI.@)
+ *
+ * Removes one or all cached responses from the HTTP Server API cache.
+ *
+ * PARAMS
+ *   queue      [I] Handle to the request queue.
+ *   url        [I] The URL prefix of the cache entries to flush. If NULL, all entries are flushed.
+ *   flags      [I] Reserved, must be 0.
+ *   overlapped [I] Optional pointer to an OVERLAPPED structure for asynchronous operation.
+ *
+ * RETURNS
+ *   NO_ERROR on success, or an error code on failure.
  */
 ULONG WINAPI HttpFlushResponseCache(HANDLE queue, const WCHAR *url, ULONG flags, OVERLAPPED *overlapped)
 {
