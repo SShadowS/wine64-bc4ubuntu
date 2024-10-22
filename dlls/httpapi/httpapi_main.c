@@ -197,10 +197,11 @@ ULONG WINAPI HttpCancelHttpRequest(HANDLE RequestQueueHandle, HTTP_REQUEST_ID Re
     ULONG ret = NO_ERROR;
     OVERLAPPED sync_ovl;
 
-    TRACE("RequestQueueHandle %p, RequestId %s, pOverlapped %p.\n", RequestQueueHandle, wine_dbgstr_longlong(RequestId), pOverlapped);
+    TRACE("RequestQueueHandle %p, RequestId %s, pOverlapped %p.\n",
+            RequestQueueHandle, wine_dbgstr_longlong(RequestId), pOverlapped);
 
-    params.RequestId = RequestId;
-    params.Bits = sizeof(void *) * 8;
+    if (!RequestQueueHandle)
+        return ERROR_INVALID_PARAMETER;
 
     if (!pOverlapped)
     {
@@ -208,14 +209,18 @@ ULONG WINAPI HttpCancelHttpRequest(HANDLE RequestQueueHandle, HTTP_REQUEST_ID Re
         pOverlapped = &sync_ovl;
     }
 
-    if (!DeviceIoControl(RequestQueueHandle, IOCTL_HTTP_CANCEL_REQUEST, &params, sizeof(params), NULL, 0, NULL, pOverlapped))
+    params.RequestId = RequestId;
+    params.Bits = sizeof(void *) * 8;
+
+    if (!DeviceIoControl(RequestQueueHandle, IOCTL_HTTP_CANCEL_REQUEST,
+            &params, sizeof(params), NULL, 0, NULL, pOverlapped))
         ret = GetLastError();
 
     if (pOverlapped == &sync_ovl)
     {
         if (ret == ERROR_IO_PENDING)
         {
-            ret = ERROR_SUCCESS;
+            ret = NO_ERROR;
             if (!GetOverlappedResult(RequestQueueHandle, pOverlapped, NULL, TRUE))
                 ret = GetLastError();
         }
