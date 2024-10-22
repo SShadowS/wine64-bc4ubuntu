@@ -243,10 +243,47 @@ ULONG WINAPI HttpCancelHttpRequest(HANDLE RequestQueueHandle, HTTP_REQUEST_ID Re
  *   NO_ERROR if function succeeds, or error code if function fails
  *
  */
-ULONG WINAPI HttpTerminate( ULONG flags, PVOID reserved )
+ULONG WINAPI HttpTerminate(ULONG flags, PVOID reserved)
 {
-    FIXME( "(0x%lx, %p): stub!\n", flags, reserved );
-    return NO_ERROR;
+    SC_HANDLE manager, service;
+    ULONG ret = NO_ERROR;
+
+    TRACE("flags %#lx, reserved %p.\n", flags, reserved);
+
+    if (flags & ~HTTP_INITIALIZE_SERVER)
+    {
+        FIXME("Unhandled flags %#lx.\n", flags);
+        return NO_ERROR;
+    }
+
+    if (reserved)
+        return ERROR_INVALID_PARAMETER;
+
+    /* Stop the HTTP service */
+    if (!(manager = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT)))
+        return GetLastError();
+
+    if (!(service = OpenServiceW(manager, L"http", SERVICE_STOP)))
+    {
+        ERR("Failed to open HTTP service, error %lu.\n", GetLastError());
+        CloseServiceHandle(manager);
+        return GetLastError();
+    }
+
+    if (!ControlService(service, SERVICE_CONTROL_STOP, NULL) 
+            && GetLastError() != ERROR_SERVICE_NOT_ACTIVE)
+    {
+        ERR("Failed to stop HTTP service, error %lu.\n", GetLastError());
+        ret = GetLastError();
+    }
+
+    CloseServiceHandle(service);
+    CloseServiceHandle(manager);
+
+    /* Clean up any cached data */
+    HttpFlushResponseCache(NULL, NULL, 0, NULL);
+
+    return ret;
 }
 
 /***********************************************************************
