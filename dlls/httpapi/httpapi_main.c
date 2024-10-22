@@ -40,12 +40,21 @@ struct cache_entry {
 static struct list cache_list = LIST_INIT(cache_list);
 static ULONG cache_count = 0;
 
+struct http_wait_for_disconnect_params
+{
+    HTTP_CONNECTION_ID connection_id;
+    ULONG bits;
+    ULONG flags;
+};
+
 struct http_cancel_request_params
 {
     HTTP_REQUEST_ID RequestId;
     ULONG Bits;
 };
 
+#define IOCTL_HTTP_WAIT_FOR_DISCONNECT CTL_CODE(FILE_DEVICE_NETWORK, 0x32, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_HTTP_WAIT_FOR_DISCONNECT_EX CTL_CODE(FILE_DEVICE_NETWORK, 0x33, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define IOCTL_HTTP_CANCEL_REQUEST CTL_CODE(FILE_DEVICE_NETWORK, 0x31, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 
@@ -105,7 +114,11 @@ ULONG WINAPI HttpWaitForDisconnect(HANDLE ReqQueueHandle, HTTP_CONNECTION_ID Con
     ULONG ret = NO_ERROR;
     OVERLAPPED sync_ovl;
 
-    TRACE("ReqQueueHandle %p, ConnectionId %s, pOverlapped %p.\n", ReqQueueHandle, wine_dbgstr_longlong(ConnectionId), pOverlapped);
+    TRACE("ReqQueueHandle %p, ConnectionId %s, pOverlapped %p.\n",
+            ReqQueueHandle, wine_dbgstr_longlong(ConnectionId), pOverlapped);
+
+    if (!ReqQueueHandle)
+        return ERROR_INVALID_PARAMETER;
 
     if (!pOverlapped)
     {
@@ -117,14 +130,15 @@ ULONG WINAPI HttpWaitForDisconnect(HANDLE ReqQueueHandle, HTTP_CONNECTION_ID Con
     params.bits = sizeof(void *) * 8;
     params.flags = 0;
 
-    if (!DeviceIoControl(ReqQueueHandle, IOCTL_HTTP_WAIT_FOR_DISCONNECT, &params, sizeof(params), NULL, 0, NULL, pOverlapped))
+    if (!DeviceIoControl(ReqQueueHandle, IOCTL_HTTP_WAIT_FOR_DISCONNECT,
+            &params, sizeof(params), NULL, 0, NULL, pOverlapped))
         ret = GetLastError();
 
     if (pOverlapped == &sync_ovl)
     {
         if (ret == ERROR_IO_PENDING)
         {
-            ret = ERROR_SUCCESS;
+            ret = NO_ERROR;
             if (!GetOverlappedResult(ReqQueueHandle, pOverlapped, NULL, TRUE))
                 ret = GetLastError();
         }
@@ -137,11 +151,14 @@ ULONG WINAPI HttpWaitForDisconnect(HANDLE ReqQueueHandle, HTTP_CONNECTION_ID Con
 ULONG WINAPI HttpWaitForDisconnectEx(HANDLE ReqQueueHandle, HTTP_CONNECTION_ID ConnectionId, ULONG Flags, LPOVERLAPPED pOverlapped)
 {
     struct http_wait_for_disconnect_params params;
-    ULONG ret = ERROR_SUCCESS;
+    ULONG ret = NO_ERROR;
     OVERLAPPED sync_ovl;
 
     TRACE("ReqQueueHandle %p, ConnectionId %s, Flags %#lx, pOverlapped %p.\n",
-          ReqQueueHandle, wine_dbgstr_longlong(ConnectionId), Flags, pOverlapped);
+            ReqQueueHandle, wine_dbgstr_longlong(ConnectionId), Flags, pOverlapped);
+
+    if (!ReqQueueHandle)
+        return ERROR_INVALID_PARAMETER;
 
     if (!pOverlapped)
     {
@@ -149,21 +166,22 @@ ULONG WINAPI HttpWaitForDisconnectEx(HANDLE ReqQueueHandle, HTTP_CONNECTION_ID C
         pOverlapped = &sync_ovl;
     }
 
-    if (Flags != 0)
+    if (Flags)
         FIXME("Unhandled Flags %#lx.\n", Flags);
 
     params.connection_id = ConnectionId;
     params.bits = sizeof(void *) * 8;
     params.flags = Flags;
 
-    if (!DeviceIoControl(ReqQueueHandle, IOCTL_HTTP_WAIT_FOR_DISCONNECT_EX, &params, sizeof(params), NULL, 0, NULL, pOverlapped))
+    if (!DeviceIoControl(ReqQueueHandle, IOCTL_HTTP_WAIT_FOR_DISCONNECT_EX,
+            &params, sizeof(params), NULL, 0, NULL, pOverlapped))
         ret = GetLastError();
 
     if (pOverlapped == &sync_ovl)
     {
         if (ret == ERROR_IO_PENDING)
         {
-            ret = ERROR_SUCCESS;
+            ret = NO_ERROR;
             if (!GetOverlappedResult(ReqQueueHandle, pOverlapped, NULL, TRUE))
                 ret = GetLastError();
         }
