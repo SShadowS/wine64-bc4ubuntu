@@ -509,44 +509,54 @@ ULONG WINAPI HttpReceiveRequestEntityBody(HANDLE queue, HTTP_REQUEST_ID id, ULON
 ULONG WINAPI HttpReceiveHttpRequest(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
         HTTP_REQUEST *request, ULONG size, ULONG *ret_size, OVERLAPPED *ovl)
 {
-    struct http_receive_request_params params =
-    {
-        .addr = (ULONG_PTR)request,
-        .id = id,
-        .flags = flags,
-        .bits = sizeof(void *) * 8,
-    };
-    ULONG ret = ERROR_SUCCESS;
+    struct http_receive_request_params params;
+    ULONG ret = NO_ERROR;
     ULONG local_ret_size;
     OVERLAPPED sync_ovl;
 
     TRACE("queue %p, id %s, flags %#lx, request %p, size %#lx, ret_size %p, ovl %p.\n",
             queue, wine_dbgstr_longlong(id), flags, request, size, ret_size, ovl);
 
-    if (flags & ~HTTP_RECEIVE_REQUEST_FLAG_COPY_BODY)
-        FIXME("Ignoring flags %#lx.\n", flags & ~HTTP_RECEIVE_REQUEST_FLAG_COPY_BODY);
+    if (!queue || !request)
+        return ERROR_INVALID_PARAMETER;
 
     if (size < sizeof(HTTP_REQUEST_V1))
         return ERROR_INSUFFICIENT_BUFFER;
 
+    if (flags & ~HTTP_RECEIVE_REQUEST_FLAG_COPY_BODY)
+        FIXME("Ignoring flags %#lx.\n", flags & ~HTTP_RECEIVE_REQUEST_FLAG_COPY_BODY);
+
     if (!ovl)
     {
         sync_ovl.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+        if (!sync_ovl.hEvent)
+            return GetLastError();
         ovl = &sync_ovl;
     }
 
-    if (!ret_size)
-        ret_size = &local_ret_size;
+    params.addr = (ULONG_PTR)request;
+    params.id = id;
+    params.flags = flags;
+    params.bits = sizeof(void *) * 8;
 
-    if (!DeviceIoControl(queue, IOCTL_HTTP_RECEIVE_REQUEST, &params, sizeof(params), request, size, ret_size, ovl))
+    if (!DeviceIoControl(queue, IOCTL_HTTP_RECEIVE_REQUEST,
+            &params, sizeof(params), request, size, ret_size ? ret_size : &local_ret_size, ovl))
+    {
         ret = GetLastError();
+        if (ret != ERROR_IO_PENDING)
+        {
+            if (ovl == &sync_ovl)
+                CloseHandle(sync_ovl.hEvent);
+            return ret;
+        }
+    }
 
     if (ovl == &sync_ovl)
     {
         if (ret == ERROR_IO_PENDING)
         {
-            ret = ERROR_SUCCESS;
-            if (!GetOverlappedResult(queue, ovl, ret_size, TRUE))
+            ret = NO_ERROR;
+            if (!GetOverlappedResult(queue, ovl, ret_size ? ret_size : &local_ret_size, TRUE))
                 ret = GetLastError();
         }
         CloseHandle(sync_ovl.hEvent);
