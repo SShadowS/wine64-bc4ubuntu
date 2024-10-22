@@ -960,11 +960,21 @@ ULONG WINAPI HttpSetUrlGroupProperty(HTTP_URL_GROUP_ID id, HTTP_SERVER_PROPERTY 
 ULONG WINAPI HttpAddUrlToUrlGroup(HTTP_URL_GROUP_ID id, const WCHAR *url,
         HTTP_URL_CONTEXT context, ULONG reserved)
 {
-    struct url_group *group = get_url_group(id);
+    struct url_group *group;
+    WCHAR *new_url;
     ULONG ret;
 
     TRACE("id %s, url %s, context %s, reserved %#lx.\n", wine_dbgstr_longlong(id),
             debugstr_w(url), wine_dbgstr_longlong(context), reserved);
+
+    if (!url)
+        return ERROR_INVALID_PARAMETER;
+
+    if (reserved)
+        return ERROR_INVALID_PARAMETER;
+
+    if (!(group = get_url_group(id)))
+        return ERROR_INVALID_PARAMETER;
 
     if (group->url)
     {
@@ -972,18 +982,23 @@ ULONG WINAPI HttpAddUrlToUrlGroup(HTTP_URL_GROUP_ID id, const WCHAR *url,
         return ERROR_CALL_NOT_IMPLEMENTED;
     }
 
+    if (!(new_url = wcsdup(url)))
+        return ERROR_OUTOFMEMORY;
+
     if (group->queue)
     {
         ret = add_url(group->queue, url, context);
         if (ret)
+        {
+            free(new_url);
             return ret;
+        }
     }
 
-    if (!(group->url = wcsdup(url)))
-        return ERROR_OUTOFMEMORY;
+    group->url = new_url;
     group->context = context;
 
-    return ERROR_SUCCESS;
+    return NO_ERROR;
 }
 
 /***********************************************************************
@@ -1064,22 +1079,28 @@ ULONG WINAPI HttpCloseRequestQueue(HANDLE handle)
  * RETURNS
  *   NO_ERROR on success, or an error code on failure.
  */
-ULONG WINAPI HttpAddFragmentToCache(HANDLE queue, const WCHAR *url, const HTTP_DATA_CHUNK *data_chunks,
-                                    ULONG chunk_count, const HTTP_CACHE_POLICY *cache_policy, void *reserved)
+ULONG WINAPI HttpAddFragmentToCache(HANDLE queue, const WCHAR *url, 
+        const HTTP_DATA_CHUNK *data_chunks, ULONG chunk_count,
+        const HTTP_CACHE_POLICY *cache_policy, void *reserved)
 {
     struct cache_entry *entry;
     ULONG total_length = 0;
+    char *current_pos;
     ULONG i;
 
     TRACE("queue %p, url %s, data_chunks %p, chunk_count %lu, cache_policy %p, reserved %p.\n",
-          queue, debugstr_w(url), data_chunks, chunk_count, cache_policy, reserved);
+            queue, debugstr_w(url), data_chunks, chunk_count, cache_policy, reserved);
 
-    if (!url || !data_chunks || chunk_count == 0)
+    if (!url || !data_chunks || !chunk_count)
+        return ERROR_INVALID_PARAMETER;
+
+    if (reserved)
         return ERROR_INVALID_PARAMETER;
 
     if (cache_count >= MAX_CACHE_ENTRIES)
         return ERROR_CACHE_FULL;
 
+    /* Calculate total length and validate chunks */
     for (i = 0; i < chunk_count; i++)
     {
         if (data_chunks[i].DataChunkType != HttpDataChunkFromMemory)
@@ -1087,32 +1108,37 @@ ULONG WINAPI HttpAddFragmentToCache(HANDLE queue, const WCHAR *url, const HTTP_D
             FIXME("Unsupported data chunk type %d.\n", data_chunks[i].DataChunkType);
             return ERROR_NOT_SUPPORTED;
         }
+        if (!data_chunks[i].FromMemory.pBuffer || !data_chunks[i].FromMemory.BufferLength)
+            return ERROR_INVALID_PARAMETER;
+        
         total_length += data_chunks[i].FromMemory.BufferLength;
     }
 
-    entry = malloc(sizeof(*entry));
-    if (!entry)
+    if (!(entry = malloc(sizeof(*entry))))
         return ERROR_OUTOFMEMORY;
 
-    entry->url = wcsdup(url);
-    entry->data = malloc(total_length);
-    entry->data_length = total_length;
-
-    if (!entry->url || !entry->data)
+    if (!(entry->url = wcsdup(url)))
     {
-        free(entry->url);
-        free(entry->data);
         free(entry);
         return ERROR_OUTOFMEMORY;
     }
 
-    total_length = 0;
+    if (!(entry->data = malloc(total_length)))
+    {
+        free(entry->url);
+        free(entry);
+        return ERROR_OUTOFMEMORY;
+    }
+
+    entry->data_length = total_length;
+    current_pos = entry->data;
+
+    /* Copy data chunks */
     for (i = 0; i < chunk_count; i++)
     {
-        memcpy((char *)entry->data + total_length,
-               data_chunks[i].FromMemory.pBuffer,
-               data_chunks[i].FromMemory.BufferLength);
-        total_length += data_chunks[i].FromMemory.BufferLength;
+        memcpy(current_pos, data_chunks[i].FromMemory.pBuffer,
+                data_chunks[i].FromMemory.BufferLength);
+        current_pos += data_chunks[i].FromMemory.BufferLength;
     }
 
     list_add_tail(&cache_list, &entry->entry);
@@ -1195,9 +1221,39 @@ ULONG WINAPI HttpShutdownRequestQueue(HANDLE queue)
 ULONG WINAPI HttpSetRequestQueueProperty(HANDLE queue, HTTP_SERVER_PROPERTY property,
         void *value, ULONG length, ULONG reserved1, void *reserved2)
 {
-    FIXME("queue %p, property %u, value %p, length %lu, reserved1 %#lx, reserved2 %p, stub!\n",
+    TRACE("queue %p, property %u, value %p, length %lu, reserved1 %#lx, reserved2 %p.\n",
             queue, property, value, length, reserved1, reserved2);
-    return ERROR_CALL_NOT_IMPLEMENTED;
+
+    if (!queue || !value)
+        return ERROR_INVALID_PARAMETER;
+
+    if (reserved1 || reserved2)
+        return ERROR_INVALID_PARAMETER;
+
+    switch (property)
+    {
+        case HttpServerQueueLengthProperty:
+            if (length != sizeof(HTTP_QOS_SETTING_INFO))
+                return ERROR_INVALID_PARAMETER;
+            FIXME("Ignoring queue length setting.\n");
+            return NO_ERROR;
+
+        case HttpServerStateProperty:
+            if (length != sizeof(HTTP_STATE_INFO))
+                return ERROR_INVALID_PARAMETER;
+            FIXME("Ignoring state property.\n");
+            return NO_ERROR;
+
+        case HttpServer503VerbosityProperty:
+            if (length != sizeof(HTTP_503_RESPONSE_VERBOSITY))
+                return ERROR_INVALID_PARAMETER;
+            FIXME("Ignoring 503 verbosity property.\n");
+            return NO_ERROR;
+
+        default:
+            FIXME("Unhandled property %u.\n", property);
+            return ERROR_INVALID_PARAMETER;
+    }
 }
 
 /***********************************************************************
