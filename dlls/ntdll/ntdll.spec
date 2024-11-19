@@ -145,6 +145,7 @@
 @ stdcall -syscall NtAlertThread(long)
 @ stdcall -syscall NtAlertThreadByThreadId(ptr)
 @ stdcall -syscall NtAllocateLocallyUniqueId(ptr)
+@ stdcall -syscall NtAllocateReserveObject(ptr long long)
 # @ stub NtAllocateUserPhysicalPages
 @ stdcall -syscall NtAllocateUuids(ptr ptr ptr ptr)
 @ stdcall -syscall NtAllocateVirtualMemory(long ptr long ptr long long)
@@ -399,6 +400,7 @@
 @ stdcall -syscall NtSetInformationVirtualMemory(long long ptr ptr ptr long)
 @ stdcall -syscall NtSetIntervalProfile(long long)
 @ stdcall -syscall NtSetIoCompletion(ptr long long long long)
+@ stdcall -syscall NtSetIoCompletionEx(ptr ptr long long long long)
 @ stdcall -syscall NtSetLdtEntries(long int64 long int64)
 # @ stub NtSetLowEventPair
 # @ stub NtSetLowWaitHighEventPair
@@ -450,6 +452,7 @@
 @ stdcall -syscall -arch=win32 NtWow64AllocateVirtualMemory64(long ptr int64 ptr long long)
 @ stdcall -syscall -arch=win32 NtWow64GetNativeSystemInformation(long ptr long ptr)
 @ stdcall -syscall -arch=win32 NtWow64IsProcessorFeaturePresent(long)
+@ stdcall -syscall -arch=win32 NtWow64QueryInformationProcess64(long long ptr long ptr)
 @ stdcall -syscall -arch=win32 NtWow64ReadVirtualMemory64(long int64 ptr int64 ptr)
 @ stdcall -syscall -arch=win32 NtWow64WriteVirtualMemory64(long int64 ptr int64 ptr)
 @ stdcall -syscall NtWriteFile(long long ptr ptr ptr ptr long ptr ptr)
@@ -457,6 +460,10 @@
 # @ stub NtWriteRequestData
 @ stdcall -syscall NtWriteVirtualMemory(long ptr ptr long ptr)
 @ stdcall -syscall NtYieldExecution()
+@ stdcall NtdllDefWindowProc_A(long long long long)
+@ stdcall NtdllDefWindowProc_W(long long long long)
+@ stdcall NtdllDialogWndProc_A(long long long long)
+@ stdcall NtdllDialogWndProc_W(long long long long)
 @ stub PfxFindPrefix
 @ stub PfxInitialize
 @ stub PfxInsertPrefix
@@ -801,6 +808,7 @@
 @ stdcall RtlInitializeGenericTable(ptr ptr ptr ptr ptr)
 @ stdcall RtlInitializeGenericTableAvl(ptr ptr ptr ptr ptr)
 @ stdcall RtlInitializeHandleTable(long long ptr)
+@ stdcall RtlInitializeNtUserPfn(ptr long ptr long ptr long)
 @ stub RtlInitializeRXact
 # @ stub RtlInitializeRangeList
 @ stdcall RtlInitializeResource(ptr)
@@ -972,9 +980,11 @@
 @ stub RtlRemoteCall
 @ stdcall RtlRemoveVectoredContinueHandler(ptr)
 @ stdcall RtlRemoveVectoredExceptionHandler(ptr)
+@ stdcall RtlResetNtUserPfn()
 @ stdcall RtlResetRtlTranslations(ptr)
 @ cdecl RtlRestoreContext(ptr ptr)
 @ stdcall RtlRestoreLastWin32Error(long) RtlSetLastWin32Error
+@ stdcall RtlRetrieveNtUserPfn(ptr ptr ptr)
 @ stub RtlRevertMemoryStream
 @ stub RtlRunDecodeUnicodeString
 @ stub RtlRunEncodeUnicodeString
@@ -1451,6 +1461,7 @@
 @ stdcall -private -syscall ZwSetInformationVirtualMemory(long long ptr ptr ptr long) NtSetInformationVirtualMemory
 @ stdcall -private -syscall ZwSetIntervalProfile(long long) NtSetIntervalProfile
 @ stdcall -private -syscall ZwSetIoCompletion(ptr long long long long) NtSetIoCompletion
+@ stdcall -private -syscall ZwSetIoCompletionEx(ptr ptr long long long long) NtSetIoCompletionEx
 @ stdcall -private -syscall ZwSetLdtEntries(long int64 long int64) NtSetLdtEntries
 # @ stub ZwSetLowEventPair
 # @ stub ZwSetLowWaitHighEventPair

@@ -50,8 +50,7 @@ extern void create_window_surface( HWND hwnd, BOOL create_layered, const RECT *s
 extern struct window_surface *get_driver_window_surface( struct window_surface *surface, UINT monitor_dpi );
 extern void erase_now( HWND hwnd, UINT rdw_flags );
 extern void flush_window_surfaces( BOOL idle );
-extern void move_window_bits( HWND hwnd, const RECT *visible_rect, const RECT *old_visible_rect,
-                              const RECT *window_rect, const RECT *valid_rects );
+extern void move_window_bits( HWND hwnd, const struct window_rects *rects, const RECT *valid_rects );
 extern void move_window_bits_surface( HWND hwnd, const RECT *window_rect, struct window_surface *old_surface,
                                       const RECT *old_visible_rect, const RECT *valid_rects );
 extern void register_window_surface( struct window_surface *old,
@@ -62,7 +61,7 @@ extern void *window_surface_get_color( struct window_surface *surface, BITMAPINF
 extern BOOL adjust_window_rect( RECT *rect, DWORD style, BOOL menu, DWORD ex_style, UINT dpi );
 extern LRESULT default_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
                                     BOOL ansi );
-extern LRESULT desktop_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam );
+extern LRESULT desktop_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, BOOL ansi );
 extern void draw_menu_button( HWND hwnd, HDC dc, RECT *r, enum NONCLIENT_BUTTON_TYPE, BOOL down, BOOL grayed );
 extern BOOL draw_frame_menu( HDC dc, RECT *r, UINT flags );
 extern BOOL draw_nc_sys_button( HWND hwnd, HDC hdc, BOOL down );
@@ -107,7 +106,7 @@ extern BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus, DW
 extern BOOL set_ime_composition_rect( HWND hwnd, RECT rect );
 extern void toggle_caret( HWND hwnd );
 extern void update_mouse_tracking_info( HWND hwnd );
-extern BOOL get_clip_cursor( RECT *rect, UINT dpi );
+extern BOOL get_clip_cursor( RECT *rect, UINT dpi, MONITOR_DPI_TYPE type );
 extern BOOL process_wine_clipcursor( HWND hwnd, UINT flags, BOOL reset );
 extern BOOL clip_fullscreen_window( HWND hwnd, BOOL reset );
 extern USHORT map_scan_to_kbd_vkey( USHORT scan, HKL layout );
@@ -125,8 +124,7 @@ extern UINT get_menu_state( HMENU handle, UINT item_id, UINT flags );
 extern HMENU get_window_sys_sub_menu( HWND hwnd );
 extern BOOL is_menu( HMENU handle );
 extern HWND is_menu_active(void);
-extern LRESULT popup_menu_window_proc( HWND hwnd, UINT message, WPARAM wparam,
-                                       LPARAM lparam );
+extern LRESULT popup_menu_window_proc( HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam, BOOL ansi );
 extern BOOL set_window_menu( HWND hwnd, HMENU handle );
 extern void track_keyboard_menu_bar( HWND hwnd, UINT wparam, WCHAR ch );
 extern void track_mouse_menu_bar( HWND hwnd, INT ht, int x, int y );
@@ -187,6 +185,9 @@ extern RECT map_dpi_rect( RECT rect, UINT dpi_from, UINT dpi_to );
 extern HRGN map_dpi_region( HRGN region, UINT dpi_from, UINT dpi_to );
 extern struct window_rects map_dpi_window_rects( struct window_rects rects, UINT dpi_from, UINT dpi_to );
 extern BOOL message_beep( UINT i );
+extern RECT map_rect_raw_to_virt( RECT rect, UINT dpi_to );
+extern RECT map_rect_virt_to_raw( RECT rect, UINT dpi_from );
+extern struct window_rects map_window_rects_virt_to_raw( struct window_rects rects, UINT dpi_from );
 extern POINT point_phys_to_win_dpi( HWND hwnd, POINT pt );
 extern POINT point_thread_to_win_dpi( HWND hwnd, POINT pt );
 extern RECT rect_thread_to_win_dpi( HWND hwnd, RECT rect );

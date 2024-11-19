@@ -208,12 +208,12 @@ extern void start_server( BOOL debug );
 extern unsigned int server_call_unlocked( void *req_ptr );
 extern void server_enter_uninterrupted_section( pthread_mutex_t *mutex, sigset_t *sigset );
 extern void server_leave_uninterrupted_section( pthread_mutex_t *mutex, sigset_t *sigset );
-extern unsigned int server_select( const select_op_t *select_op, data_size_t size, UINT flags,
-                                   timeout_t abs_timeout, context_t *context, user_apc_t *user_apc );
-extern unsigned int server_wait( const select_op_t *select_op, data_size_t size, UINT flags,
+extern unsigned int server_select( const union select_op *select_op, data_size_t size, UINT flags,
+                                   timeout_t abs_timeout, context_t *context, struct user_apc *user_apc );
+extern unsigned int server_wait( const union select_op *select_op, data_size_t size, UINT flags,
                                  const LARGE_INTEGER *timeout );
-extern unsigned int server_queue_process_apc( HANDLE process, const apc_call_t *call,
-                                              apc_result_t *result );
+extern unsigned int server_queue_process_apc( HANDLE process, const union apc_call *call,
+                                              union apc_result *result );
 extern int server_get_unix_fd( HANDLE handle, unsigned int wanted_access, int *unix_fd,
                                int *needs_close, enum server_fd_type *type, unsigned int *options );
 extern void wine_server_send_fd( int fd );
@@ -436,10 +436,10 @@ static inline void mutex_unlock( pthread_mutex_t *mutex )
     if (!process_exiting) pthread_mutex_unlock( mutex );
 }
 
-static inline async_data_t server_async( HANDLE handle, struct async_fileio *user, HANDLE event,
-                                         PIO_APC_ROUTINE apc, void *apc_context, client_ptr_t iosb )
+static inline struct async_data server_async( HANDLE handle, struct async_fileio *user, HANDLE event,
+                                              PIO_APC_ROUTINE apc, void *apc_context, client_ptr_t iosb )
 {
-    async_data_t async;
+    struct async_data async;
     async.handle      = wine_server_obj_handle( handle );
     async.user        = wine_server_client_ptr( user );
     async.iosb        = iosb;

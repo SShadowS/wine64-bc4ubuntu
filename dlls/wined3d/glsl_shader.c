@@ -7366,7 +7366,7 @@ static GLuint shader_glsl_generate_vs3_rasterizer_input_setup(struct shader_glsl
             }
             else if (shader_match_semantic(semantic_name, WINED3D_DECL_USAGE_FOG))
             {
-                shader_addline(buffer, "%s = clamp(outputs[%u].%c, 0.0, 1.0);\n",
+                shader_addline(buffer, "%s = outputs[%u].%c;\n",
                         legacy_syntax ? "gl_FogFragCoord" : "ffp_varying_fogcoord",
                         output->register_idx, reg_mask[1]);
             }
@@ -11402,6 +11402,8 @@ static void shader_glsl_get_caps(const struct wined3d_adapter *adapter, struct s
 
     TRACE("Shader model %u.\n", shader_model);
 
+    memset(caps, 0, sizeof(*caps));
+
     caps->vs_version = min(wined3d_settings.max_sm_vs, shader_model);
     caps->hs_version = min(wined3d_settings.max_sm_hs, shader_model);
     caps->ds_version = min(wined3d_settings.max_sm_ds, shader_model);
@@ -11742,6 +11744,8 @@ static void glsl_vertex_pipe_vp_disable(const struct wined3d_context *context) {
 static void glsl_vertex_pipe_vp_get_caps(const struct wined3d_adapter *adapter, struct wined3d_vertex_caps *caps)
 {
     const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl_const(adapter)->gl_info;
+
+    memset(caps, 0, sizeof(*caps));
 
     caps->emulated_flatshading = !needs_legacy_glsl_syntax(gl_info);
     caps->max_active_lights = WINED3D_MAX_ACTIVE_LIGHTS;

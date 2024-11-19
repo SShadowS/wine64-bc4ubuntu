@@ -1078,7 +1078,7 @@ static LONG_PTR get_window_long_size( HWND hwnd, INT offset, UINT size, BOOL ans
          * more tolerant to A/W mismatches. The lack of W->A->W conversion for such a mismatch suggests
          * that the hack is in GetWindowLongPtr[AW], not in winprocs.
          */
-        if (win->winproc == BUILTIN_WINPROC(WINPROC_EDIT) && (!!ansi != !(win->flags & WIN_ISUNICODE)))
+        if (win->winproc == BUILTIN_WINPROC(NTUSER_WNDPROC_EDIT) && (!!ansi != !(win->flags & WIN_ISUNICODE)))
             retval = (ULONG_PTR)win->winproc;
         else
             retval = (ULONG_PTR)get_winproc( win->winproc, ansi );
@@ -1855,7 +1855,7 @@ static RECT get_visible_rect( HWND hwnd, BOOL shaped, UINT style, UINT ex_style,
 
 static BOOL get_surface_rect( const RECT *visible_rect, RECT *surface_rect )
 {
-    RECT virtual_rect = get_virtual_screen_rect( 0, MDT_DEFAULT );
+    RECT virtual_rect = get_virtual_screen_rect( 0, MDT_RAW_DPI );
 
     *surface_rect = *visible_rect;
 
@@ -1910,7 +1910,7 @@ static struct window_surface *get_window_surface( HWND hwnd, UINT swp_flags, BOO
     HWND parent = NtUserGetAncestor( hwnd, GA_PARENT );
     struct window_surface *new_surface;
     struct window_rects monitor_rects;
-    UINT raw_dpi, monitor_dpi, style, ex_style;
+    UINT raw_dpi, style, ex_style;
     RECT dummy;
     HRGN shape;
 
@@ -1918,14 +1918,16 @@ static struct window_surface *get_window_surface( HWND hwnd, UINT swp_flags, BOO
     ex_style = NtUserGetWindowLongW( hwnd, GWL_EXSTYLE );
     is_child = parent && parent != NtUserGetDesktopWindow();
 
-    if (is_child) monitor_dpi = get_win_monitor_dpi( parent, &raw_dpi );
-    else monitor_dpi = monitor_dpi_from_rect( rects->window, get_thread_dpi(), &raw_dpi );
+    if (is_child) get_win_monitor_dpi( parent, &raw_dpi );
+    else monitor_dpi_from_rect( rects->window, get_thread_dpi(), &raw_dpi );
 
     if (get_window_region( hwnd, FALSE, &shape, &dummy )) shaped = FALSE;
     else if ((shaped = !!shape)) NtGdiDeleteObjectApp( shape );
 
     rects->visible = rects->window;
-    monitor_rects = map_dpi_window_rects( *rects, get_thread_dpi(), monitor_dpi );
+    if (is_child) monitor_rects = map_dpi_window_rects( *rects, get_thread_dpi(), raw_dpi );
+    else monitor_rects = map_window_rects_virt_to_raw( *rects, get_thread_dpi() );
+
     if (!user_driver->pWindowPosChanging( hwnd, swp_flags, shaped, &monitor_rects )) needs_surface = FALSE;
     else if (is_child) needs_surface = FALSE;
     else if (swp_flags & SWP_HIDEWINDOW) needs_surface = FALSE;
@@ -1941,9 +1943,8 @@ static struct window_surface *get_window_surface( HWND hwnd, UINT swp_flags, BOO
 
     if ((create_opaque && is_layered) || (create_layered && !is_layered))
     {
-        window_surface_release( new_surface );
-        new_surface = &dummy_surface;
-        window_surface_add_ref( new_surface );
+        if (new_surface) window_surface_release( new_surface );
+        window_surface_add_ref( (new_surface = &dummy_surface) );
     }
     else if (!create_opaque && is_layered) create_layered = TRUE;
 
@@ -1951,7 +1952,7 @@ static struct window_surface *get_window_surface( HWND hwnd, UINT swp_flags, BOO
     else if (create_layered || is_layered) needs_surface = TRUE;
 
     if (needs_surface)
-        create_window_surface( hwnd, create_layered, surface_rect, monitor_dpi, &new_surface );
+        create_window_surface( hwnd, create_layered, surface_rect, raw_dpi, &new_surface );
     else if (new_surface && new_surface != &dummy_surface)
     {
         window_surface_release( new_surface );
@@ -1999,7 +2000,7 @@ static BOOL apply_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags, stru
 {
     struct window_rects monitor_rects;
     WND *win;
-    HWND surface_win = 0, parent = NtUserGetAncestor( hwnd, GA_PARENT );
+    HWND owner_hint, surface_win = 0, parent = NtUserGetAncestor( hwnd, GA_PARENT );
     BOOL ret, is_fullscreen, is_layered, is_child, needs_update = FALSE;
     struct window_rects old_rects;
     RECT extra_rects[3];
@@ -2013,13 +2014,10 @@ static BOOL apply_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags, stru
     if (is_child) monitor_dpi = get_win_monitor_dpi( parent, &raw_dpi );
     else monitor_dpi = monitor_dpi_from_rect( new_rects->window, get_thread_dpi(), &raw_dpi );
 
-    get_window_rects( hwnd, COORDS_SCREEN, &old_rects, get_thread_dpi() );
+    get_window_rects( hwnd, COORDS_PARENT, &old_rects, get_thread_dpi() );
     if (IsRectEmpty( &valid_rects[0] ) || is_layered) valid_rects = NULL;
 
     if (!(win = get_win_ptr( hwnd )) || win == WND_DESKTOP || win == WND_OTHER_PROCESS) return FALSE;
-
-    old_rects.visible = win->rects.visible;
-    old_rects.client = win->rects.client;
     old_surface = win->surface;
     if (old_surface != new_surface) swp_flags |= SWP_FRAMECHANGED;  /* force refreshing non-client area */
     if (new_surface == &dummy_surface) swp_flags |= SWP_NOREDRAW;
@@ -2029,7 +2027,8 @@ static BOOL apply_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags, stru
         valid_rects = NULL;
     }
 
-    monitor_rects = map_dpi_window_rects( *new_rects, get_thread_dpi(), monitor_dpi );
+    if (is_child) monitor_rects = map_dpi_window_rects( *new_rects, get_thread_dpi(), raw_dpi );
+    else monitor_rects = map_window_rects_virt_to_raw( *new_rects, get_thread_dpi() );
 
     SERVER_START_REQ( set_window_pos )
     {
@@ -2098,18 +2097,25 @@ static BOOL apply_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags, stru
         {
             if (valid_rects)
             {
+                RECT rects[2] = {valid_rects[0], valid_rects[1]};
+                valid_rects = rects;
+
                 if (old_surface != new_surface)
                     move_window_bits_surface( hwnd, &new_rects->window, old_surface, &old_rects.visible, valid_rects );
                 else
-                    move_window_bits( hwnd, &new_rects->visible, &old_rects.visible, &new_rects->window, valid_rects );
+                {
+                    OffsetRect( &rects[1], new_rects->visible.left - old_rects.visible.left, new_rects->visible.top - old_rects.visible.top );
+                    move_window_bits( hwnd, new_rects, valid_rects );
+                }
             }
             window_surface_release( old_surface );
         }
         else if (valid_rects)
         {
-            RECT rects[2];
+            RECT rects[2] = {valid_rects[0], valid_rects[1]};
             int x_offset = old_rects.visible.left - new_rects->visible.left;
             int y_offset = old_rects.visible.top - new_rects->visible.top;
+            valid_rects = rects;
 
             /* if all that happened is that the whole window moved, copy everything */
             if (!(swp_flags & SWP_FRAMECHANGED) &&
@@ -2121,18 +2127,27 @@ static BOOL apply_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags, stru
                 old_rects.client.bottom  - new_rects->client.bottom == y_offset &&
                 EqualRect( &valid_rects[0], &new_rects->client ))
             {
-                rects[0] = new_rects->visible;
-                rects[1] = old_rects.visible;
-                valid_rects = rects;
+                rects[0] = new_rects->window;
+                rects[1] = old_rects.window;
             }
 
-            if (surface_win && surface_win != hwnd)
-                move_window_bits( hwnd, &new_rects->visible, &new_rects->visible, &new_rects->window, valid_rects );
-            else
+            if (!surface_win || surface_win == hwnd)
                 user_driver->pMoveWindowBits( hwnd, &old_rects, new_rects, valid_rects );
+            else
+            {
+                /* move a child window bits within its parent window surface, the surface itself
+                 * didn't move and valid rects are already relative to the surface rect. */
+                move_window_bits( hwnd, new_rects, valid_rects );
+            }
         }
 
-        user_driver->pWindowPosChanged( hwnd, insert_after, swp_flags, is_fullscreen, &monitor_rects, get_driver_window_surface( new_surface, monitor_dpi ) );
+        owner_hint = NtUserGetWindowRelative(hwnd, GW_OWNER);
+        /* fallback to any window that is right below our top left corner */
+        if (!owner_hint) owner_hint = NtUserWindowFromPoint(new_rects->window.left - 1, new_rects->window.top - 1);
+        if (owner_hint) owner_hint = NtUserGetAncestor(owner_hint, GA_ROOT);
+
+        user_driver->pWindowPosChanged( hwnd, insert_after, owner_hint, swp_flags, is_fullscreen, &monitor_rects,
+                                        get_driver_window_surface( new_surface, raw_dpi ) );
 
         update_children_window_state( hwnd );
     }
@@ -2280,13 +2295,13 @@ int WINAPI NtUserSetWindowRgn( HWND hwnd, HRGN hrgn, BOOL redraw )
     {
         UINT swp_flags = SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED |
             SWP_NOCLIENTSIZE | SWP_NOCLIENTMOVE;
-        UINT raw_dpi, dpi;
+        UINT raw_dpi;
         HRGN monitor_hrgn;
 
         if (!redraw) swp_flags |= SWP_NOREDRAW;
 
-        dpi = get_win_monitor_dpi( hwnd, &raw_dpi );
-        monitor_hrgn = map_dpi_region( hrgn, get_thread_dpi(), dpi );
+        get_win_monitor_dpi( hwnd, &raw_dpi );
+        monitor_hrgn = map_dpi_region( hrgn, get_thread_dpi(), raw_dpi );
         user_driver->pSetWindowRgn( hwnd, monitor_hrgn, redraw );
         if (monitor_hrgn) NtGdiDeleteObjectApp( monitor_hrgn );
 
@@ -5720,12 +5735,9 @@ static BOOL set_dialog_info( HWND hwnd, void *info )
 
 static BOOL set_raw_window_pos( HWND hwnd, RECT rect, UINT flags, BOOL internal )
 {
-    UINT dpi, raw_dpi;
-
     TRACE( "hwnd %p, rect %s, flags %#x, internal %u\n", hwnd, wine_dbgstr_rect(&rect), flags, internal );
 
-    dpi = get_win_monitor_dpi( hwnd, &raw_dpi );
-    rect = map_dpi_rect( rect, dpi, get_thread_dpi() );
+    rect = map_rect_raw_to_virt( rect, get_thread_dpi() );
 
     if (internal)
     {

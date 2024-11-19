@@ -29,6 +29,7 @@ struct fd;
 struct mapping;
 struct async_queue;
 struct completion;
+struct reserve;
 
 /* server-side representation of I/O status block */
 struct iosb
@@ -236,8 +237,10 @@ extern struct dir *get_dir_obj( struct process *process, obj_handle_t handle, un
 /* completion */
 
 extern struct completion *get_completion_obj( struct process *process, obj_handle_t handle, unsigned int access );
+extern struct reserve *get_completion_reserve_obj( struct process *process, obj_handle_t handle, unsigned int access );
 extern void add_completion( struct completion *completion, apc_param_t ckey, apc_param_t cvalue,
                             unsigned int status, apc_param_t information );
+extern void cleanup_thread_completion( struct thread *thread );
 
 /* serial port functions */
 
@@ -249,8 +252,8 @@ extern struct object *create_serial( struct fd *fd );
 typedef void (*async_completion_callback)( void *private );
 
 extern void free_async_queue( struct async_queue *queue );
-extern struct async *create_async( struct fd *fd, struct thread *thread, const async_data_t *data, struct iosb *iosb );
-extern struct async *create_request_async( struct fd *fd, unsigned int comp_flags, const async_data_t *data,
+extern struct async *create_async( struct fd *fd, struct thread *thread, const struct async_data *data, struct iosb *iosb );
+extern struct async *create_request_async( struct fd *fd, unsigned int comp_flags, const struct async_data *data,
                                            int is_system );
 extern obj_handle_t async_handoff( struct async *async, data_size_t *result, int force_blocking );
 extern void queue_async( struct async_queue *queue, struct async *async );

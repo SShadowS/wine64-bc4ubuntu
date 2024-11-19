@@ -100,64 +100,43 @@
 
 #if !defined(_MSC_VER) && !defined(__MINGW32__)
 # undef __stdcall
-# ifdef __i386__
-#  ifdef __GNUC__
-#   if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 2)) || defined(__APPLE__)
-#    define __stdcall __attribute__((__stdcall__)) __attribute__((__force_align_arg_pointer__))
-#   else
-#    define __stdcall __attribute__((__stdcall__))
-#   endif
+# undef __cdecl
+# if defined(__i386__) && defined(__GNUC__)
+#  if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 2)) || defined(__APPLE__)
+#   define __stdcall __attribute__((__stdcall__)) __attribute__((__force_align_arg_pointer__))
+#   define __cdecl __attribute__((__cdecl__)) __attribute__((__force_align_arg_pointer__))
 #  else
-#   error You need to define __stdcall for your compiler
+#   define __stdcall __attribute__((__stdcall__))
+#   define __cdecl __attribute__((__cdecl__))
 #  endif
-# elif defined(__x86_64__) && defined (__GNUC__)
+# elif defined(__x86_64__) && defined(__GNUC__)
 #  if __has_attribute(__force_align_arg_pointer__)
 #   define __stdcall __attribute__((ms_abi)) __attribute__((__force_align_arg_pointer__))
 #  else
 #   define __stdcall __attribute__((ms_abi))
 #  endif
-# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(__CYGWIN__)
-#   define __stdcall __attribute__((pcs("aapcs-vfp")))
-# elif defined(__aarch64__) && defined (__GNUC__) && __has_attribute(ms_abi)
-#  define __stdcall __attribute__((ms_abi))
-# else  /* __i386__ */
-#  define __stdcall
-# endif  /* __i386__ */
-# undef __cdecl
-# if defined(__i386__) && defined(__GNUC__)
-#  if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 2)) || defined(__APPLE__)
-#   define __cdecl __attribute__((__cdecl__)) __attribute__((__force_align_arg_pointer__))
-#  else
-#   define __cdecl __attribute__((__cdecl__))
-#  endif
-# else
 #  define __cdecl __stdcall
+# else
+#  define __stdcall
+#  define __cdecl
 # endif
 #endif  /* _MSC_VER || __MINGW32__ */
 
-#ifndef WINAPIV
-# if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(__MINGW32__) && !defined(__CYGWIN__)
-#  define WINAPIV __attribute__((pcs("aapcs")))
-# else
-#  define WINAPIV __cdecl
-# endif
-#endif
-
 #ifndef DECLSPEC_NORETURN
-# if __has_declspec_attribute(noreturn) && !defined(MIDL_PASS)
-#  define DECLSPEC_NORETURN __declspec(noreturn)
-# elif defined(__GNUC__)
+# ifdef __GNUC__
 #  define DECLSPEC_NORETURN __attribute__((noreturn))
+# elif __has_declspec_attribute(noreturn) && !defined(MIDL_PASS)
+#  define DECLSPEC_NORETURN __declspec(noreturn)
 # else
 #  define DECLSPEC_NORETURN
 # endif
 #endif
 
 #ifndef DECLSPEC_ALIGN
-# if __has_declspec_attribute(align) &&  !defined(MIDL_PASS)
-#  define DECLSPEC_ALIGN(x) __declspec(align(x))
-# elif defined(__GNUC__)
+# ifdef __GNUC__
 #  define DECLSPEC_ALIGN(x) __attribute__((aligned(x)))
+# elif __has_declspec_attribute(align) &&  !defined(MIDL_PASS)
+#  define DECLSPEC_ALIGN(x) __declspec(align(x))
 # else
 #  define DECLSPEC_ALIGN(x)
 # endif

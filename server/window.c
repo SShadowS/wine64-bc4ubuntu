@@ -240,6 +240,90 @@ static inline void update_pixel_format_flags( struct window *win )
         win->paint_flags |= PAINT_PIXEL_FORMAT_CHILD;
 }
 
+static rectangle_t monitors_get_union_rect( struct winstation *winstation, int is_raw )
+{
+    struct monitor_info *monitor, *end;
+    rectangle_t rect = {0};
+
+    for (monitor = winstation->monitors, end = monitor + winstation->monitor_count; monitor < end; monitor++)
+    {
+        rectangle_t monitor_rect = is_raw ? monitor->raw : monitor->virt;
+        if (monitor->flags & (MONITOR_FLAG_CLONE | MONITOR_FLAG_INACTIVE)) continue;
+        union_rect( &rect, &rect, &monitor_rect );
+    }
+
+    return rect;
+}
+
+/* returns the largest intersecting or nearest monitor, keep in sync with win32u/sysparams.c */
+static struct monitor_info *get_monitor_from_rect( struct winstation *winstation, const rectangle_t *rect, int is_raw )
+{
+    struct monitor_info *monitor, *nearest = NULL, *found = NULL, *end;
+    unsigned int max_area = 0, min_distance = -1;
+
+    for (monitor = winstation->monitors, end = monitor + winstation->monitor_count; monitor < end; monitor++)
+    {
+        rectangle_t intersect, target = is_raw ? monitor->raw : monitor->virt;
+
+        if (monitor->flags & (MONITOR_FLAG_CLONE | MONITOR_FLAG_INACTIVE)) continue;
+
+        if (intersect_rect( &intersect, &target, rect ))
+        {
+            /* check for larger intersecting area */
+            unsigned int area = (intersect.right - intersect.left) * (intersect.bottom - intersect.top);
+
+            if (area > max_area)
+            {
+                max_area = area;
+                found = monitor;
+            }
+        }
+
+        if (!found)  /* if not intersecting, check for min distance */
+        {
+            unsigned int distance, x, y;
+
+            if (rect->right <= target.left) x = target.left - rect->right;
+            else if (target.right <= rect->left) x = rect->left - target.right;
+            else x = 0;
+
+            if (rect->bottom <= target.top) y = target.top - rect->bottom;
+            else if (target.bottom <= rect->top) y = rect->top - target.bottom;
+            else y = 0;
+
+            distance = x * x + y * y;
+            if (distance < min_distance)
+            {
+                min_distance = distance;
+                nearest = monitor;
+            }
+        }
+    }
+
+    return found ? found : nearest;
+}
+
+static void map_point_raw_to_virt( struct desktop *desktop, int *x, int *y )
+{
+    int width_from, height_from, width_to, height_to;
+    rectangle_t rect = {*x, *y, *x + 1, *y + 1};
+    struct monitor_info *monitor;
+
+    if (!(monitor = get_monitor_from_rect( desktop->winstation, &rect, 1 ))) return;
+    width_to = monitor->virt.right - monitor->virt.left;
+    height_to = monitor->virt.bottom - monitor->virt.top;
+    width_from = monitor->raw.right - monitor->raw.left;
+    height_from = monitor->raw.bottom - monitor->raw.top;
+
+    *x = *x * 2 - (monitor->raw.left * 2 + width_from);
+    *x = (*x * width_to * 2 + width_from) / (width_from * 2);
+    *x = (*x + monitor->virt.left * 2 + width_to) / 2;
+
+    *y = *y * 2 - (monitor->raw.top * 2 + height_from);
+    *y = (*y * height_to * 2 + height_from) / (height_from * 2);
+    *y = (*y + monitor->virt.top * 2 + height_to) / 2;
+}
+
 /* get the per-monitor DPI for a window */
 static unsigned int get_monitor_dpi( struct window *win )
 {
@@ -499,10 +583,9 @@ struct process *get_top_window_owner( struct desktop *desktop )
 }
 
 /* get the top window size of a given desktop */
-void get_top_window_rectangle( struct desktop *desktop, rectangle_t *rect )
+void get_virtual_screen_rect( struct desktop *desktop, rectangle_t *rect, int is_raw )
 {
-    struct window *win = desktop->top_window;
-    *rect = win ? win->window_rect : empty_rect;
+    *rect = monitors_get_union_rect( desktop->winstation, is_raw );
 }
 
 /* post a message to the desktop window */
@@ -893,12 +976,14 @@ static int get_window_children_from_point( struct window *parent, int x, int y,
     return 1;
 }
 
-/* get handle of root of top-most window containing point */
+/* get handle of root of top-most window containing point (in absolute raw coords) */
 user_handle_t shallow_window_from_point( struct desktop *desktop, int x, int y )
 {
     struct window *ptr;
 
     if (!desktop->top_window) return 0;
+
+    map_point_raw_to_virt( desktop, &x, &y );
 
     LIST_FOR_EACH_ENTRY( ptr, &desktop->top_window->children, struct window, entry )
     {
@@ -910,12 +995,14 @@ user_handle_t shallow_window_from_point( struct desktop *desktop, int x, int y )
     return desktop->top_window->handle;
 }
 
-/* return thread of top-most window containing point (in absolute coords) */
+/* return thread of top-most window containing point (in absolute raw coords) */
 struct thread *window_thread_from_point( user_handle_t scope, int x, int y )
 {
     struct window *win = get_user_object( scope, USER_WINDOW );
 
     if (!win) return NULL;
+
+    map_point_raw_to_virt( win->desktop, &x, &y );
 
     screen_to_client( win, &x, &y, 0 );
     win = child_window_from_point( win, x, y );
@@ -2401,11 +2488,11 @@ DECL_HANDLER(get_window_tree)
 /* set the position and Z order of a window */
 DECL_HANDLER(set_window_pos)
 {
-    rectangle_t window_rect, client_rect, visible_rect, surface_rect, valid_rect;
+    rectangle_t window_rect, client_rect, visible_rect, surface_rect, valid_rect, old_window, old_client;
     const rectangle_t *extra_rects = get_req_data();
     struct window *previous = NULL;
     struct window *top, *win = get_window( req->handle );
-    unsigned int flags = req->swp_flags;
+    unsigned int flags = req->swp_flags, old_style;
 
     if (!win) return;
     if (!win->parent) flags |= SWP_NOZORDER;  /* no Z order for the desktop */
@@ -2470,8 +2557,14 @@ DECL_HANDLER(set_window_pos)
     if (win->paint_flags & PAINT_HAS_PIXEL_FORMAT) update_pixel_format_flags( win );
 
     win->monitor_dpi = req->monitor_dpi;
+    old_style = win->style;
+    old_window = win->window_rect;
+    old_client = win->client_rect;
     set_window_pos( win, previous, flags, &window_rect, &client_rect,
                     &visible_rect, &surface_rect, &valid_rect );
+    if ((win->style & old_style & WS_VISIBLE) && (memcmp( &old_client, &win->client_rect, sizeof(old_client) )
+        || memcmp( &old_window, &win->window_rect, sizeof(old_window) )))
+        update_cursor_pos( win->desktop );
 
     if (win->paint_flags & SET_WINPOS_LAYERED_WINDOW) validate_whole_window( win );
 

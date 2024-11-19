@@ -2637,14 +2637,18 @@ static BOOL process_hardware_message( MSG *msg, UINT hw_id, const struct hardwar
                                       HWND hwnd_filter, UINT first, UINT last, BOOL remove )
 {
     struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
+    RECT rect = {msg->pt.x, msg->pt.y, msg->pt.x, msg->pt.y};
     UINT context;
     BOOL ret = FALSE;
 
     thread_info->msg_source.deviceType = msg_data->source.device;
     thread_info->msg_source.originId   = msg_data->source.origin;
 
-    /* hardware messages are always in physical coords */
+    /* hardware messages are always in raw physical coords */
     context = set_thread_dpi_awareness_context( NTUSER_DPI_PER_MONITOR_AWARE );
+    rect = map_rect_raw_to_virt( rect, get_thread_dpi() );
+    msg->pt.x = rect.left;
+    msg->pt.y = rect.top;
 
     if (msg->message == WM_INPUT || msg->message == WM_INPUT_DEVICE_CHANGE)
         ret = process_rawinput_message( msg, hw_id, msg_data );
@@ -2725,7 +2729,7 @@ int peek_message( MSG *msg, const struct peek_message_filter *filter )
     {
         NTSTATUS res;
         size_t size = 0;
-        const message_data_t *msg_data = buffer;
+        const union message_data *msg_data = buffer;
         UINT wake_mask, signal_bits, wake_bits, changed_bits, clear_bits = 0;
 
         /* use the same logic as in server/queue.c get_message */
@@ -3316,7 +3320,7 @@ BOOL WINAPI NtUserGetMessage( MSG *msg, HWND hwnd, UINT first, UINT last )
 static BOOL put_message_in_queue( const struct send_message_info *info, size_t *reply_size )
 {
     struct packed_message data;
-    message_data_t msg_data;
+    union message_data msg_data;
     unsigned int res;
     int i;
     timeout_t timeout = TIMEOUT_INFINITE;
@@ -4366,10 +4370,10 @@ LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
         return scroll_bar_window_proc( hwnd, msg, wparam, lparam, ansi );
 
     case NtUserPopupMenuWndProc:
-        return popup_menu_window_proc( hwnd, msg, wparam, lparam );
+        return popup_menu_window_proc( hwnd, msg, wparam, lparam, ansi );
 
     case NtUserDesktopWindowProc:
-        return desktop_window_proc( hwnd, msg, wparam, lparam );
+        return desktop_window_proc( hwnd, msg, wparam, lparam, ansi );
 
     case NtUserDefWindowProc:
         return default_window_proc( hwnd, msg, wparam, lparam, ansi );
@@ -4425,6 +4429,9 @@ LRESULT WINAPI NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
 
     case NtUserSystemTrayCall:
         return system_tray_call( hwnd, msg, wparam, lparam, result_info );
+
+    case NtUserDragDropCall:
+        return drag_drop_call( hwnd, msg, wparam, lparam, result_info );
 
     default:
         FIXME( "%p %x %lx %lx %p %x %x\n", hwnd, msg, (long)wparam, lparam, result_info, (int)type, ansi );

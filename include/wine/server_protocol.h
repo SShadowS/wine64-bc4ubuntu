@@ -57,7 +57,7 @@ struct request_max_size
 
 
 
-typedef union
+union debug_event_data
 {
     int code;
     struct
@@ -109,7 +109,7 @@ typedef union
         int          __pad;
         mod_handle_t base;
     } unload_dll;
-} debug_event_t;
+};
 
 
 enum context_exec_space
@@ -260,7 +260,7 @@ typedef struct
 } rectangle_t;
 
 
-typedef struct
+struct async_data
 {
     obj_handle_t    handle;
     obj_handle_t    event;
@@ -268,7 +268,7 @@ typedef struct
     client_ptr_t    user;
     client_ptr_t    apc;
     apc_param_t     apc_context;
-} async_data_t;
+};
 
 
 
@@ -312,7 +312,7 @@ struct winevent_msg_data
 
 };
 
-typedef union
+union hw_input
 {
     int type;
     struct
@@ -342,15 +342,15 @@ typedef union
         lparam_t       lparam;
         struct hid_input hid;
     } hw;
-} hw_input_t;
+};
 
-typedef union
+union message_data
 {
     unsigned char            bytes[1];
     struct hardware_msg_data hardware;
     struct callback_msg_data callback;
     struct winevent_msg_data winevent;
-} message_data_t;
+};
 
 
 struct filesystem_event
@@ -435,7 +435,7 @@ struct object_type_info
 
 };
 
-enum select_op
+enum select_opcode
 {
     SELECT_NONE,
     SELECT_WAIT,
@@ -445,28 +445,28 @@ enum select_op
     SELECT_KEYED_EVENT_RELEASE
 };
 
-typedef union
+union select_op
 {
-    enum select_op op;
+    enum select_opcode op;
     struct
     {
-        enum select_op  op;
+        enum select_opcode op;
         obj_handle_t    handles[MAXIMUM_WAIT_OBJECTS];
         int             __pad;
     } wait;
     struct
     {
-        enum select_op  op;
+        enum select_opcode op;
         obj_handle_t    wait;
         obj_handle_t    signal;
     } signal_and_wait;
     struct
     {
-        enum select_op  op;
+        enum select_opcode op;
         obj_handle_t    handle;
         client_ptr_t    key;
     } keyed_event;
-} select_op_t;
+};
 
 enum apc_type
 {
@@ -488,18 +488,18 @@ enum apc_type
     APC_DUP_HANDLE
 };
 
-typedef struct
+struct user_apc
 {
     enum apc_type    type;
     int              __pad;
     client_ptr_t     func;
     apc_param_t      args[3];
-} user_apc_t;
+};
 
-typedef union
+union apc_call
 {
     enum apc_type type;
-    user_apc_t    user;
+    struct user_apc user;
     struct
     {
         enum apc_type    type;
@@ -620,9 +620,9 @@ typedef union
         unsigned int     attributes;
         unsigned int     options;
     } dup_handle;
-} apc_call_t;
+};
 
-typedef union
+union apc_result
 {
     enum apc_type type;
     struct
@@ -732,7 +732,7 @@ typedef union
         enum apc_type    type;
         unsigned int     status;
     } break_process;
-} apc_result_t;
+};
 
 enum irp_type
 {
@@ -748,7 +748,7 @@ enum irp_type
     IRP_CALL_CANCEL
 };
 
-typedef union
+union irp_params
 {
     enum irp_type        type;
     struct
@@ -816,7 +816,7 @@ typedef union
         int              __pad;
         client_ptr_t     irp;
     } cancel;
-} irp_params_t;
+};
 
 
 typedef struct
@@ -879,6 +879,17 @@ struct directory_entry
 
 
 };
+
+struct monitor_info
+{
+    rectangle_t raw;
+    rectangle_t virt;
+    unsigned int flags;
+    unsigned int dpi;
+};
+#define MONITOR_FLAG_PRIMARY  0x01
+#define MONITOR_FLAG_CLONE    0x02
+#define MONITOR_FLAG_INACTIVE 0x04
 
 
 
@@ -1332,7 +1343,7 @@ struct get_apc_result_request
 struct get_apc_result_reply
 {
     struct reply_header __header;
-    apc_result_t result;
+    union apc_result result;
 };
 
 
@@ -1377,6 +1388,21 @@ struct dup_handle_request
     char __pad_36[4];
 };
 struct dup_handle_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+
+struct allocate_reserve_object_request
+{
+    struct request_header __header;
+    int type;
+    /* VARARG(objattr,object_attributes); */
+};
+struct allocate_reserve_object_reply
 {
     struct reply_header __header;
     obj_handle_t handle;
@@ -1803,7 +1829,7 @@ struct flush_request
 {
     struct request_header __header;
     char __pad_12[4];
-    async_data_t   async;
+    struct async_data async;
 };
 struct flush_reply
 {
@@ -1831,7 +1857,7 @@ struct get_volume_info_request
 {
     struct request_header __header;
     obj_handle_t handle;
-    async_data_t async;
+    struct async_data async;
     unsigned int info_class;
     char __pad_60[4];
 };
@@ -1880,7 +1906,7 @@ struct recv_socket_request
 {
     struct request_header __header;
     int          oob;
-    async_data_t async;
+    struct async_data async;
     int          force_async;
     char __pad_60[4];
 };
@@ -1899,7 +1925,7 @@ struct send_socket_request
 {
     struct request_header __header;
     unsigned int flags;
-    async_data_t async;
+    struct async_data async;
 };
 struct send_socket_reply
 {
@@ -1990,7 +2016,7 @@ struct read_directory_changes_request
     unsigned int filter;
     int          subtree;
     int          want_data;
-    async_data_t async;
+    struct async_data async;
 };
 struct read_directory_changes_reply
 {
@@ -2944,7 +2970,7 @@ struct send_hardware_message_request
 {
     struct request_header __header;
     user_handle_t   win;
-    hw_input_t      input;
+    union hw_input  input;
     unsigned int    flags;
     /* VARARG(report,bytes); */
     char __pad_60[4];
@@ -3126,7 +3152,7 @@ struct register_async_request
 {
     struct request_header __header;
     int          type;
-    async_data_t async;
+    struct async_data async;
     int          count;
     char __pad_60[4];
 };
@@ -3190,7 +3216,7 @@ struct read_request
 {
     struct request_header __header;
     char __pad_12[4];
-    async_data_t   async;
+    struct async_data async;
     file_pos_t     pos;
 };
 struct read_reply
@@ -3207,7 +3233,7 @@ struct write_request
 {
     struct request_header __header;
     char __pad_12[4];
-    async_data_t   async;
+    struct async_data async;
     file_pos_t     pos;
     /* VARARG(data,bytes); */
 };
@@ -3226,7 +3252,7 @@ struct ioctl_request
 {
     struct request_header __header;
     ioctl_code_t   code;
-    async_data_t   async;
+    struct async_data async;
     /* VARARG(in_data,bytes); */
 };
 struct ioctl_reply
@@ -3821,6 +3847,19 @@ struct close_winstation_request
     obj_handle_t handle;
 };
 struct close_winstation_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct set_winstation_monitors_request
+{
+    struct request_header __header;
+    /* VARARG(infos,monitor_infos); */
+    char __pad_12[4];
+};
+struct set_winstation_monitors_reply
 {
     struct reply_header __header;
 };
@@ -5200,7 +5239,7 @@ struct get_next_device_request_request
 struct get_next_device_request_reply
 {
     struct reply_header __header;
-    irp_params_t params;
+    union irp_params params;
     obj_handle_t next;
     thread_id_t  client_tid;
     client_ptr_t client_thread;
@@ -5373,8 +5412,8 @@ struct add_completion_request
     apc_param_t   ckey;
     apc_param_t   cvalue;
     apc_param_t   information;
+    obj_handle_t  reserve_handle;
     unsigned int  status;
-    char __pad_44[4];
 };
 struct add_completion_reply
 {
@@ -5387,8 +5426,27 @@ struct remove_completion_request
 {
     struct request_header __header;
     obj_handle_t handle;
+    int          alertable;
+    char __pad_20[4];
 };
 struct remove_completion_reply
+{
+    struct reply_header __header;
+    apc_param_t   ckey;
+    apc_param_t   cvalue;
+    apc_param_t   information;
+    unsigned int  status;
+    obj_handle_t  wait_handle;
+};
+
+
+
+struct get_thread_completion_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct get_thread_completion_reply
 {
     struct reply_header __header;
     apc_param_t   ckey;
@@ -5837,6 +5895,7 @@ enum request
     REQ_close_handle,
     REQ_set_handle_info,
     REQ_dup_handle,
+    REQ_allocate_reserve_object,
     REQ_compare_objects,
     REQ_set_object_permanence,
     REQ_open_process,
@@ -5982,6 +6041,7 @@ enum request
     REQ_create_winstation,
     REQ_open_winstation,
     REQ_close_winstation,
+    REQ_set_winstation_monitors,
     REQ_get_process_winstation,
     REQ_set_process_winstation,
     REQ_enum_winstation,
@@ -6074,6 +6134,7 @@ enum request
     REQ_open_completion,
     REQ_add_completion,
     REQ_remove_completion,
+    REQ_get_thread_completion,
     REQ_query_completion,
     REQ_set_completion_info,
     REQ_add_fd_completion,
@@ -6132,6 +6193,7 @@ union generic_request
     struct close_handle_request close_handle_request;
     struct set_handle_info_request set_handle_info_request;
     struct dup_handle_request dup_handle_request;
+    struct allocate_reserve_object_request allocate_reserve_object_request;
     struct compare_objects_request compare_objects_request;
     struct set_object_permanence_request set_object_permanence_request;
     struct open_process_request open_process_request;
@@ -6277,6 +6339,7 @@ union generic_request
     struct create_winstation_request create_winstation_request;
     struct open_winstation_request open_winstation_request;
     struct close_winstation_request close_winstation_request;
+    struct set_winstation_monitors_request set_winstation_monitors_request;
     struct get_process_winstation_request get_process_winstation_request;
     struct set_process_winstation_request set_process_winstation_request;
     struct enum_winstation_request enum_winstation_request;
@@ -6369,6 +6432,7 @@ union generic_request
     struct open_completion_request open_completion_request;
     struct add_completion_request add_completion_request;
     struct remove_completion_request remove_completion_request;
+    struct get_thread_completion_request get_thread_completion_request;
     struct query_completion_request query_completion_request;
     struct set_completion_info_request set_completion_info_request;
     struct add_fd_completion_request add_fd_completion_request;
@@ -6425,6 +6489,7 @@ union generic_reply
     struct close_handle_reply close_handle_reply;
     struct set_handle_info_reply set_handle_info_reply;
     struct dup_handle_reply dup_handle_reply;
+    struct allocate_reserve_object_reply allocate_reserve_object_reply;
     struct compare_objects_reply compare_objects_reply;
     struct set_object_permanence_reply set_object_permanence_reply;
     struct open_process_reply open_process_reply;
@@ -6570,6 +6635,7 @@ union generic_reply
     struct create_winstation_reply create_winstation_reply;
     struct open_winstation_reply open_winstation_reply;
     struct close_winstation_reply close_winstation_reply;
+    struct set_winstation_monitors_reply set_winstation_monitors_reply;
     struct get_process_winstation_reply get_process_winstation_reply;
     struct set_process_winstation_reply set_process_winstation_reply;
     struct enum_winstation_reply enum_winstation_reply;
@@ -6662,6 +6728,7 @@ union generic_reply
     struct open_completion_reply open_completion_reply;
     struct add_completion_reply add_completion_reply;
     struct remove_completion_reply remove_completion_reply;
+    struct get_thread_completion_reply get_thread_completion_reply;
     struct query_completion_reply query_completion_reply;
     struct set_completion_info_reply set_completion_info_reply;
     struct add_fd_completion_reply add_fd_completion_reply;
@@ -6691,10 +6758,6 @@ union generic_reply
     struct set_keyboard_repeat_reply set_keyboard_repeat_reply;
 };
 
-/* ### protocol_version begin ### */
-
-#define SERVER_PROTOCOL_VERSION 842
-
-/* ### protocol_version end ### */
+#define SERVER_PROTOCOL_VERSION 848
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

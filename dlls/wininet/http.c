@@ -3886,26 +3886,23 @@ static DWORD HTTP_HttpQueryInfoW(http_request_t *request, DWORD dwInfoLevel,
     }
     else if (dwInfoLevel & HTTP_QUERY_FLAG_SYSTEMTIME && lpBuffer)
     {
-        time_t tmpTime;
-        struct tm tmpTM;
-        SYSTEMTIME *STHook;
+        SYSTEMTIME st;
 
-        tmpTime = ConvertTimeString(lphttpHdr->lpszValue);
-
-        tmpTM = *gmtime(&tmpTime);
-        STHook = (SYSTEMTIME *)lpBuffer;
-        STHook->wDay = tmpTM.tm_mday;
-        STHook->wHour = tmpTM.tm_hour;
-        STHook->wMilliseconds = 0;
-        STHook->wMinute = tmpTM.tm_min;
-        STHook->wDayOfWeek = tmpTM.tm_wday;
-        STHook->wMonth = tmpTM.tm_mon + 1;
-        STHook->wSecond = tmpTM.tm_sec;
-        STHook->wYear = 1900+tmpTM.tm_year;
-
-        TRACE(" returning time: %04d/%02d/%02d - %d - %02d:%02d:%02d.%02d\n",
-              STHook->wYear, STHook->wMonth, STHook->wDay, STHook->wDayOfWeek,
-              STHook->wHour, STHook->wMinute, STHook->wSecond, STHook->wMilliseconds);
+        if (!InternetTimeToSystemTimeW(lphttpHdr->lpszValue, &st, 0))
+        {
+            LeaveCriticalSection( &request->headers_section );
+            return ERROR_HTTP_INVALID_HEADER;
+        }
+        if (*lpdwBufferLength < sizeof(st))
+        {
+            *lpdwBufferLength = sizeof(st);
+            LeaveCriticalSection( &request->headers_section );
+            return ERROR_INSUFFICIENT_BUFFER;
+        }
+        TRACE(" returning time: %04u/%02u/%02u - %u - %02u:%02u:%02u.%02u\n",
+              st.wYear, st.wMonth, st.wDay, st.wDayOfWeek, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+        memcpy(lpBuffer, &st, sizeof(st));
+        *lpdwBufferLength = sizeof(st);
     }
     else if (lphttpHdr->lpszValue)
     {
@@ -4521,7 +4518,7 @@ static BOOL HTTP_ParseDateAsAsctime(LPCWSTR value, FILETIME *ft)
     /* asctime() doesn't report a timezone, but some web servers do, so accept
      * with or without GMT.
      */
-    if (*ptr && wcscmp(ptr, L"GMT"))
+    if (*ptr && (wcscmp(ptr, L"GMT") && wcscmp(ptr, L"UTC")))
     {
         ERR("unexpected timezone %s\n", debugstr_w(ptr));
         return FALSE;
@@ -4598,7 +4595,7 @@ static BOOL HTTP_ParseRfc1123Date(LPCWSTR value, FILETIME *ft)
     while (iswspace(*ptr))
         ptr++;
 
-    if (wcscmp(ptr, L"GMT"))
+    if (wcscmp(ptr, L"GMT") && wcscmp(ptr, L"UTC"))
     {
         ERR("unexpected time zone %s\n", debugstr_w(ptr));
         return FALSE;
@@ -4715,7 +4712,7 @@ static BOOL HTTP_ParseRfc850Date(LPCWSTR value, FILETIME *ft)
     while (iswspace(*ptr))
         ptr++;
 
-    if (wcscmp(ptr, L"GMT"))
+    if (wcscmp(ptr, L"GMT") && wcscmp(ptr, L"UTC"))
     {
         ERR("unexpected time zone %s\n", debugstr_w(ptr));
         return FALSE;

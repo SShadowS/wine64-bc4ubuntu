@@ -73,7 +73,7 @@ struct request_max_size
 
 
 /* debug event data */
-typedef union
+union debug_event_data
 {
     int code;   /* event code */
     struct
@@ -125,7 +125,7 @@ typedef union
         int          __pad;
         mod_handle_t base;       /* base address of the dll */
     } unload_dll;
-} debug_event_t;
+};
 
 
 enum context_exec_space
@@ -276,7 +276,7 @@ typedef struct
 } rectangle_t;
 
 /* structure for parameters of async I/O calls */
-typedef struct
+struct async_data
 {
     obj_handle_t    handle;        /* object to perform I/O on */
     obj_handle_t    event;         /* event to signal when done */
@@ -284,7 +284,7 @@ typedef struct
     client_ptr_t    user;          /* opaque user data containing callback pointer and async-specific data */
     client_ptr_t    apc;           /* user APC to call */
     apc_param_t     apc_context;   /* user APC context or completion value */
-} async_data_t;
+};
 
 /* structures for extra message data */
 
@@ -328,7 +328,7 @@ struct winevent_msg_data
     /* followed by module name if any */
 };
 
-typedef union
+union hw_input
 {
     int type;
     struct
@@ -358,15 +358,15 @@ typedef union
         lparam_t       lparam;  /* parameters */
         struct hid_input hid;   /* defined in ntuser.h */
     } hw;
-} hw_input_t;
+};
 
-typedef union
+union message_data
 {
     unsigned char            bytes[1];   /* raw data for sent messages */
     struct hardware_msg_data hardware;
     struct callback_msg_data callback;
     struct winevent_msg_data winevent;
-} message_data_t;
+};
 
 /* structure returned in filesystem events */
 struct filesystem_event
@@ -451,7 +451,7 @@ struct object_type_info
     /* VARARG(name,unicode_str); */
 };
 
-enum select_op
+enum select_opcode
 {
     SELECT_NONE,
     SELECT_WAIT,
@@ -461,28 +461,28 @@ enum select_op
     SELECT_KEYED_EVENT_RELEASE
 };
 
-typedef union
+union select_op
 {
-    enum select_op op;
+    enum select_opcode op;
     struct
     {
-        enum select_op  op;      /* SELECT_WAIT or SELECT_WAIT_ALL */
+        enum select_opcode op;   /* SELECT_WAIT or SELECT_WAIT_ALL */
         obj_handle_t    handles[MAXIMUM_WAIT_OBJECTS];
         int             __pad;
     } wait;
     struct
     {
-        enum select_op  op;      /* SELECT_SIGNAL_AND_WAIT */
+        enum select_opcode op;   /* SELECT_SIGNAL_AND_WAIT */
         obj_handle_t    wait;
         obj_handle_t    signal;  /* must be last in the structure so we can remove it on retries */
     } signal_and_wait;
     struct
     {
-        enum select_op  op;      /* SELECT_KEYED_EVENT_WAIT or SELECT_KEYED_EVENT_RELEASE */
+        enum select_opcode op;   /* SELECT_KEYED_EVENT_WAIT or SELECT_KEYED_EVENT_RELEASE */
         obj_handle_t    handle;
         client_ptr_t    key;
     } keyed_event;
-} select_op_t;
+};
 
 enum apc_type
 {
@@ -504,18 +504,18 @@ enum apc_type
     APC_DUP_HANDLE
 };
 
-typedef struct
+struct user_apc
 {
     enum apc_type    type;     /* APC_USER */
     int              __pad;
     client_ptr_t     func;     /* void (__stdcall *func)(ULONG_PTR,ULONG_PTR,ULONG_PTR); */
     apc_param_t      args[3];  /* arguments for user function */
-} user_apc_t;
+};
 
-typedef union
+union apc_call
 {
     enum apc_type type;
-    user_apc_t    user;
+    struct user_apc user;
     struct
     {
         enum apc_type    type;     /* APC_ASYNC_IO */
@@ -636,9 +636,9 @@ typedef union
         unsigned int     attributes;   /* object attributes */
         unsigned int     options;      /* duplicate options */
     } dup_handle;
-} apc_call_t;
+};
 
-typedef union
+union apc_result
 {
     enum apc_type type;
     struct
@@ -748,7 +748,7 @@ typedef union
         enum apc_type    type;      /* APC_BREAK_PROCESS */
         unsigned int     status;    /* status returned by call */
     } break_process;
-} apc_result_t;
+};
 
 enum irp_type
 {
@@ -764,7 +764,7 @@ enum irp_type
     IRP_CALL_CANCEL
 };
 
-typedef union
+union irp_params
 {
     enum irp_type        type;      /* irp call type */
     struct
@@ -832,7 +832,7 @@ typedef union
         int              __pad;
         client_ptr_t     irp;       /* opaque ptr for canceled irp */
     } cancel;
-} irp_params_t;
+};
 
 /* information about a PE image mapping, roughly equivalent to SECTION_IMAGE_INFORMATION */
 typedef struct
@@ -895,6 +895,17 @@ struct directory_entry
     /* VARARG(name,unicode_str,name_len); */
     /* VARARG(type,unicode_str,type_len); */
 };
+
+struct monitor_info
+{
+    rectangle_t raw;     /* host / physical position of the monitor rect */
+    rectangle_t virt;    /* client / virtual position of the monitor rect */
+    unsigned int flags;  /* MONITOR_FLAG_* flags for the monitor */
+    unsigned int dpi;    /* physical DPI for the monitor */
+};
+#define MONITOR_FLAG_PRIMARY  0x01
+#define MONITOR_FLAG_CLONE    0x02
+#define MONITOR_FLAG_INACTIVE 0x04
 
 /****************************************************************/
 /* shared session mapping structures */
@@ -1221,7 +1232,7 @@ typedef struct
 @REQ(get_apc_result)
     obj_handle_t handle;       /* handle to the APC */
 @REPLY
-    apc_result_t result;       /* result of the APC */
+    union apc_result result;   /* result of the APC */
 @END
 
 
@@ -1251,6 +1262,15 @@ typedef struct
     unsigned int options;      /* duplicate options */
 @REPLY
     obj_handle_t handle;       /* duplicated handle in dst process */
+@END
+
+
+/* Allocate a reserve object for pre-allocating memory for object types */
+@REQ(allocate_reserve_object)
+    int type;                   /* reserve object type. See MEMORY_RESERVE_OBJECT_TYPE */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;        /* reserve object handle */
 @END
 
 
@@ -1519,7 +1539,7 @@ enum server_fd_type
 
 /* Flush a file buffers */
 @REQ(flush)
-    async_data_t   async;       /* async I/O parameters */
+    struct async_data async;    /* async I/O parameters */
 @REPLY
     obj_handle_t event;         /* event set when finished */
 @END
@@ -1535,7 +1555,7 @@ enum server_fd_type
 /* Query volume information */
 @REQ(get_volume_info)
     obj_handle_t handle;        /* handle to the file */
-    async_data_t async;         /* async I/O parameters */
+    struct async_data async;    /* async I/O parameters */
     unsigned int info_class;    /* queried information class */
 @REPLY
     obj_handle_t wait;          /* handle to wait on for blocking read */
@@ -1566,7 +1586,7 @@ enum server_fd_type
 /* Perform a recv on a socket */
 @REQ(recv_socket)
     int          oob;           /* are we receiving OOB data? */
-    async_data_t async;         /* async I/O parameters */
+    struct async_data async;    /* async I/O parameters */
     int          force_async;   /* Force asynchronous mode? */
 @REPLY
     obj_handle_t wait;          /* handle to wait on for blocking recv */
@@ -1578,7 +1598,7 @@ enum server_fd_type
 /* Perform a send on a socket */
 @REQ(send_socket)
     unsigned int flags;         /* SERVER_SOCKET_IO_* flags */
-    async_data_t async;         /* async I/O parameters */
+    struct async_data async;    /* async I/O parameters */
 @REPLY
     obj_handle_t wait;          /* handle to wait on for blocking send */
     unsigned int options;       /* device open options */
@@ -1636,7 +1656,7 @@ enum server_fd_type
     unsigned int filter;        /* notification filter */
     int          subtree;       /* watch the subtree? */
     int          want_data;     /* flag indicating whether change data should be collected */
-    async_data_t async;         /* async I/O parameters */
+    struct async_data async;    /* async I/O parameters */
 @END
 
 
@@ -2221,7 +2241,7 @@ enum message_type
 /* Send a hardware message to a thread queue */
 @REQ(send_hardware_message)
     user_handle_t   win;       /* window handle */
-    hw_input_t      input;     /* input data */
+    union hw_input  input;     /* input data */
     unsigned int    flags;     /* flags (see below) */
     VARARG(report,bytes);      /* HID report data */
 @REPLY
@@ -2335,7 +2355,7 @@ enum message_type
 /* Create an async I/O */
 @REQ(register_async)
     int          type;          /* type of queue to look after */
-    async_data_t async;         /* async I/O parameters */
+    struct async_data async;    /* async I/O parameters */
     int          count;         /* count - usually # of bytes to be read/written */
 @END
 #define ASYNC_TYPE_READ  0x01
@@ -2372,7 +2392,7 @@ enum message_type
 
 /* Perform a read on a file object */
 @REQ(read)
-    async_data_t   async;         /* async I/O parameters */
+    struct async_data async;      /* async I/O parameters */
     file_pos_t     pos;           /* read position */
 @REPLY
     obj_handle_t   wait;          /* handle to wait on for blocking read */
@@ -2383,7 +2403,7 @@ enum message_type
 
 /* Perform a write on a file object */
 @REQ(write)
-    async_data_t   async;         /* async I/O parameters */
+    struct async_data async;      /* async I/O parameters */
     file_pos_t     pos;           /* write position */
     VARARG(data,bytes);           /* write data */
 @REPLY
@@ -2396,7 +2416,7 @@ enum message_type
 /* Perform an ioctl on a file */
 @REQ(ioctl)
     ioctl_code_t   code;          /* ioctl code */
-    async_data_t   async;         /* async I/O parameters */
+    struct async_data async;      /* async I/O parameters */
     VARARG(in_data,bytes);        /* ioctl input data */
 @REPLY
     obj_handle_t   wait;          /* handle to wait on for blocking ioctl */
@@ -2790,6 +2810,12 @@ enum coords_relative
 /* Close a window station */
 @REQ(close_winstation)
     obj_handle_t handle;          /* handle to the window station */
+@END
+
+
+/* Update the process current window station monitors */
+@REQ(set_winstation_monitors)
+    VARARG(infos,monitor_infos);  /* window station monitors */
 @END
 
 
@@ -3669,7 +3695,7 @@ typedef union
     data_size_t  result;          /* IOSB result of the previous irp */
     VARARG(data,bytes);           /* output data of the previous irp */
 @REPLY
-    irp_params_t params;          /* irp parameters */
+    union irp_params params;      /* irp parameters */
     obj_handle_t next;            /* handle to the next irp */
     thread_id_t  client_tid;      /* tid of thread calling irp */
     client_ptr_t client_thread;   /* pointer to thread object of calling irp */
@@ -3777,6 +3803,7 @@ typedef union
     apc_param_t   ckey;           /* completion key */
     apc_param_t   cvalue;         /* completion value */
     apc_param_t   information;    /* IO_STATUS_BLOCK Information */
+    obj_handle_t  reserve_handle; /* completion reserve object handle */
     unsigned int  status;         /* completion result */
 @END
 
@@ -3784,6 +3811,18 @@ typedef union
 /* get completion from completion port queue */
 @REQ(remove_completion)
     obj_handle_t handle;          /* port handle */
+    int          alertable;       /* completion wait is alertable */
+@REPLY
+    apc_param_t   ckey;           /* completion key */
+    apc_param_t   cvalue;         /* completion value */
+    apc_param_t   information;    /* IO_STATUS_BLOCK Information */
+    unsigned int  status;         /* completion result */
+    obj_handle_t  wait_handle;    /* handle to completion wait internal object */
+@END
+
+
+/* get completion after successful wait */
+@REQ(get_thread_completion)
 @REPLY
     apc_param_t   ckey;           /* completion key */
     apc_param_t   cvalue;         /* completion value */

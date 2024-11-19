@@ -116,6 +116,9 @@ struct GroupData
   /* View of remote data */
   LPVOID lpRemoteData;
   DWORD  dwRemoteDataSize;
+
+  /* SP data on a per player basis */
+  LPVOID lpSPPlayerData;
 };
 typedef struct GroupData  GroupData;
 typedef struct GroupData* lpGroupData;
@@ -128,10 +131,17 @@ struct GroupList
 };
 typedef struct GroupList* lpGroupList;
 
+typedef DWORD FN_COPY_MESSAGE( DPMSG_GENERIC *genericDst, DPMSG_GENERIC *genericSrc,
+                               DWORD genericSize, BOOL ansi );
+
 struct DPMSG
 {
   DPQ_ENTRY( DPMSG ) msgs;
+  DPID fromId;
+  DPID toId;
   DPMSG_GENERIC* msg;
+  FN_COPY_MESSAGE *copyMessage;
+  DWORD genericSize;
 };
 typedef struct DPMSG* LPDPMSG;
 
@@ -158,11 +168,12 @@ typedef struct tagDirectPlay2Data
 
   lpGroupData lpSysGroup; /* System group with _everything_ in it */
 
+  DPID systemPlayerId;
+
   LPDPSESSIONDESC2 lpSessionDesc;
 
   /* I/O Msg queues */
   DPQ_HEAD( DPMSG ) receiveMsgs; /* Msg receive queue */
-  DPQ_HEAD( DPMSG ) sendMsgs;    /* Msg send pending queue */
 
   /* Information about the service provider active on this connection */
   SPINITDATA spData;
@@ -193,19 +204,23 @@ typedef struct IDirectPlayImpl
   IDirectPlay3 IDirectPlay3_iface;
   IDirectPlay4A IDirectPlay4A_iface;
   IDirectPlay4  IDirectPlay4_iface;
-  LONG numIfaces; /* "in use interfaces" refcount */
-  LONG ref, ref2A, ref2, ref3A, ref3, ref4A, ref4;
+  LONG ref;
   CRITICAL_SECTION lock;
   DirectPlay2Data *dp2;
 } IDirectPlayImpl;
 
-HRESULT DP_HandleMessage( IDirectPlayImpl *This, const void *lpMessageBody,
-        DWORD  dwMessageBodySize, const void *lpMessageHeader, WORD wCommandId, WORD wVersion,
+HRESULT DP_HandleMessage( IDirectPlayImpl *This, void *messageBody,
+        DWORD  dwMessageBodySize, void *messageHeader, WORD wCommandId, WORD wVersion,
         void **lplpReply, DWORD *lpdwMsgSize );
 DPSESSIONDESC2 *DP_DuplicateSessionDesc( const DPSESSIONDESC2 *src, BOOL dstAnsi, BOOL srcAnsi );
+HRESULT DP_HandleGameMessage( IDirectPlayImpl *This, void *messageBody, DWORD messageBodySize,
+                              DPID fromId, DPID toId );
 HRESULT DP_CreatePlayer( IDirectPlayImpl *This, void *msgHeader, DPID *lpid, DPNAME *lpName,
                          void *data, DWORD dataSize, void *spData, DWORD spDataSize, DWORD dwFlags,
-                         HANDLE hEvent, BOOL bAnsi );
+                         HANDLE hEvent, struct PlayerData **playerData, BOOL bAnsi );
+HRESULT DP_CreateGroup( IDirectPlayImpl *This, void *msgHeader, const DPID *lpid,
+                        const DPNAME *lpName, void *data, DWORD dataSize, DWORD dwFlags,
+                        DPID idParent, BOOL bAnsi );
 
 /* DP SP external interfaces into DirectPlay */
 extern HRESULT DP_GetSPPlayerData( IDirectPlayImpl *lpDP, DPID idPlayer, void **lplpData );
