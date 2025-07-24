@@ -4763,8 +4763,31 @@ sub build_locale_data()
             $senglanguage .= " ($engscript)" if $engscript;
             $snativelangname .= " ($nativescript)" if $nativescript;
         }
-        my $sengdisplayname = $neutral ? $senglanguage : "$senglanguage ($sengcountry)";
-        my $snativedisplayname = $neutral ? $snativelangname : "$snativelangname ($snativectryname)";
+        # Extract variant from locale name (e.g., "valencia" from "ca-ES-valencia")
+        # Only consider it a variant if it's not a known script code and not a 2-letter territory
+        my $variant = "";
+        if ($sname && $sname =~ /^[^-]+-([^-]+)-(.+)$/) {
+            my $second_part = $1;
+            my $third_part = $2;
+            # If second part is a 2-letter territory and third part is not a 2-letter territory,
+            # then third part is likely a variant
+            if (length($second_part) == 2 && length($third_part) > 2 && $third_part !~ /^[A-Z][a-z]{3}$/) {
+                $variant = $third_part;
+            }
+        }
+        
+        # Build display name with variant
+        my $sengdisplayname;
+        my $snativedisplayname;
+        if ($variant) {
+            # Capitalize first letter of variant for display
+            my $display_variant = ucfirst($variant);
+            $sengdisplayname = $neutral ? "$senglanguage ($display_variant)" : "$senglanguage ($sengcountry, $display_variant)";
+            $snativedisplayname = $neutral ? "$snativelangname ($display_variant)" : "$snativelangname ($snativectryname, $display_variant)";
+        } else {
+            $sengdisplayname = $neutral ? $senglanguage : "$senglanguage ($sengcountry)";
+            $snativedisplayname = $neutral ? $snativelangname : "$snativelangname ($snativectryname)";
+        }
         $sengdisplayname =~ s/\) \(/, /;
         $snativedisplayname =~ s/\) \(/, /;
         my $sscripts = locale_entry( $loc, "sscripts", $script ) || xml_query( $suppl, "/supplementalData/languageData/language[\@type='$language' and not(\@alt)]/\@scripts" );
