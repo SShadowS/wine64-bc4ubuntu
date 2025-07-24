@@ -98,9 +98,30 @@ cd ../wine-32
 sudo make install
 ```
 
-### Quick Rebuild for Development
+### Automated Build Scripts
 
-**Use this when you've made small changes and want to test quickly:**
+**Use the provided build scripts for convenient development:**
+
+```bash
+# Quick incremental build and install (recommended for most changes)
+./build-wine.sh
+
+# Clean build (when you want to ensure a fresh build)
+./build-wine.sh --clean
+
+# Full reconfigure and build (when configure options change)
+./build-wine.sh --full
+
+# Quick build without install (for compilation testing)
+./build-wine.sh --quick
+
+# Test the build
+./test-build.sh
+```
+
+### Manual Quick Rebuild
+
+**Use this when you prefer manual control:**
 
 ```bash
 cd ~/wine-source/build/wine-64
