@@ -33,6 +33,92 @@ Common configure options:
 
 Run `./configure --help` for all options.
 
+## Production Wine Build Workflow
+
+### One-Time System Setup
+
+**IMPORTANT**: This setup only needs to be done once per system.
+
+```bash
+# Add 32-bit architecture support
+sudo dpkg --add-architecture i386
+
+# Install core build dependencies
+sudo apt update && sudo apt install -y \
+  build-essential gcc-multilib g++-multilib flex bison \
+  mingw-w64 ccache git
+
+# Install Wine development libraries (64-bit)
+sudo apt install -y \
+  libx11-dev libfreetype-dev libxcursor-dev libxi-dev libxext-dev \
+  libxrandr-dev libxinerama-dev libxcomposite-dev libxrender-dev \
+  libxfixes-dev libxmu-dev libxxf86vm-dev libxss-dev libdbus-1-dev \
+  libglib2.0-dev libcups2-dev libgphoto2-dev libsane-dev \
+  libkrb5-dev libv4l-dev libpulse-dev libudev-dev libjpeg-dev \
+  libpng-dev libtiff-dev libosmesa6-dev libgl1-mesa-dev \
+  libglu1-mesa-dev libncurses-dev libpcap-dev libgnutls28-dev \
+  libvulkan-dev libwayland-dev
+
+# Install Wine development libraries (32-bit)
+sudo apt install -y \
+  libx11-dev:i386 libfreetype6-dev:i386 libgl1-mesa-dev:i386 \
+  libglu1-mesa-dev:i386 libncurses-dev:i386 libxcursor-dev:i386 \
+  libxi-dev:i386 libxrandr-dev:i386 libxcomposite-dev:i386 \
+  libosmesa6-dev:i386 libdbus-1-dev:i386 libudev-dev:i386 \
+  libv4l-dev:i386 libkrb5-dev:i386 libgnutls28-dev:i386 \
+  libxxf86vm-dev:i386 libxinerama-dev:i386
+```
+
+### Development Build Process
+
+**Use this workflow when testing changes or rebuilding Wine:**
+
+```bash
+cd ~/wine-source
+
+# Create build directories (if they don't exist)
+mkdir -p build/wine-64 build/wine-32
+
+# Build 64-bit Wine
+cd build/wine-64
+../../configure CC="ccache gcc" CROSSCC="ccache i686-w64-mingw32-gcc" --enable-win64
+make clean  # Only needed if rebuilding
+make -j$(nproc)
+
+# Build 32-bit Wine (with 64-bit support)
+cd ../wine-32
+../../configure CC="ccache gcc" CROSSCC="ccache i686-w64-mingw32-gcc" --with-wine64=../wine-64
+make clean  # Only needed if rebuilding  
+make -j$(nproc)
+
+# Install both architectures
+cd ../wine-64
+sudo make install
+cd ../wine-32
+sudo make install
+```
+
+### Quick Rebuild for Development
+
+**Use this when you've made small changes and want to test quickly:**
+
+```bash
+cd ~/wine-source/build/wine-64
+make -j$(nproc)
+sudo make install
+
+cd ../wine-32
+make -j$(nproc)
+sudo make install
+```
+
+### Performance Notes
+
+- **ccache**: Dramatically speeds up rebuilds by caching compilation
+- **Parallel builds**: `-j$(nproc)` uses all CPU cores for faster compilation
+- **Separate build dirs**: Keeps source tree clean and allows easy cleanup
+- **Dual architecture**: Provides full Windows compatibility (32-bit and 64-bit)
+
 ## Development Commands
 
 ### Testing
@@ -143,6 +229,76 @@ Example: `CreateFileW()` → path translation → Unix `open()` → Windows hand
 - `configure.ac` - Autoconf configuration
 - `server/protocol.def` - Server protocol definition
 - `VERSION` - Wine version information
+
+## Business Central Server Testing
+
+### Wine Prefix Setup for Business Central
+
+**Create a dedicated Wine prefix for Business Central testing:**
+
+```bash
+# Create BC testing environment
+WINEPREFIX=~/.local/share/wineprefixes/bc WINEARCH=win64 wineboot -i
+
+# Install .NET Framework 4.8 (required for BC Server)
+winetricks arch=64 prefix=bc dotnet48 -q
+
+# Install PowerShell 5.1 (if needed for BC management)
+winetricks arch=64 prefix=bc ps51
+```
+
+### Testing Locale Enumeration Fix
+
+**Test the duplicate culture fix with a simple program:**
+
+```bash
+# Compile and run locale enumeration test
+cd /tmp
+i686-w64-mingw32-gcc -o test_locale_enum.exe test_locale_enum.c -lkernel32
+WINEPREFIX=~/.local/share/wineprefixes/bc wine test_locale_enum.exe
+```
+
+**Expected behavior after fix:**
+- No duplicate "Catalan (Spain)" entries
+- `ca-ES` shows as "Catalan (Spain)"
+- `ca-ES-valencia` shows as "Catalan (Spain, Valencia)"
+
+### Business Central Server Testing
+
+**Test BC Server startup after Wine improvements:**
+
+```bash
+# Set environment for BC testing
+export WINEPREFIX=~/.local/share/wineprefixes/bc
+export WINEARCH=win64
+
+# Run BC Server (adjust path as needed)
+wine "C:/Program Files/Microsoft Dynamics 365 Business Central/260/Service/Microsoft.Dynamics.Nav.Server.exe"
+
+# Monitor for culture enumeration errors
+WINEDEBUG=+dll,+locale wine "BC Server executable"
+```
+
+**Common BC Server testing scenarios:**
+1. **Startup test**: Verify server starts without culture exceptions
+2. **HTTP API test**: Test web service functionality 
+3. **Database connectivity**: Test SQL Server connections through Wine
+4. **Performance monitoring**: Check for memory leaks or crashes
+
+### Debug Channels for BC Testing
+
+```bash
+# Locale and culture debugging
+WINEDEBUG=+locale,+dll wine program.exe
+
+# HTTP API debugging  
+WINEDEBUG=+httpapi,+wininet wine program.exe
+
+# Comprehensive debugging
+WINEDEBUG=+dll,+locale,+httpapi,+ole,+rpc wine program.exe
+
+# Common debug channels: +all, +dll, +reg, +file, +process, +locale, +httpapi
+```
 
 ## Debugging
 
