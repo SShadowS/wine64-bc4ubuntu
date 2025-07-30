@@ -18,62 +18,80 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "user_private.h"
 #include "controls.h"
 #include "winver.h"
-#include "wine/server.h"
 #include "wine/asm.h"
 #include "wine/exception.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 
+#define MAX_ATOM_LEN 255 /* from dlls/kernel32/atom.c */
+
+static const char *debugstr_us( const UNICODE_STRING *us )
+{
+    if (!us) return "<null>";
+    return debugstr_wn( us->Buffer, us->Length / sizeof(WCHAR) );
+}
+
+#ifdef __i386__
+/* Some apps pass a non-stdcall proc to EnumChildWindows,
+ * so we need a small assembly wrapper to call the proc.
+ */
+extern LRESULT enum_callback_wrapper( WNDENUMPROC proc, HWND hwnd, LPARAM lparam );
+__ASM_GLOBAL_FUNC( enum_callback_wrapper,
+    "pushl %ebp\n\t"
+    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+    __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+    "movl %esp,%ebp\n\t"
+    __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+    "pushl 16(%ebp)\n\t"
+    "pushl 12(%ebp)\n\t"
+    "call *8(%ebp)\n\t"
+    "leave\n\t"
+    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+    __ASM_CFI(".cfi_same_value %ebp\n\t")
+    "ret" )
+#else
+static inline LRESULT enum_callback_wrapper( WNDENUMPROC proc, HWND hwnd, LPARAM lparam )
+{
+    return proc( hwnd, lparam );
+}
+#endif /* __i386__ */
 
 /*******************************************************************
- *           list_window_children
- *
- * Build an array of the children of a given window. The array must be
- * freed with HeapFree. Returns NULL when no windows are found.
+ *           enum_windows
  */
-static HWND *list_window_children( HDESK desktop, HWND hwnd, UNICODE_STRING *class, DWORD tid )
+static BOOL enum_windows( HDESK desktop, HWND hwnd, DWORD tid, BOOL children,
+                          WNDENUMPROC proc, LPARAM param )
 {
     HWND *list;
-    int i, size = 128;
-    ATOM atom = class ? get_int_atom_value( class ) : 0;
-
-    /* empty class is not the same as NULL class */
-    if (!atom && class && !class->Length) return NULL;
+    ULONG i, size = 128;
+    BOOL ret = !children;  /* EnumChildWindows returns FALSE on empty list, the others TRUE */
+    NTSTATUS status;
 
     for (;;)
     {
-        int count = 0;
-
-        if (!(list = HeapAlloc( GetProcessHeap(), 0, size * sizeof(HWND) ))) break;
-
-        SERVER_START_REQ( get_window_children )
-        {
-            req->desktop = wine_server_obj_handle( desktop );
-            req->parent = wine_server_user_handle( hwnd );
-            req->tid = tid;
-            req->atom = atom;
-            if (!atom && class) wine_server_add_data( req, class->Buffer, class->Length );
-            wine_server_set_reply( req, list, (size-1) * sizeof(user_handle_t) );
-            if (!wine_server_call( req )) count = reply->count;
-        }
-        SERVER_END_REQ;
-        if (count && count < size)
-        {
-            /* start from the end since HWND is potentially larger than user_handle_t */
-            for (i = count - 1; i >= 0; i--)
-                list[i] = wine_server_ptr_handle( ((user_handle_t *)list)[i] );
-            list[count] = 0;
-            return list;
-        }
+        if (!(list = HeapAlloc( GetProcessHeap(), 0, size * sizeof(HWND) ))) return FALSE;
+        status = NtUserBuildHwndList( desktop, hwnd, children, TRUE, tid, size, list, &size );
+        if (!status) break;
         HeapFree( GetProcessHeap(), 0, list );
-        if (!count) break;
-        size = count + 1;  /* restart with a large enough buffer */
+        if (status != STATUS_BUFFER_TOO_SMALL)
+        {
+            SetLastError( RtlNtStatusToDosError( status ));
+            return FALSE;
+        }
     }
-    return NULL;
+    for (i = 0; i < size && list[i] != HWND_BOTTOM; i++)
+    {
+        if (!IsWindow( list[i] )) continue;
+        if (!(ret = enum_callback_wrapper( proc, list[i], param ))) break;
+    }
+    HeapFree( GetProcessHeap(), 0, list );
+    return ret;
 }
 
 
@@ -136,20 +154,6 @@ HWND WIN_IsCurrentThread( HWND hwnd )
 HWND WIN_GetFullHandle( HWND hwnd )
 {
     return UlongToHandle( NtUserCallHwnd( hwnd, NtUserGetFullWindowHandle ));
-}
-
-
-/***********************************************************************
- *           WIN_SetStyle
- *
- * Change the style of a window.
- */
-ULONG WIN_SetStyle( HWND hwnd, ULONG set_bits, ULONG clear_bits )
-{
-    /* FIXME: Use SetWindowLong or move callers to win32u instead.
-     * We use STYLESTRUCT to pass params, but meaning of its field does not match our usage. */
-    STYLESTRUCT style = { .styleNew = set_bits, .styleOld = clear_bits };
-    return NtUserCallHwndParam( hwnd, (UINT_PTR)&style, NtUserSetWindowStyle );
 }
 
 
@@ -278,14 +282,23 @@ static BOOL is_default_coord( int x )
  */
 HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module, BOOL unicode )
 {
-    UNICODE_STRING class, window_name = {0};
+    WCHAR nameW[MAX_ATOM_LEN + 1];
+    UNICODE_STRING class = RTL_CONSTANT_STRING(nameW), version, window_name = {0};
     HWND hwnd, top_child = 0;
     MDICREATESTRUCTW mdi_cs;
     WNDCLASSEXW info;
     WCHAR name_buf[8];
     HMENU menu;
 
-    if (!get_class_info( module, className, &info, &class, FALSE )) return FALSE;
+    init_class_name( &class, className );
+    get_class_version( &class, &version, TRUE );
+
+    if (!NtUserGetClassInfoEx( module, &class, &info, NULL, FALSE ))
+    {
+        TRACE( "%s %p -> not found\n", debugstr_us(&class), module );
+        SetLastError( ERROR_CLASS_DOES_NOT_EXIST );
+        return FALSE;
+    }
 
     TRACE("%s %s%s%s ex=%08lx style=%08lx %d,%d %dx%d parent=%p menu=%p inst=%p params=%p\n",
           unicode ? debugstr_w(cs->lpszName) : debugstr_a((LPCSTR)cs->lpszName),
@@ -581,15 +594,6 @@ HWND WINAPI GetDesktopWindow(void)
 }
 
 
-/*******************************************************************
- *		EnableWindow (USER32.@)
- */
-BOOL WINAPI EnableWindow( HWND hwnd, BOOL enable )
-{
-    return NtUserEnableWindow( hwnd, enable );
-}
-
-
 /***********************************************************************
  *		IsWindowEnabled (USER32.@)
  */
@@ -860,15 +864,6 @@ BOOL WINAPI AnimateWindow( HWND hwnd, DWORD time, DWORD flags )
 
 
 /***********************************************************************
- *           BeginDeferWindowPos (USER32.@)
- */
-HDWP WINAPI BeginDeferWindowPos( INT count )
-{
-    return NtUserBeginDeferWindowPos( count );
-}
-
-
-/***********************************************************************
  *           DeferWindowPos (USER32.@)
  */
 HDWP WINAPI DeferWindowPos( HDWP hdwp, HWND hwnd, HWND after, INT x, INT y,
@@ -884,15 +879,6 @@ HDWP WINAPI DeferWindowPos( HDWP hdwp, HWND hwnd, HWND after, INT x, INT y,
 BOOL WINAPI EndDeferWindowPos( HDWP hdwp )
 {
     return NtUserEndDeferWindowPosEx( hdwp, FALSE );
-}
-
-
-/***********************************************************************
- *           ArrangeIconicWindows (USER32.@)
- */
-UINT WINAPI ArrangeIconicWindows( HWND parent )
-{
-    return NtUserArrangeIconicWindows( parent );
 }
 
 
@@ -1274,6 +1260,17 @@ BOOL WINAPI IsWindowVisible( HWND hwnd )
 }
 
 
+/***********************************************************************
+ *		IsWindowArranged (USER32.@)
+ */
+BOOL WINAPI IsWindowArranged( HWND hwnd )
+{
+    FIXME( "hwnd %p stub.\n", hwnd );
+
+    return FALSE;
+}
+
+
 /*******************************************************************
  *		GetTopWindow (USER32.@)
  */
@@ -1294,28 +1291,11 @@ HWND WINAPI GetWindow( HWND hwnd, UINT rel )
 
 
 /*******************************************************************
- *		ShowOwnedPopups (USER32.@)
- */
-BOOL WINAPI ShowOwnedPopups( HWND owner, BOOL show )
-{
-    return NtUserShowOwnedPopups( owner, show );
-}
-
-
-/*******************************************************************
  *		GetLastActivePopup (USER32.@)
  */
 HWND WINAPI GetLastActivePopup( HWND hwnd )
 {
-    HWND retval = hwnd;
-
-    SERVER_START_REQ( get_window_info )
-    {
-        req->handle = wine_server_user_handle( hwnd );
-        if (!wine_server_call_err( req )) retval = wine_server_ptr_handle( reply->last_active );
-    }
-    SERVER_END_REQ;
-    return retval;
+    return NtUserGetLastActivePopup( hwnd );
 }
 
 
@@ -1327,12 +1307,22 @@ HWND WINAPI GetLastActivePopup( HWND hwnd )
  */
 HWND *WIN_ListChildren( HWND hwnd )
 {
-    if (!hwnd)
+    HWND *list;
+    ULONG size = 128;
+    NTSTATUS status;
+
+    if (!(hwnd = GetWindow( hwnd, GW_CHILD ))) return NULL;
+
+    for (;;)
     {
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        return NULL;
+        if (!(list = HeapAlloc( GetProcessHeap(), 0, size * sizeof(HWND) ))) return NULL;
+        status = NtUserBuildHwndList( 0, hwnd, FALSE, TRUE, 0, size, list, &size );
+        if (!status && size > 1) break;
+        HeapFree( GetProcessHeap(), 0, list );
+        if (status != STATUS_BUFFER_TOO_SMALL) return NULL;
     }
-    return list_window_children( 0, hwnd, NULL, 0 );
+    list[size - 1] = 0;
+    return list;
 }
 
 
@@ -1341,26 +1331,7 @@ HWND *WIN_ListChildren( HWND hwnd )
  */
 BOOL WINAPI EnumWindows( WNDENUMPROC lpEnumFunc, LPARAM lParam )
 {
-    HWND *list;
-    BOOL ret = TRUE;
-    int i;
-
-    /* We have to build a list of all windows first, to avoid */
-    /* unpleasant side-effects, for instance if the callback */
-    /* function changes the Z-order of the windows.          */
-
-    if (!(list = WIN_ListChildren( GetDesktopWindow() ))) return TRUE;
-
-    /* Now call the callback function for every window */
-
-    for (i = 0; list[i]; i++)
-    {
-        /* Make sure that the window still exists */
-        if (!IsWindow( list[i] )) continue;
-        if (!(ret = lpEnumFunc( list[i], lParam ))) break;
-    }
-    HeapFree( GetProcessHeap(), 0, list );
-    return ret;
+    return enum_windows( 0, 0, 0, FALSE, lpEnumFunc, lParam );
 }
 
 
@@ -1369,18 +1340,7 @@ BOOL WINAPI EnumWindows( WNDENUMPROC lpEnumFunc, LPARAM lParam )
  */
 BOOL WINAPI EnumThreadWindows( DWORD id, WNDENUMPROC func, LPARAM lParam )
 {
-    HWND *list;
-    int i;
-    BOOL ret = TRUE;
-
-    if (!(list = list_window_children( 0, GetDesktopWindow(), NULL, id ))) return TRUE;
-
-    /* Now call the callback function for every window */
-
-    for (i = 0; list[i]; i++)
-        if (!(ret = func( list[i], lParam ))) break;
-    HeapFree( GetProcessHeap(), 0, list );
-    return ret;
+    return enum_windows( 0, 0, id, FALSE, func, lParam );
 }
 
 
@@ -1389,70 +1349,7 @@ BOOL WINAPI EnumThreadWindows( DWORD id, WNDENUMPROC func, LPARAM lParam )
  */
 BOOL WINAPI EnumDesktopWindows( HDESK desktop, WNDENUMPROC func, LPARAM lparam )
 {
-    HWND *list;
-    int i;
-
-    if (!(list = list_window_children( desktop, 0, NULL, 0 ))) return TRUE;
-
-    for (i = 0; list[i]; i++)
-        if (!func( list[i], lparam )) break;
-    HeapFree( GetProcessHeap(), 0, list );
-    return TRUE;
-}
-
-
-#ifdef __i386__
-/* Some apps pass a non-stdcall proc to EnumChildWindows,
- * so we need a small assembly wrapper to call the proc.
- */
-extern LRESULT enum_callback_wrapper( WNDENUMPROC proc, HWND hwnd, LPARAM lparam );
-__ASM_GLOBAL_FUNC( enum_callback_wrapper,
-    "pushl %ebp\n\t"
-    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-    __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
-    "movl %esp,%ebp\n\t"
-    __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
-    "pushl 16(%ebp)\n\t"
-    "pushl 12(%ebp)\n\t"
-    "call *8(%ebp)\n\t"
-    "leave\n\t"
-    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
-    __ASM_CFI(".cfi_same_value %ebp\n\t")
-    "ret" )
-#else
-static inline LRESULT enum_callback_wrapper( WNDENUMPROC proc, HWND hwnd, LPARAM lparam )
-{
-    return proc( hwnd, lparam );
-}
-#endif /* __i386__ */
-
-/**********************************************************************
- *           WIN_EnumChildWindows
- *
- * Helper function for EnumChildWindows().
- */
-static BOOL WIN_EnumChildWindows( HWND *list, WNDENUMPROC func, LPARAM lParam )
-{
-    HWND *childList;
-    BOOL ret = FALSE;
-
-    for ( ; *list; list++)
-    {
-        /* Make sure that the window still exists */
-        if (!IsWindow( *list )) continue;
-        /* Build children list first */
-        childList = WIN_ListChildren( *list );
-
-        ret = enum_callback_wrapper( func, *list, lParam );
-
-        if (childList)
-        {
-            if (ret) ret = WIN_EnumChildWindows( childList, func, lParam );
-            HeapFree( GetProcessHeap(), 0, childList );
-        }
-        if (!ret) return FALSE;
-    }
-    return TRUE;
+    return enum_windows( desktop, 0, 0, FALSE, func, lparam );
 }
 
 
@@ -1461,13 +1358,7 @@ static BOOL WIN_EnumChildWindows( HWND *list, WNDENUMPROC func, LPARAM lParam )
  */
 BOOL WINAPI EnumChildWindows( HWND parent, WNDENUMPROC func, LPARAM lParam )
 {
-    HWND *list;
-    BOOL ret;
-
-    if (!(list = WIN_ListChildren( parent ))) return FALSE;
-    ret = WIN_EnumChildWindows( list, func, lParam );
-    HeapFree( GetProcessHeap(), 0, list );
-    return ret;
+    return enum_windows( 0, parent, 0, TRUE, func, lParam );
 }
 
 
@@ -1504,24 +1395,6 @@ BOOL WINAPI FlashWindow( HWND hWnd, BOOL bInvert )
     finfo.dwTimeout = 0;
     finfo.hwnd = hWnd;
     return NtUserFlashWindowEx( &finfo );
-}
-
-
-/*******************************************************************
- *		GetWindowContextHelpId (USER32.@)
- */
-DWORD WINAPI GetWindowContextHelpId( HWND hwnd )
-{
-    return NtUserGetWindowContextHelpId( hwnd );
-}
-
-
-/*******************************************************************
- *		SetWindowContextHelpId (USER32.@)
- */
-BOOL WINAPI SetWindowContextHelpId( HWND hwnd, DWORD id )
-{
-    return NtUserSetWindowContextHelpId( hwnd, id );
 }
 
 
@@ -1633,12 +1506,7 @@ BOOL WINAPI UpdateLayeredWindow( HWND hwnd, HDC hdcDst, POINT *pptDst, SIZE *psi
  */
 BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
 {
-    if (!layout)
-    {
-        SetLastError( ERROR_NOACCESS );
-        return FALSE;
-    }
-    *layout = NtUserGetProcessDefaultLayout();
+    if (!NtUserGetProcessDefaultLayout( layout )) return FALSE;
     if (*layout == ~0u)
     {
         WCHAR *str, buffer[MAX_PATH];
@@ -1675,17 +1543,6 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
 }
 
 
-/******************************************************************************
- *                    SetProcessDefaultLayout [USER32.@]
- *
- * Sets the default layout for parentless windows.
- */
-BOOL WINAPI SetProcessDefaultLayout( DWORD layout )
-{
-    return NtUserSetProcessDefaultLayout( layout );
-}
-
-
 /***********************************************************************
  *           UpdateWindow (USER32.@)
  */
@@ -1698,21 +1555,6 @@ BOOL WINAPI UpdateWindow( HWND hwnd )
     }
 
     return NtUserRedrawWindow( hwnd, NULL, 0, RDW_UPDATENOW | RDW_ALLCHILDREN );
-}
-
-
-/***********************************************************************
- *           ValidateRgn (USER32.@)
- */
-BOOL WINAPI ValidateRgn( HWND hwnd, HRGN hrgn )
-{
-    if (!hwnd)
-    {
-        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
-        return FALSE;
-    }
-
-    return NtUserRedrawWindow( hwnd, NULL, hrgn, RDW_VALIDATE );
 }
 
 
@@ -1817,5 +1659,15 @@ BOOL WINAPI SetWindowCompositionAttribute(HWND hwnd, void *data)
 {
     FIXME("(%p, %p): stub\n", hwnd, data);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+/**********************************************************************
+ *              SetProcessLaunchForegroundPolicy (USER32.@)
+ */
+BOOL WINAPI SetProcessLaunchForegroundPolicy(DWORD pid, DWORD flags)
+{
+    FIXME("(%lu %lu): stub\n", pid, flags);
+    SetLastError(ERROR_ACCESS_DENIED);
     return FALSE;
 }

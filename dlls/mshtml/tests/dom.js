@@ -147,9 +147,18 @@ async_test("iframe_location", function() {
     iframe.onload = function() {
         ok(iframe.contentWindow.location.pathname === "/emptyfile",
            "path = " + iframe.contentWindow.location.pathname);
+        ok(iframe.contentWindow.Image !== undefined, "Image is undefined");
+        ok(iframe.contentWindow.VBArray !== undefined, "VBArray is undefined");
+        iframe.contentWindow.Image = undefined;
+        iframe.contentWindow.VBArray = undefined;
+        iframe.contentWindow.foobar = 1234;
         iframe.onload = function () {
             ok(iframe.contentWindow.location.pathname === "/empty/file",
                "path = " + iframe.contentWindow.location.pathname);
+            ok(iframe.contentWindow.Image !== undefined, "Image is undefined (2)");
+            ok(iframe.contentWindow.VBArray !== undefined, "VBArray is undefined (2)");
+            ok(!Object.prototype.hasOwnProperty.call(iframe.contentWindow, "foobar"),
+               "contentWindow has foobar");
             next_test();
         }
         iframe.src = "empty/file";
@@ -376,6 +385,26 @@ sync_test("document_owner", function() {
     ok(node.ownerDocument === document, "text.ownerDocument = " + node.ownerDocument);
 });
 
+sync_test("document_style_props", function() {
+    document.body.innerHTML = '<a href="#"></a>';
+    var r, elem = document.getElementsByTagName("a")[0];
+    todo_wine.
+    ok(document.linkColor === "#0000ff", "default linkColor = " + document.linkColor);
+
+    document.linkColor = "#deadb8";
+    ok(document.linkColor === "#deadb8", "linkColor = " + document.linkColor);
+    r = window.getComputedStyle(elem).color;
+    ok(r === "rgb(222, 173, 184)", "style color = " + r);
+
+    ok(document.vLinkColor === undefined, "default vLinkColor = " + document.vLinkColor);
+    document.vLinkColor = "#b8dead";
+    ok(document.vLinkColor === "#b8dead", "vLinkColor = " + document.vLinkColor);
+
+    ok(document.aLinkColor === undefined, "default aLinkColor = " + document.aLinkColor);
+    document.aLinkColor = "#deb8ad";
+    ok(document.aLinkColor === "#deb8ad", "aLinkColor = " + document.aLinkColor);
+});
+
 sync_test("style_properties", function() {
     document.body.innerHTML = '<div>test</div><svg></svg>';
     var elem = document.body.firstChild;
@@ -470,12 +499,35 @@ sync_test("style_properties", function() {
     try {
         current_style.zIndex = 1;
         ok(false, "expected exception");
-    }catch(e) {}
+    }catch(e) {
+        todo_wine.
+        ok(e.name === "NoModificationAllowedError", "setting current_style.zIndex threw " + e.name);
+    }
 
     try {
         computed_style.zIndex = 1;
         ok(false, "expected exception");
-    }catch(e) {}
+    }catch(e) {
+        todo_wine.
+        ok(e.name === "NoModificationAllowedError", "setting computed_style.zIndex threw " + e.name);
+    }
+
+    /* prop not found in any IHTMLCurrentStyle* interfaces, but exposed from common CSSStyleDeclarationPrototype */
+    try {
+        current_style.perspective = 1;
+        ok(false, "expected exception");
+    }catch(e) {
+        todo_wine.
+        ok(e.name === "NoModificationAllowedError", "setting current_style.perspective threw " + e.name);
+    }
+
+    try {
+        computed_style.perspective = 1;
+        ok(false, "expected exception");
+    }catch(e) {
+        todo_wine.
+        ok(e.name === "NoModificationAllowedError", "setting computed_style.perspective threw " + e.name);
+    }
 
     elem = elem.nextSibling;
     computed_style = window.getComputedStyle(elem);
@@ -987,4 +1039,17 @@ sync_test("importNode", function() {
     ok(node.parentNode === null, "node.parentNode = " + node.parentNode);
     ok(node2.hasChildNodes() === false, "node2 has child nodes");
     ok(node2.parentNode === null, "node2.parentNode = " + node2.parentNode);
+});
+
+sync_test("attributeNode", function() {
+    document.body.innerHTML = '<div id="test" attr="wine"></div>';
+    var elem = document.getElementById("test");
+    var attr = elem.attributes[0];
+
+    ok(attr.ownerDocument === document, "ownerDocument = " + attr.ownerDocument);
+    ok(attr.ownerElement === elem, "ownerElement = " + attr.ownerElement);
+
+    attr = document.createAttribute("id");
+    ok(attr.ownerDocument === document, "detached attr ownerDocument = " + attr.ownerDocument);
+    ok(attr.ownerElement === null, "detached attr ownerElement = " + attr.ownerElement);
 });

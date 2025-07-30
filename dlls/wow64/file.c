@@ -414,6 +414,26 @@ NTSTATUS WINAPI wow64_NtFlushBuffersFile( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtFlushBuffersFileEx
+ */
+NTSTATUS WINAPI wow64_NtFlushBuffersFileEx( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    ULONG flags = get_ulong( &args );
+    void *params = get_ptr( &args );
+    ULONG size = get_ulong( &args );
+    IO_STATUS_BLOCK32 *io32 = get_ptr( &args );
+
+    IO_STATUS_BLOCK io;
+    NTSTATUS status;
+
+    status = NtFlushBuffersFileEx( handle, flags, params, size, iosb_32to64( &io, io32 ) );
+    put_iosb( io32, &io );
+    return status;
+}
+
+
+/**********************************************************************
  *           wow64_NtFsControlFile
  */
 NTSTATUS WINAPI wow64_NtFsControlFile( UINT *args )
@@ -731,7 +751,11 @@ NTSTATUS WINAPI wow64_NtRemoveIoCompletionEx( UINT *args )
 
     NTSTATUS status;
     ULONG i;
-    FILE_IO_COMPLETION_INFORMATION *info = Wow64AllocateTemp( count * sizeof(*info) );
+    FILE_IO_COMPLETION_INFORMATION *info;
+
+    if (!count) return STATUS_INVALID_PARAMETER;
+
+    info = Wow64AllocateTemp( count * sizeof(*info) );
 
     status = NtRemoveIoCompletionEx( handle, info, count, written, timeout, alertable );
     for (i = 0; i < *written; i++)
@@ -930,33 +954,4 @@ NTSTATUS WINAPI wow64_NtWriteFileGather( UINT *args )
                                 iosb_32to64( &io, io32 ), segments, len, offset, key );
     put_iosb( io32, &io );
     return status;
-}
-
-
-/**********************************************************************
- *           wow64_wine_nt_to_unix_file_name
- */
-NTSTATUS WINAPI wow64_wine_nt_to_unix_file_name( UINT *args )
-{
-    OBJECT_ATTRIBUTES32 *attr32 = get_ptr( &args );
-    char *nameA = get_ptr( &args );
-    ULONG *size = get_ptr( &args );
-    UINT disposition = get_ulong( &args );
-
-    struct object_attr64 attr;
-
-    return wine_nt_to_unix_file_name( objattr_32to64_redirect( &attr, attr32 ), nameA, size, disposition );
-}
-
-
-/**********************************************************************
- *           wow64_wine_unix_to_nt_file_name
- */
-NTSTATUS WINAPI wow64_wine_unix_to_nt_file_name( UINT *args )
-{
-    const char *name = get_ptr( &args );
-    WCHAR *buffer = get_ptr( &args );
-    ULONG *size = get_ptr( &args );
-
-    return wine_unix_to_nt_file_name( name, buffer, size );
 }

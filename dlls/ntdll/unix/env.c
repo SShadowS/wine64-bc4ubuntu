@@ -78,6 +78,8 @@ WCHAR **main_wargv = NULL;
 
 static LCID user_lcid, system_lcid;
 static LANGID user_ui_language;
+static WCHAR *nt_build_dir;
+static WCHAR *nt_data_dir;
 
 static char system_locale[LOCALE_NAME_MAX_LENGTH];
 static char user_locale[LOCALE_NAME_MAX_LENGTH];
@@ -147,11 +149,12 @@ static void *read_nls_file( const char *name )
 
 static NTSTATUS open_nls_data_file( const char *path, const WCHAR *sysdir, HANDLE *file )
 {
-    NTSTATUS status = STATUS_OBJECT_NAME_NOT_FOUND;
+    NTSTATUS status;
+    IO_STATUS_BLOCK io;
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING valueW;
     WCHAR buffer[64];
-    char *p, *ntpath;
+    char *p;
 
     wcscpy( buffer, system_dir );
     p = strrchr( path, '/' ) + 1;
@@ -163,11 +166,7 @@ static NTSTATUS open_nls_data_file( const char *path, const WCHAR *sysdir, HANDL
                              FILE_OPEN, FILE_SYNCHRONOUS_IO_ALERT, NULL, 0 );
     if (status != STATUS_NO_SUCH_FILE) return status;
 
-    if ((status = nt_to_unix_file_name( &attr, &ntpath, FILE_OPEN ))) return status;
-    status = open_unix_file( file, ntpath, GENERIC_READ, &attr, 0, FILE_SHARE_READ,
-                             FILE_OPEN, FILE_SYNCHRONOUS_IO_ALERT, NULL, 0 );
-    free( ntpath );
-    return status;
+    return NtOpenFile( file, GENERIC_READ, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
 }
 
 static NTSTATUS get_nls_section_name( UINT type, UINT id, WCHAR name[32] )
@@ -271,6 +270,7 @@ static const struct { const char *name; UINT cp; } charset_names[] =
     { "ISO88599", 28599 },
     { "KOI8R", 20866 },
     { "KOI8U", 21866 },
+    { "SHIFTJIS", 932 },
     { "SJIS", 932 },
     { "TIS620", 28601 },
     { "UTF8", CP_UTF8 }
@@ -469,18 +469,18 @@ int ntdll_wcsnicmp( const WCHAR *str1, const WCHAR *str2, int n )
 /***********************************************************************
  *           ntdll_get_build_dir  (ntdll.so)
  */
-const char *ntdll_get_build_dir(void)
+const WCHAR *ntdll_get_build_dir(void)
 {
-    return build_dir;
+    return nt_build_dir;
 }
 
 
 /***********************************************************************
  *           ntdll_get_data_dir  (ntdll.so)
  */
-const char *ntdll_get_data_dir(void)
+const WCHAR *ntdll_get_data_dir(void)
 {
-    return data_dir;
+    return nt_data_dir;
 }
 
 
@@ -1041,7 +1041,7 @@ static void add_path_var( WCHAR **env, SIZE_T *pos, SIZE_T *size, const char *na
 {
     WCHAR *nt_name = NULL;
 
-    if (path && unix_to_nt_file_name( path, &nt_name )) return;
+    if (path && unix_to_nt_file_name( path, &nt_name, FILE_OPEN )) return;
     append_envW( env, pos, size, name, nt_name );
     free( nt_name );
 }
@@ -1057,7 +1057,7 @@ static void add_system_dll_path_var( WCHAR **env, SIZE_T *pos, SIZE_T *size )
     {
         WCHAR *nt_name = NULL;
 
-        if (!unix_to_nt_file_name( system_dll_paths[i], &nt_name ))
+        if (!unix_to_nt_file_name( system_dll_paths[i], &nt_name, FILE_OPEN ))
         {
             size_t len = wcslen( nt_name );
             path = realloc( path, (path_len + len + 1) * sizeof(WCHAR) );
@@ -1084,14 +1084,17 @@ static void add_system_dll_path_var( WCHAR **env, SIZE_T *pos, SIZE_T *size )
 static void add_dynamic_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
 {
     const char *overrides = getenv( "WINEDLLOVERRIDES" );
-    const char *wineloader = getenv( "WINELOADER" );
     unsigned int i;
     char str[22];
 
-    add_path_var( env, pos, size, "WINEDATADIR", data_dir );
+    if (build_dir) unix_to_nt_file_name( build_dir, &nt_build_dir, FILE_OPEN );
+    if (data_dir) unix_to_nt_file_name( data_dir, &nt_data_dir, FILE_OPEN );
+
+    append_envW( env, pos, size, "WINEBUILDDIR", nt_build_dir );
+    append_envW( env, pos, size, "WINEDATADIR", nt_data_dir );
     add_path_var( env, pos, size, "WINEHOMEDIR", home_dir );
-    add_path_var( env, pos, size, "WINEBUILDDIR", build_dir );
     add_path_var( env, pos, size, "WINECONFIGDIR", config_dir );
+    add_path_var( env, pos, size, "WINELOADER", wineloader );
     for (i = 0; dll_paths[i]; i++)
     {
         snprintf( str, sizeof(str), "WINEDLLDIR%u", i );
@@ -1100,7 +1103,6 @@ static void add_dynamic_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
     snprintf( str, sizeof(str), "WINEDLLDIR%u", i );
     append_envW( env, pos, size, str, NULL );
     add_system_dll_path_var( env, pos, size );
-    append_envA( env, pos, size, "WINELOADER", wineloader );
     append_envA( env, pos, size, "WINEUSERNAME", user_name );
     append_envA( env, pos, size, "WINEDLLOVERRIDES", overrides );
     if (unix_cp.CodePage != CP_UTF8)
@@ -1476,7 +1478,7 @@ static WCHAR *get_initial_directory(void)
 
     if (pwd)
     {
-        if (!unix_to_nt_file_name( pwd, &ret ))
+        if (!unix_to_nt_file_name( pwd, &ret, FILE_OPEN ))
         {
             ULONG len = wcslen( ret );
             if (len && ret[len - 1] != '\\')
@@ -1620,6 +1622,7 @@ static void run_wineboot( WCHAR *env, SIZE_T size )
         return;
     }
 
+    virtual_init_user_shared_data();
     env[size] = 0;
     params.Flags           = PROCESS_PARAMS_FLAG_NORMALIZED;
     params.Environment     = env;
@@ -1638,18 +1641,9 @@ static void run_wineboot( WCHAR *env, SIZE_T size )
 
     wine_server_fd_to_handle( 2, GENERIC_WRITE | SYNCHRONIZE, OBJ_INHERIT, &params.hStdError );
 
-    if (NtCurrentTeb64() && !NtCurrentTeb64()->TlsSlots[WOW64_TLS_FILESYSREDIR])
-    {
-        NtCurrentTeb64()->TlsSlots[WOW64_TLS_FILESYSREDIR] = TRUE;
-        status = NtCreateUserProcess( &process, &thread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,
-                                      NULL, NULL, 0, THREAD_CREATE_FLAGS_CREATE_SUSPENDED, &params,
-                                      &create_info, &ps_attr );
-        NtCurrentTeb64()->TlsSlots[WOW64_TLS_FILESYSREDIR] = FALSE;
-    }
-    else
-        status = NtCreateUserProcess( &process, &thread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,
-                                      NULL, NULL, 0, THREAD_CREATE_FLAGS_CREATE_SUSPENDED, &params,
-                                      &create_info, &ps_attr );
+    status = NtCreateUserProcess( &process, &thread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,
+                                  NULL, NULL, 0, THREAD_CREATE_FLAGS_CREATE_SUSPENDED, &params,
+                                  &create_info, &ps_attr );
     NtClose( params.hStdError );
 
     if (status)
@@ -1684,6 +1678,30 @@ static inline void copy_unicode_string( WCHAR **src, WCHAR **dst, UNICODE_STRING
 static inline void put_unicode_string( WCHAR *src, WCHAR **dst, UNICODE_STRING *str )
 {
     copy_unicode_string( &src, dst, str, wcslen(src) * sizeof(WCHAR) );
+}
+
+static void copy_dos_path_string( WCHAR **src, WCHAR **dst, UNICODE_STRING *str,
+                                  UNICODE_STRING *nt_str, UINT len )
+{
+    /* copy the original string into nt_str */
+    nt_str->Buffer = malloc( len + sizeof(WCHAR) );
+    memcpy( nt_str->Buffer, *src, len );
+    nt_str->Buffer[len / sizeof(WCHAR)] = 0;
+    nt_str->Length = len;
+    nt_str->MaximumLength = len + sizeof(WCHAR);
+
+    if (len > 5 * sizeof(WCHAR) && (*src)[5] == ':') /* skip the \??\ prefix */
+    {
+        *src += 4;
+        len -= 4 * sizeof(WCHAR);
+        copy_unicode_string( src, dst, str, len );
+    }
+    else
+    {
+        WCHAR *ptr = *dst;
+        copy_unicode_string( src, dst, str, len );
+        ptr[1] = '\\'; /* change \??\ to \\?\ */
+    }
 }
 
 static inline WCHAR *get_dos_path( WCHAR *nt_path )
@@ -1869,7 +1887,7 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module )
     peb->ProcessParameters          = params;
     peb->OSMajorVersion             = 10;
     peb->OSMinorVersion             = 0;
-    peb->OSBuildNumber              = 19043;
+    peb->OSBuildNumber              = 19045;
     peb->OSPlatformId               = VER_PLATFORM_WIN32_NT;
     peb->ImageSubSystem             = main_image_info.SubSystemType;
     peb->ImageSubSystemMajorVersion = main_image_info.MajorSubsystemVersion;
@@ -1932,10 +1950,13 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     static const WCHAR pathW[] = {'P','A','T','H'};
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
     SIZE_T size, env_pos, env_size;
-    WCHAR *dst, *image, *cmdline, *path, *bootstrap;
+    WCHAR *dst, *cmdline, *path, *bootstrap;
     WCHAR *env = get_initial_environment( &env_pos, &env_size );
     WCHAR *curdir = get_initial_directory();
+    UNICODE_STRING nt_name;
     NTSTATUS status;
+
+    if (NtCurrentTeb64()) NtCurrentTeb64()->TlsSlots[WOW64_TLS_FILESYSREDIR] = TRUE;
 
     /* store the initial PATH value */
     path = get_env_var( env, env_pos, pathW, 4 );
@@ -1956,8 +1977,17 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     add_registry_environment( &env, &env_pos, &env_size );
     env[env_pos++] = 0;
 
-    status = load_main_exe( NULL, main_argv[1], curdir, 0, &image, module );
-    if (!status)
+    get_full_path( main_argv[1], curdir, &nt_name );
+    status = load_main_exe( &nt_name, 0, module );
+    /* fail only if the file contained an explicit path */
+    if (status == STATUS_DLL_NOT_FOUND &&
+        (strpbrk( main_argv[1], "/\\" ) || (main_argv[1][0] && main_argv[1][1] == ':')))
+    {
+        MESSAGE( "wine: failed to open %s\n", debugstr_a(main_argv[1]) );
+        NtTerminateProcess( GetCurrentProcess(), status );
+    }
+
+    if (NT_SUCCESS(status))
     {
         char *loader;
 
@@ -1973,14 +2003,18 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     if (status)  /* try launching it through start.exe */
     {
         static const char *args[] = { "start.exe", "/exec" };
-        free( image );
+        free( nt_name.Buffer );
         if (*module) NtUnmapViewOfSection( GetCurrentProcess(), *module );
-        load_start_exe( &image, module );
+        load_start_exe( &nt_name, module );
         prepend_argv( args, 2 );
     }
-    else rebuild_argv();
+    else
+    {
+        rebuild_argv();
+        if (NtCurrentTeb64()) NtCurrentTeb64()->TlsSlots[WOW64_TLS_FILESYSREDIR] = FALSE;
+    }
 
-    main_wargv = build_wargv( get_dos_path( image ));
+    main_wargv = build_wargv( get_dos_path( nt_name.Buffer ));
     cmdline = build_command_line( main_wargv );
 
     TRACE( "image %s cmdline %s dir %s\n",
@@ -2011,7 +2045,7 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
     put_unicode_string( main_wargv[0], &dst, &params->ImagePathName );
     put_unicode_string( cmdline, &dst, &params->CommandLine );
     put_unicode_string( main_wargv[0], &dst, &params->WindowTitle );
-    free( image );
+    free( nt_name.Buffer );
     free( cmdline );
     free( curdir );
 
@@ -2031,12 +2065,13 @@ static RTL_USER_PROCESS_PARAMETERS *build_initial_params( void **module )
  */
 void init_startup_info(void)
 {
-    WCHAR *src, *dst, *env, *image;
+    WCHAR *src, *dst, *env;
     void *module = NULL;
     unsigned int status;
     SIZE_T size, info_size, env_size, env_pos;
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
-    startup_info_t *info;
+    struct startup_info_data *info;
+    UNICODE_STRING nt_name;
     USHORT machine;
 
     if (!startup_info_size)
@@ -2110,7 +2145,7 @@ void init_startup_info(void)
     dst = params->CurrentDirectory.DosPath.Buffer + MAX_PATH;
 
     if (info->dllpath_len) copy_unicode_string( &src, &dst, &params->DllPath, info->dllpath_len );
-    copy_unicode_string( &src, &dst, &params->ImagePathName, info->imagepath_len );
+    copy_dos_path_string( &src, &dst, &params->ImagePathName, &nt_name, info->imagepath_len );
     copy_unicode_string( &src, &dst, &params->CommandLine, info->cmdline_len );
     copy_unicode_string( &src, &dst, &params->WindowTitle, info->title_len );
     copy_unicode_string( &src, &dst, &params->Desktop, info->desktop_len );
@@ -2132,16 +2167,15 @@ void init_startup_info(void)
     free( env );
     free( info );
 
-    status = load_main_exe( params->ImagePathName.Buffer, NULL, params->CommandLine.Buffer,
-                            machine, &image, &module );
+    status = load_main_exe( &nt_name, machine, &module );
     if (!NT_SUCCESS(status))
     {
-        MESSAGE( "wine: failed to start %s\n", debugstr_us(&params->ImagePathName) );
+        MESSAGE( "wine: failed to start %s: %x\n", debugstr_us(&params->ImagePathName), status );
         NtTerminateProcess( GetCurrentProcess(), status );
     }
     rebuild_argv();
-    main_wargv = build_wargv( get_dos_path( image ));
-    free( image );
+    main_wargv = build_wargv( params->ImagePathName.Buffer );
+    free( nt_name.Buffer );
     init_peb( params, module );
 }
 
@@ -2161,20 +2195,16 @@ static BOOL is_console_handle( HANDLE handle )
  */
 void *create_startup_info( const UNICODE_STRING *nt_image, ULONG process_flags,
                            const RTL_USER_PROCESS_PARAMETERS *params,
-                           const pe_image_info_t *pe_info, DWORD *info_size )
+                           const struct pe_image_info *pe_info, DWORD *info_size )
 {
-    startup_info_t *info;
-    UNICODE_STRING dos_image = *nt_image;
+    struct startup_info_data *info;
     DWORD size;
     void *ptr;
-
-    dos_image.Buffer = get_dos_path( nt_image->Buffer );
-    dos_image.Length = nt_image->Length - (dos_image.Buffer - nt_image->Buffer) * sizeof(WCHAR);
 
     size = sizeof(*info);
     size += params->CurrentDirectory.DosPath.Length;
     size += params->DllPath.Length;
-    size += dos_image.Length;
+    size += nt_image->Length;
     size += params->CommandLine.Length;
     size += params->WindowTitle.Length;
     size += params->Desktop.Length;
@@ -2213,7 +2243,7 @@ void *create_startup_info( const UNICODE_STRING *nt_image, ULONG process_flags,
     ptr = info + 1;
     info->curdir_len = append_string( &ptr, params, &params->CurrentDirectory.DosPath );
     info->dllpath_len = append_string( &ptr, params, &params->DllPath );
-    info->imagepath_len = append_string( &ptr, params, &dos_image );
+    info->imagepath_len = append_string( &ptr, params, nt_image );
     info->cmdline_len = append_string( &ptr, params, &params->CommandLine );
     info->title_len = append_string( &ptr, params, &params->WindowTitle );
     info->desktop_len = append_string( &ptr, params, &params->Desktop );

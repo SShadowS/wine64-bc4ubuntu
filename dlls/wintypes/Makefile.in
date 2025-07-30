@@ -3,6 +3,8 @@ IMPORTLIB = wintypes
 IMPORTS   = combase
 
 SOURCES = \
+	buffer.c \
 	classes.idl \
 	main.c \
+	storage.c \
 	wintypes_private.idl

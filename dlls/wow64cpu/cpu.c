@@ -31,7 +31,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wow);
 
-#include "pshpack1.h"
+#pragma pack(push,1)
 struct thunk_32to64
 {
     BYTE  ljmp;   /* jump far, absolute indirect */
@@ -45,7 +45,7 @@ struct thunk_opcodes
     struct thunk_32to64 syscall_thunk;
     struct thunk_32to64 unix_thunk;
 };
-#include "poppack.h"
+#pragma pack(pop)
 
 static BYTE DECLSPEC_ALIGN(4096) code_buffer[0x1000];
 
@@ -255,6 +255,7 @@ __ASM_GLOBAL_FUNC( unix_call_32to64,
                    "movl 12(%r14),%edx\n\t"     /* code */
                    "movl 16(%r14),%r8d\n\t"     /* args */
                    "callq *__wine_unix_call_dispatcher(%rip)\n\t"
+                   "movl %eax,0xb0(%r13)\n\t"   /* context->Eax */
                    "btrl $0,-4(%r13)\n\t"       /* cpu->Flags & WOW64_CPURESERVED_FLAG_RESET_STATE */
                    "jc .Lsyscall_32to64_return\n\t"
                    "movl 0xb8(%r13),%edx\n\t"   /* context->Eip */

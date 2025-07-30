@@ -120,14 +120,14 @@ enum context_exec_space
 };
 
 
-typedef struct
+struct context_data
 {
     unsigned int     machine;
     unsigned int     flags;
     union
     {
         struct { unsigned int eip, ebp, esp, eflags, cs, ss; } i386_regs;
-        struct { unsigned __int64 rip, rbp, rsp;
+        struct { unsigned __int64 rip, rsp;
                  unsigned int cs, ss, flags, __pad; } x86_64_regs;
         struct { unsigned int sp, lr, pc, cpsr; } arm_regs;
         struct { unsigned __int64 sp, pc, pstate; } arm64_regs;
@@ -135,7 +135,7 @@ typedef struct
     union
     {
         struct { unsigned int eax, ebx, ecx, edx, esi, edi; } i386_regs;
-        struct { unsigned __int64 rax,rbx, rcx, rdx, rsi, rdi,
+        struct { unsigned __int64 rax, rbx, rcx, rdx, rbp, rsi, rdi,
                                   r8, r9, r10, r11, r12, r13, r14, r15; } x86_64_regs;
         struct { unsigned int r[13]; } arm_regs;
         struct { unsigned __int64 x[31]; } arm64_regs;
@@ -172,7 +172,7 @@ typedef struct
     {
         struct { struct { unsigned __int64 low, high; } ymm_high[16]; } regs;
     } ymm;
-} context_t;
+};
 
 #define SERVER_CTX_CONTROL            0x01
 #define SERVER_CTX_INTEGER            0x02
@@ -206,7 +206,7 @@ typedef __int64 timeout_t;
 typedef __int64 abstime_t;
 
 
-typedef struct
+struct startup_info_data
 {
     unsigned int debug_flags;
     unsigned int console_flags;
@@ -240,24 +240,24 @@ typedef struct
 
 
 
-} startup_info_t;
+};
 
 
-typedef struct
+struct property_data
 {
     atom_t         atom;
     int            string;
     lparam_t       data;
-} property_data_t;
+};
 
 
-typedef struct
+struct rectangle
 {
     int  left;
     int  top;
     int  right;
     int  bottom;
-} rectangle_t;
+};
 
 
 struct async_data
@@ -389,13 +389,13 @@ struct sid
     unsigned int  sub_auth[15];
 };
 
-typedef struct
+struct generic_map
 {
     unsigned int read;
     unsigned int write;
     unsigned int exec;
     unsigned int all;
-} generic_map_t;
+};
 
 #define MAX_ACL_LEN 65535
 
@@ -431,7 +431,7 @@ struct object_type_info
     unsigned int  obj_max;
     unsigned int  handle_max;
     unsigned int  valid_access;
-    generic_map_t mapping;
+    struct generic_map mapping;
 
 };
 
@@ -819,7 +819,7 @@ union irp_params
 };
 
 
-typedef struct
+struct pe_image_info
 {
     client_ptr_t   base;
     client_ptr_t   map_addr;
@@ -827,6 +827,7 @@ typedef struct
     mem_size_t     stack_commit;
     unsigned int   entry_point;
     unsigned int   map_size;
+    unsigned int   alignment;
     unsigned int   zerobits;
     unsigned int   subsystem;
     unsigned short subsystem_minor;
@@ -844,11 +845,12 @@ typedef struct
     unsigned char  image_flags;
     unsigned int   loader_flags;
     unsigned int   header_size;
+    unsigned int   header_map_size;
     unsigned int   file_size;
     unsigned int   checksum;
     unsigned int   dbg_offset;
     unsigned int   dbg_size;
-} pe_image_info_t;
+};
 #define IMAGE_FLAGS_ComPlusNativeReady        0x01
 #define IMAGE_FLAGS_ComPlusILOnly             0x02
 #define IMAGE_FLAGS_ImageDynamicallyRelocated 0x04
@@ -863,14 +865,14 @@ struct rawinput_device
     user_handle_t  target;
 };
 
-typedef struct
+struct cursor_pos
 {
     int x;
     int y;
     unsigned int time;
     int __pad;
     lparam_t info;
-} cursor_pos_t;
+};
 
 struct directory_entry
 {
@@ -882,14 +884,70 @@ struct directory_entry
 
 struct monitor_info
 {
-    rectangle_t raw;
-    rectangle_t virt;
-    unsigned int flags;
-    unsigned int dpi;
+    struct rectangle raw;
+    struct rectangle virt;
+    unsigned int     flags;
+    unsigned int     dpi;
 };
 #define MONITOR_FLAG_PRIMARY  0x01
 #define MONITOR_FLAG_CLONE    0x02
 #define MONITOR_FLAG_INACTIVE 0x04
+
+union tcp_connection
+{
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned int state;
+    } common;
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned int state;
+        unsigned int local_addr;
+        unsigned int local_port;
+        unsigned int remote_addr;
+        unsigned int remote_port;
+    } ipv4;
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned int state;
+        unsigned char local_addr[16];
+        unsigned int local_scope_id;
+        unsigned int local_port;
+        unsigned char remote_addr[16];
+        unsigned int remote_scope_id;
+        unsigned int remote_port;
+    } ipv6;
+};
+
+union udp_endpoint
+{
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+    } common;
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned int addr;
+        unsigned int port;
+    } ipv4;
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned char addr[16];
+        unsigned int scope_id;
+        unsigned int port;
+    } ipv6;
+};
 
 
 
@@ -899,7 +957,7 @@ struct shared_cursor
     int                  x;
     int                  y;
     unsigned int         last_change;
-    rectangle_t          clip;
+    struct rectangle     clip;
 };
 
 typedef volatile struct
@@ -907,6 +965,7 @@ typedef volatile struct
     unsigned int         flags;
     struct shared_cursor cursor;
     unsigned char        keystate[256];
+    unsigned __int64     monitor_serial;
 } desktop_shm_t;
 
 typedef volatile struct
@@ -927,18 +986,24 @@ typedef volatile struct
     user_handle_t        menu_owner;
     user_handle_t        move_size;
     user_handle_t        caret;
-    rectangle_t          caret_rect;
+    struct rectangle     caret_rect;
     user_handle_t        cursor;
     int                  cursor_count;
     unsigned char        keystate[256];
     int                  keystate_lock;
 } input_shm_t;
 
+typedef volatile struct
+{
+    unsigned int         dpi_context;
+} window_shm_t;
+
 typedef volatile union
 {
     desktop_shm_t        desktop;
     queue_shm_t          queue;
     input_shm_t          input;
+    window_shm_t         window;
 } object_shm_t;
 
 typedef volatile struct
@@ -948,11 +1013,16 @@ typedef volatile struct
     object_shm_t         shm;
 } shared_object_t;
 
-typedef struct
+typedef volatile struct
+{
+    struct user_entry user_entries[MAX_USER_HANDLES];
+} session_shm_t;
+
+struct obj_locator
 {
     object_id_t          id;
     mem_size_t           offset;
-} obj_locator_t;
+};
 
 
 
@@ -1146,9 +1216,9 @@ struct get_process_info_reply
     unsigned int session_id;
     int          exit_code;
     int          priority;
+    unsigned short base_priority;
     unsigned short machine;
     /* VARARG(image,pe_image_info); */
-    char __pad_62[2];
 };
 
 
@@ -1207,19 +1277,20 @@ struct set_process_info_request
 {
     struct request_header __header;
     obj_handle_t handle;
-    int          mask;
     int          priority;
+    int          base_priority;
     affinity_t   affinity;
     obj_handle_t token;
-    char __pad_36[4];
+    int          mask;
 };
 struct set_process_info_reply
 {
     struct reply_header __header;
 };
-#define SET_PROCESS_INFO_PRIORITY 0x01
-#define SET_PROCESS_INFO_AFFINITY 0x02
-#define SET_PROCESS_INFO_TOKEN    0x04
+#define SET_PROCESS_INFO_PRIORITY      0x01
+#define SET_PROCESS_INFO_BASE_PRIORITY 0x02
+#define SET_PROCESS_INFO_AFFINITY      0x04
+#define SET_PROCESS_INFO_TOKEN         0x08
 
 
 
@@ -1240,7 +1311,7 @@ struct get_thread_info_reply
     affinity_t   affinity;
     int          exit_code;
     int          priority;
-    int          last;
+    int          base_priority;
     int          suspend_count;
     unsigned int flags;
     data_size_t  desc_len;
@@ -1248,6 +1319,7 @@ struct get_thread_info_reply
 };
 #define GET_THREAD_INFO_FLAG_DBG_HIDDEN 0x01
 #define GET_THREAD_INFO_FLAG_TERMINATED 0x02
+#define GET_THREAD_INFO_FLAG_LAST       0x04
 
 
 
@@ -1271,24 +1343,25 @@ struct set_thread_info_request
 {
     struct request_header __header;
     obj_handle_t handle;
-    int          mask;
     int          priority;
+    int          base_priority;
     affinity_t   affinity;
     client_ptr_t entry_point;
     obj_handle_t token;
+    unsigned int mask;
     /* VARARG(desc,unicode_str); */
-    char __pad_44[4];
 };
 struct set_thread_info_reply
 {
     struct reply_header __header;
 };
-#define SET_THREAD_INFO_PRIORITY    0x01
-#define SET_THREAD_INFO_AFFINITY    0x02
-#define SET_THREAD_INFO_TOKEN       0x04
-#define SET_THREAD_INFO_ENTRYPOINT  0x08
-#define SET_THREAD_INFO_DESCRIPTION 0x10
-#define SET_THREAD_INFO_DBG_HIDDEN  0x20
+#define SET_THREAD_INFO_PRIORITY        0x01
+#define SET_THREAD_INFO_BASE_PRIORITY   0x02
+#define SET_THREAD_INFO_AFFINITY        0x04
+#define SET_THREAD_INFO_TOKEN           0x08
+#define SET_THREAD_INFO_ENTRYPOINT      0x10
+#define SET_THREAD_INFO_DESCRIPTION     0x20
+#define SET_THREAD_INFO_DBG_HIDDEN      0x40
 
 
 
@@ -2838,6 +2911,36 @@ struct get_atom_information_reply
 
 
 
+struct add_user_atom_request
+{
+    struct request_header __header;
+    /* VARARG(name,unicode_str); */
+    char __pad_12[4];
+};
+struct add_user_atom_reply
+{
+    struct reply_header __header;
+    atom_t        atom;
+    char __pad_12[4];
+};
+
+
+
+struct get_user_atom_name_request
+{
+    struct request_header __header;
+    atom_t       atom;
+};
+struct get_user_atom_name_reply
+{
+    struct reply_header __header;
+    data_size_t  total;
+    /* VARARG(name,unicode_str); */
+    char __pad_12[4];
+};
+
+
+
 struct get_msg_queue_handle_request
 {
     struct request_header __header;
@@ -2860,7 +2963,7 @@ struct get_msg_queue_request
 struct get_msg_queue_reply
 {
     struct reply_header __header;
-    obj_locator_t  locator;
+    struct obj_locator locator;
 };
 
 
@@ -3328,12 +3431,13 @@ struct create_window_request
     user_handle_t  parent;
     user_handle_t  owner;
     atom_t         atom;
+    mod_handle_t   class_instance;
     mod_handle_t   instance;
     unsigned int   dpi_context;
     unsigned int   style;
     unsigned int   ex_style;
     /* VARARG(class,unicode_str); */
-    char __pad_44[4];
+    char __pad_52[4];
 };
 struct create_window_reply
 {
@@ -3343,8 +3447,6 @@ struct create_window_reply
     user_handle_t  owner;
     int            extra;
     client_ptr_t   class_ptr;
-    unsigned int   dpi_context;
-    char __pad_36[4];
 };
 
 
@@ -3395,18 +3497,31 @@ struct get_window_info_request
 {
     struct request_header __header;
     user_handle_t  handle;
+    int            offset;
+    data_size_t    size;
 };
 struct get_window_info_reply
 {
     struct reply_header __header;
-    user_handle_t  full_handle;
     user_handle_t  last_active;
-    process_id_t   pid;
-    thread_id_t    tid;
-    atom_t         atom;
     int            is_unicode;
-    unsigned int   dpi_context;
-    char __pad_36[4];
+    lparam_t       info;
+};
+
+
+
+struct init_window_info_request
+{
+    struct request_header __header;
+    user_handle_t  handle;
+    unsigned int   style;
+    unsigned int   ex_style;
+    short int      is_unicode;
+    char __pad_26[6];
+};
+struct init_window_info_reply
+{
+    struct reply_header __header;
 };
 
 
@@ -3414,35 +3529,16 @@ struct get_window_info_reply
 struct set_window_info_request
 {
     struct request_header __header;
-    unsigned short flags;
-    short int      is_unicode;
     user_handle_t  handle;
-    unsigned int   style;
-    unsigned int   ex_style;
-    data_size_t    extra_size;
-    mod_handle_t   instance;
-    lparam_t       user_data;
-    lparam_t       extra_value;
-    int            extra_offset;
-    char __pad_60[4];
+    int            offset;
+    data_size_t    size;
+    lparam_t       new_info;
 };
 struct set_window_info_reply
 {
     struct reply_header __header;
-    unsigned int   old_style;
-    unsigned int   old_ex_style;
-    mod_handle_t   old_instance;
-    lparam_t       old_user_data;
-    lparam_t       old_extra_value;
-    lparam_t       old_id;
+    lparam_t       old_info;
 };
-#define SET_WIN_STYLE     0x01
-#define SET_WIN_EXSTYLE   0x02
-#define SET_WIN_ID        0x04
-#define SET_WIN_INSTANCE  0x08
-#define SET_WIN_USERDATA  0x10
-#define SET_WIN_EXTRA     0x20
-#define SET_WIN_UNICODE   0x40
 
 
 
@@ -3458,8 +3554,6 @@ struct set_parent_reply
     struct reply_header __header;
     user_handle_t  old_parent;
     user_handle_t  full_parent;
-    unsigned int   dpi_context;
-    char __pad_20[4];
 };
 
 
@@ -3479,17 +3573,34 @@ struct get_window_parents_reply
 
 
 
-struct get_window_children_request
+struct get_window_list_request
 {
     struct request_header __header;
     obj_handle_t   desktop;
-    user_handle_t  parent;
-    atom_t         atom;
+    user_handle_t  handle;
     thread_id_t    tid;
-    /* VARARG(class,unicode_str); */
+    int            children;
     char __pad_28[4];
 };
-struct get_window_children_reply
+struct get_window_list_reply
+{
+    struct reply_header __header;
+    int            count;
+    /* VARARG(windows,user_handles); */
+    char __pad_12[4];
+};
+
+
+
+struct get_class_windows_request
+{
+    struct request_header __header;
+    user_handle_t  parent;
+    user_handle_t  child;
+    atom_t         atom;
+    /* VARARG(class,unicode_str); */
+};
+struct get_class_windows_reply
 {
     struct reply_header __header;
     int            count;
@@ -3545,8 +3656,8 @@ struct set_window_pos_request
     unsigned int   monitor_dpi;
     user_handle_t  handle;
     user_handle_t  previous;
-    rectangle_t    window;
-    rectangle_t    client;
+    struct rectangle window;
+    struct rectangle client;
     /* VARARG(valid,rectangles); */
     char __pad_60[4];
 };
@@ -3556,7 +3667,7 @@ struct set_window_pos_reply
     unsigned int   new_style;
     unsigned int   new_ex_style;
     user_handle_t  surface_win;
-    int            needs_update;
+    char __pad_20[4];
 };
 #define SET_WINPOS_PAINT_SURFACE    0x01
 #define SET_WINPOS_PIXEL_FORMAT     0x02
@@ -3573,8 +3684,8 @@ struct get_window_rectangles_request
 struct get_window_rectangles_reply
 {
     struct reply_header __header;
-    rectangle_t    window;
-    rectangle_t    client;
+    struct rectangle window;
+    struct rectangle client;
 };
 enum coords_relative
 {
@@ -3643,8 +3754,8 @@ struct get_visible_region_reply
 {
     struct reply_header __header;
     user_handle_t  top_win;
-    rectangle_t    top_rect;
-    rectangle_t    win_rect;
+    struct rectangle top_rect;
+    struct rectangle win_rect;
     unsigned int   paint_flags;
     data_size_t    total_size;
     /* VARARG(region,rectangles); */
@@ -3663,7 +3774,7 @@ struct get_window_region_request
 struct get_window_region_reply
 {
     struct reply_header __header;
-    rectangle_t    visible_rect;
+    struct rectangle visible_rect;
     data_size_t    total_size;
     /* VARARG(region,rectangles); */
     char __pad_28[4];
@@ -3718,7 +3829,7 @@ struct update_window_zorder_request
 {
     struct request_header __header;
     user_handle_t  window;
-    rectangle_t    rect;
+    struct rectangle rect;
 };
 struct update_window_zorder_reply
 {
@@ -3856,12 +3967,13 @@ struct close_winstation_reply
 struct set_winstation_monitors_request
 {
     struct request_header __header;
+    int              increment;
     /* VARARG(infos,monitor_infos); */
-    char __pad_12[4];
 };
 struct set_winstation_monitors_reply
 {
     struct reply_header __header;
+    unsigned __int64 serial;
 };
 
 
@@ -3895,14 +4007,14 @@ struct set_process_winstation_reply
 struct enum_winstation_request
 {
     struct request_header __header;
-    unsigned int index;
+    obj_handle_t handle;
 };
 struct enum_winstation_reply
 {
     struct reply_header __header;
-    unsigned int next;
-    /* VARARG(name,unicode_str); */
-    char __pad_12[4];
+    data_size_t count;
+    data_size_t total;
+    /* VARARG(names,unicode_strings); */
 };
 
 
@@ -3991,7 +4103,7 @@ struct get_thread_desktop_request
 struct get_thread_desktop_reply
 {
     struct reply_header __header;
-    obj_locator_t  locator;
+    struct obj_locator locator;
     obj_handle_t   handle;
     char __pad_28[4];
 };
@@ -4006,24 +4118,7 @@ struct set_thread_desktop_request
 struct set_thread_desktop_reply
 {
     struct reply_header __header;
-    obj_locator_t  locator;
-};
-
-
-
-struct enum_desktop_request
-{
-    struct request_header __header;
-    obj_handle_t winstation;
-    unsigned int index;
-    char __pad_20[4];
-};
-struct enum_desktop_reply
-{
-    struct reply_header __header;
-    unsigned int next;
-    /* VARARG(name,unicode_str); */
-    char __pad_12[4];
+    struct obj_locator locator;
 };
 
 
@@ -4105,7 +4200,7 @@ struct get_thread_input_request
 struct get_thread_input_reply
 {
     struct reply_header __header;
-    obj_locator_t  locator;
+    struct obj_locator locator;
 };
 
 
@@ -4221,7 +4316,7 @@ struct set_caret_window_reply
 {
     struct reply_header __header;
     user_handle_t  previous;
-    rectangle_t    old_rect;
+    struct rectangle old_rect;
     int            old_hide;
     int            old_state;
     char __pad_36[4];
@@ -4244,7 +4339,7 @@ struct set_caret_info_reply
 {
     struct reply_header __header;
     user_handle_t  full_handle;
-    rectangle_t    old_rect;
+    struct rectangle old_rect;
     int            old_hide;
     int            old_state;
     char __pad_36[4];
@@ -4761,7 +4856,7 @@ struct access_check_request
     struct request_header __header;
     obj_handle_t    handle;
     unsigned int    desired_access;
-    generic_map_t   mapping;
+    struct generic_map mapping;
     /* VARARG(sd,security_descriptor); */
     char __pad_36[4];
 };
@@ -4883,38 +4978,6 @@ struct get_system_handles_reply
 };
 
 
-typedef union
-{
-    struct
-    {
-        unsigned int family;
-        process_id_t owner;
-        unsigned int state;
-    } common;
-    struct
-    {
-        unsigned int family;
-        process_id_t owner;
-        unsigned int state;
-        unsigned int local_addr;
-        unsigned int local_port;
-        unsigned int remote_addr;
-        unsigned int remote_port;
-    } ipv4;
-    struct
-    {
-        unsigned int family;
-        process_id_t owner;
-        unsigned int state;
-        unsigned char local_addr[16];
-        unsigned int local_scope_id;
-        unsigned int local_port;
-        unsigned char remote_addr[16];
-        unsigned int remote_scope_id;
-        unsigned int remote_port;
-    } ipv6;
-} tcp_connection;
-
 
 struct get_tcp_connections_request
 {
@@ -4929,30 +4992,6 @@ struct get_tcp_connections_reply
     char __pad_12[4];
 };
 
-
-typedef union
-{
-    struct
-    {
-        unsigned int family;
-        process_id_t owner;
-    } common;
-    struct
-    {
-        unsigned int family;
-        process_id_t owner;
-        unsigned int addr;
-        unsigned int port;
-    } ipv4;
-    struct
-    {
-        unsigned int family;
-        process_id_t owner;
-        unsigned char addr[16];
-        unsigned int scope_id;
-        unsigned int port;
-    } ipv6;
-} udp_endpoint;
 
 
 struct get_udp_endpoints_request
@@ -5337,6 +5376,18 @@ struct make_process_system_reply
 
 
 
+struct grant_process_admin_token_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct grant_process_admin_token_reply
+{
+    struct reply_header __header;
+};
+
+
+
 struct get_token_info_request
 {
     struct request_header __header;
@@ -5350,9 +5401,11 @@ struct get_token_info_reply
     unsigned int   session_id;
     int            primary;
     int            impersonation_level;
-    int            elevation;
+    int            elevation_type;
+    int            is_elevated;
     int            group_count;
     int            privilege_count;
+    char __pad_52[4];
 };
 
 
@@ -5597,7 +5650,8 @@ struct set_window_layered_info_reply
 struct alloc_user_handle_request
 {
     struct request_header __header;
-    char __pad_12[4];
+    unsigned short type;
+    char __pad_14[2];
 };
 struct alloc_user_handle_reply
 {
@@ -5611,7 +5665,10 @@ struct alloc_user_handle_reply
 struct free_user_handle_request
 {
     struct request_header __header;
+    unsigned short type;
+    char __pad_14[2];
     user_handle_t  handle;
+    char __pad_20[4];
 };
 struct free_user_handle_reply
 {
@@ -5628,7 +5685,7 @@ struct set_cursor_request
     int            show_count;
     int            x;
     int            y;
-    rectangle_t    clip;
+    struct rectangle clip;
 };
 struct set_cursor_reply
 {
@@ -5639,7 +5696,7 @@ struct set_cursor_reply
     int            prev_y;
     int            new_x;
     int            new_y;
-    rectangle_t    new_clip;
+    struct rectangle new_clip;
     unsigned int   last_change;
     char __pad_52[4];
 };
@@ -5835,6 +5892,22 @@ struct resume_process_reply
 };
 
 
+struct get_next_process_request
+{
+    struct request_header __header;
+    obj_handle_t last;
+    unsigned int access;
+    unsigned int attributes;
+    unsigned int flags;
+    char __pad_28[4];
+};
+struct get_next_process_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
 
 struct get_next_thread_request
 {
@@ -5983,6 +6056,8 @@ enum request
     REQ_delete_atom,
     REQ_find_atom,
     REQ_get_atom_information,
+    REQ_add_user_atom,
+    REQ_get_user_atom_name,
     REQ_get_msg_queue_handle,
     REQ_get_msg_queue,
     REQ_set_queue_fd,
@@ -6017,10 +6092,12 @@ enum request
     REQ_get_desktop_window,
     REQ_set_window_owner,
     REQ_get_window_info,
+    REQ_init_window_info,
     REQ_set_window_info,
     REQ_set_parent,
     REQ_get_window_parents,
-    REQ_get_window_children,
+    REQ_get_window_list,
+    REQ_get_class_windows,
     REQ_get_window_children_from_point,
     REQ_get_window_tree,
     REQ_set_window_pos,
@@ -6052,7 +6129,6 @@ enum request
     REQ_close_desktop,
     REQ_get_thread_desktop,
     REQ_set_thread_desktop,
-    REQ_enum_desktop,
     REQ_set_user_object_info,
     REQ_register_hotkey,
     REQ_unregister_hotkey,
@@ -6128,6 +6204,7 @@ enum request
     REQ_release_kernel_object,
     REQ_get_kernel_object_handle,
     REQ_make_process_system,
+    REQ_grant_process_admin_token,
     REQ_get_token_info,
     REQ_create_linked_token,
     REQ_create_completion,
@@ -6160,6 +6237,7 @@ enum request
     REQ_terminate_job,
     REQ_suspend_process,
     REQ_resume_process,
+    REQ_get_next_process,
     REQ_get_next_thread,
     REQ_set_keyboard_repeat,
     REQ_NB_REQUESTS
@@ -6281,6 +6359,8 @@ union generic_request
     struct delete_atom_request delete_atom_request;
     struct find_atom_request find_atom_request;
     struct get_atom_information_request get_atom_information_request;
+    struct add_user_atom_request add_user_atom_request;
+    struct get_user_atom_name_request get_user_atom_name_request;
     struct get_msg_queue_handle_request get_msg_queue_handle_request;
     struct get_msg_queue_request get_msg_queue_request;
     struct set_queue_fd_request set_queue_fd_request;
@@ -6315,10 +6395,12 @@ union generic_request
     struct get_desktop_window_request get_desktop_window_request;
     struct set_window_owner_request set_window_owner_request;
     struct get_window_info_request get_window_info_request;
+    struct init_window_info_request init_window_info_request;
     struct set_window_info_request set_window_info_request;
     struct set_parent_request set_parent_request;
     struct get_window_parents_request get_window_parents_request;
-    struct get_window_children_request get_window_children_request;
+    struct get_window_list_request get_window_list_request;
+    struct get_class_windows_request get_class_windows_request;
     struct get_window_children_from_point_request get_window_children_from_point_request;
     struct get_window_tree_request get_window_tree_request;
     struct set_window_pos_request set_window_pos_request;
@@ -6350,7 +6432,6 @@ union generic_request
     struct close_desktop_request close_desktop_request;
     struct get_thread_desktop_request get_thread_desktop_request;
     struct set_thread_desktop_request set_thread_desktop_request;
-    struct enum_desktop_request enum_desktop_request;
     struct set_user_object_info_request set_user_object_info_request;
     struct register_hotkey_request register_hotkey_request;
     struct unregister_hotkey_request unregister_hotkey_request;
@@ -6426,6 +6507,7 @@ union generic_request
     struct release_kernel_object_request release_kernel_object_request;
     struct get_kernel_object_handle_request get_kernel_object_handle_request;
     struct make_process_system_request make_process_system_request;
+    struct grant_process_admin_token_request grant_process_admin_token_request;
     struct get_token_info_request get_token_info_request;
     struct create_linked_token_request create_linked_token_request;
     struct create_completion_request create_completion_request;
@@ -6458,6 +6540,7 @@ union generic_request
     struct terminate_job_request terminate_job_request;
     struct suspend_process_request suspend_process_request;
     struct resume_process_request resume_process_request;
+    struct get_next_process_request get_next_process_request;
     struct get_next_thread_request get_next_thread_request;
     struct set_keyboard_repeat_request set_keyboard_repeat_request;
 };
@@ -6577,6 +6660,8 @@ union generic_reply
     struct delete_atom_reply delete_atom_reply;
     struct find_atom_reply find_atom_reply;
     struct get_atom_information_reply get_atom_information_reply;
+    struct add_user_atom_reply add_user_atom_reply;
+    struct get_user_atom_name_reply get_user_atom_name_reply;
     struct get_msg_queue_handle_reply get_msg_queue_handle_reply;
     struct get_msg_queue_reply get_msg_queue_reply;
     struct set_queue_fd_reply set_queue_fd_reply;
@@ -6611,10 +6696,12 @@ union generic_reply
     struct get_desktop_window_reply get_desktop_window_reply;
     struct set_window_owner_reply set_window_owner_reply;
     struct get_window_info_reply get_window_info_reply;
+    struct init_window_info_reply init_window_info_reply;
     struct set_window_info_reply set_window_info_reply;
     struct set_parent_reply set_parent_reply;
     struct get_window_parents_reply get_window_parents_reply;
-    struct get_window_children_reply get_window_children_reply;
+    struct get_window_list_reply get_window_list_reply;
+    struct get_class_windows_reply get_class_windows_reply;
     struct get_window_children_from_point_reply get_window_children_from_point_reply;
     struct get_window_tree_reply get_window_tree_reply;
     struct set_window_pos_reply set_window_pos_reply;
@@ -6646,7 +6733,6 @@ union generic_reply
     struct close_desktop_reply close_desktop_reply;
     struct get_thread_desktop_reply get_thread_desktop_reply;
     struct set_thread_desktop_reply set_thread_desktop_reply;
-    struct enum_desktop_reply enum_desktop_reply;
     struct set_user_object_info_reply set_user_object_info_reply;
     struct register_hotkey_reply register_hotkey_reply;
     struct unregister_hotkey_reply unregister_hotkey_reply;
@@ -6722,6 +6808,7 @@ union generic_reply
     struct release_kernel_object_reply release_kernel_object_reply;
     struct get_kernel_object_handle_reply get_kernel_object_handle_reply;
     struct make_process_system_reply make_process_system_reply;
+    struct grant_process_admin_token_reply grant_process_admin_token_reply;
     struct get_token_info_reply get_token_info_reply;
     struct create_linked_token_reply create_linked_token_reply;
     struct create_completion_reply create_completion_reply;
@@ -6754,10 +6841,11 @@ union generic_reply
     struct terminate_job_reply terminate_job_reply;
     struct suspend_process_reply suspend_process_reply;
     struct resume_process_reply resume_process_reply;
+    struct get_next_process_reply get_next_process_reply;
     struct get_next_thread_reply get_next_thread_reply;
     struct set_keyboard_repeat_reply set_keyboard_repeat_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 848
+#define SERVER_PROTOCOL_VERSION 880
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

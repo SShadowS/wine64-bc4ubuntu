@@ -84,6 +84,56 @@ type mixedEchoModes.cmd
 cmd /c mixedEchoModes.cmd
 del mixedEchoModes.cmd
 
+echo ------------ Testing call and echo modes ------------
+rem echo on/off is propagated back to caller (except in interactive mode)
+@echo off
+@FOR /F "tokens=* usebackq" %%F IN (`echo`) DO SET "wine_echo_on=%%F"
+goto :hopCallEchoModes
+
+rem ensure comparison isn't locale dependant
+:showEchoMode
+@FOR /F "tokens=*" %%F IN (%1) DO @IF "%%F"=="%wine_echo_on%" (@echo ECHO_IS_ON) else (@echo ECHO_IS_OFF)
+@del %1
+@exit /b 0
+:hopCallEchoModes
+
+echo %%*> callme.cmd
+rem ensure that :showEchoMode works as expected
+@echo on
+@echo>foo.tmp
+@call :showEchoMode foo.tmp
+@echo off
+@echo>foo.tmp
+@call :showEchoMode foo.tmp
+rem test inside a batch file, that caller keeps callee echo on/off status
+@echo off
+@call callme.cmd @echo on
+@echo>foo.tmp
+@call :showEchoMode foo.tmp
+@echo on
+@call callme.cmd @echo off
+@echo>foo.tmp
+@call :showEchoMode foo.tmp
+@echo off
+
+rem test in interactive mode... echo is always preserved after a call
+@echo echo on>foo.txt
+@echo call callme.cmd @echo off>>foo.txt
+@echo echo^>foo.tmp>>foo.txt
+type foo.txt | cmd.exe > NUL
+@call :showEchoMode foo.tmp
+
+@echo echo off>foo.txt
+@echo call callme.cmd @echo on>>foo.txt
+@echo echo^>foo.tmp>>foo.txt
+type foo.txt | cmd.exe > NUL
+@call :showEchoMode foo.tmp
+
+rem cleanup
+del foo.txt
+del callme.cmd
+set wine_echo_on=
+@echo off
 echo ------------ Testing parameterization ------------
 call :TestParm a b c
 call :TestParm "a b c"
@@ -176,6 +226,11 @@ del foo
 echo foo> foo
 echo foo7 7>> foo || (echo not supported & del foo)
 if exist foo (type foo) else echo not supported
+echo --- right-to-left redirection
+1>foo-out 2>foo-err 1<&2 echo foo
+type foo-out 2>NUL || echo good
+type foo-err 2>NUL || echo bad
+erase /q foo-out foo-err
 echo --- redirect at beginning of line
 >foo (echo foo)
 type foo
@@ -499,12 +554,39 @@ rem call :setError 666 & (foobar.IDontExist &&echo SUCCESS !errorlevel!||echo FA
 cd .. && rd /q /s foo
 echo --- success/failure for CALL command
 mkdir foo & cd foo
-echo exit /b %%1 > foobar.bat
+echo exit /b %%1 > foobarEB.bat
+echo type NUL > foobarS0.bat
+echo rmdir foobar.dir > foobarSEL.bat
+echo title foo >> foobarSEL.bat
+echo rmdir foobar.dir > foobarF2.bat
+echo type NUL > foobarS0WS.bat
+echo.>> foobarS0WS.bat
+echo goto :EOF > foobarGE.bat
+echo goto :end > foobarGL.bat
+echo :end >> foobarGL.bat
+echo goto :end > foobarGX.bat
+echo rmdir foobar.dir > foobarFGE.bat
+echo goto :EOF >> foobarFGE.bat
+echo rmdir foobar.dir > foobarFGL.bat
+echo goto :end >> foobarFGL.bat
+echo :end >> foobarFGL.bat
+echo rmdir foobar.dir > foobarFGX.bat
+echo goto :end >> foobarFGX.bat
 rem call :setError 666 & (call I\dont\exist.exe &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
 rem terminates batch exec on native...
 call :setError 666 & (call Idontexist.exe &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
-call :setError 666 & (call .\foobar.bat 0 &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
-call :setError 666 & (call .\foobar.bat 1024 &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
+call :setError 666 & (call .\foobarEB.bat 0 &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
+call :setError 666 & (call .\foobarEB.bat 1024 &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
+call :setError 666 & (call .\foobarS0.bat &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
+call :setError 666 & (call .\foobarS0WS.bat &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
+call :setError 666 & (call .\foobarSEL.bat &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
+call :setError 666 & (call .\foobarF2.bat &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
+call :setError 666 & (call .\foobarGE.bat &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
+call :setError 666 & (call .\foobarGL.bat &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
+call :setError 666 & (call .\foobarGX.bat &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
+call :setError 666 & (call .\foobarFGE.bat &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
+call :setError 666 & (call .\foobarFGL.bat &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
+call :setError 666 & (call .\foobarFGX.bat &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
 call :setError 666 & (call cmd.exe /c "echo foo & exit /b 0" &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
 call :setError 666 & (call cmd.exe /c "echo foo & exit /b 1025" &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
 call :setError 666 & (call rmdir foobar.dir &&echo SUCCESS !errorlevel!||echo FAILURE !errorlevel!)
@@ -953,6 +1035,19 @@ echo %WINE_VAR:~2,-3%
 echo '%WINE_VAR:~-2,-4%'
 echo %WINE_VAR:~-3,-2%
 echo %WINE_VAR:~4,4%
+echo '%WINE_VAR:~5%'
+echo '%WINE_VAR:~6%'
+echo '%WINE_VAR:~7%'
+echo '%WINE_VAR:~-0%'
+echo '%WINE_VAR:~,%'
+echo '%WINE_VAR:~,2%'
+echo '%WINE_VAR:~2a%'
+echo '%WINE_VAR:~2a,2%'
+echo '%WINE_VAR:~a,2%'
+echo '%WINE_VAR:~2,2a%'
+echo '%WINE_VAR:~-%'
+
+echo ------------ Testing variable partial replacement ------------
 set WINE_VAR=qwertyQWERTY
 echo %WINE_VAR:qw=az%
 echo %WINE_VAR:qw=%
@@ -960,7 +1055,9 @@ echo %WINE_VAR:*TY==_%
 echo %WINE_VAR:*TY=%
 set WINE_VAR=
 mkdir dummydir
+set WINE_VAR=\foo;\bar;%CD%
 cd dummydir
+for %%i in (dummydir) do echo %%~$WINE_VAR:i
 echo %CD:~-6,6%
 cd ..
 rmdir dummydir
@@ -1425,7 +1522,8 @@ if 1 == 0 (
 @tab@
 ) else echo block containing two lines with just tab seems to work
 ::
-echo @if 1 == 1 (> blockclosing.cmd
+set WINE_IDONTEXIST=
+echo @if [%%WINE_IDONTEXIST%%] == [] (@tab@> blockclosing.cmd
 echo   echo with closing bracket>> blockclosing.cmd
 echo )>> blockclosing.cmd
 cmd.exe /Q /C blockclosing.cmd
@@ -2421,6 +2519,7 @@ echo a > foo
 echo b >> foo
 echo c >> foo
 for /f "skip=2" %%i in (foo) do echo %%i
+for /f "skip=2@tab@" %%i in (foo) do echo %%i
 for /f "skip=3" %%i in (foo) do echo %%i > output_file
 if not exist output_file (echo no output) else (del output_file)
 for /f "skip=4" %%i in (foo) do echo %%i > output_file
@@ -2893,6 +2992,26 @@ popd
 cd
 rd /s/q foobar
 
+echo ------------ Testing dir /o ------------
+mkdir foobar & cd foobar
+echo AAA>a1.aa
+mkdir a1.ab
+echo A>a1.ac
+echo AA>a2.aa
+mkdir a2.ac
+echo ---
+dir /B /O:
+echo ---
+dir /B /O:GN
+echo ---
+dir /B /O:G-N
+echo ---
+dir /B /O:GNE
+echo ---
+dir /B /O:G-NE
+echo ---
+dir /B /O:G-E-N
+cd .. & rd /s/q foobar
 echo ------------ Testing attrib ------------
 rem FIXME Add tests for archive, hidden and system attributes + mixed attributes modifications
 mkdir foobar & cd foobar
@@ -3297,6 +3416,30 @@ shift
 if not "%1"=="" goto :CheckNotExist
 goto :eof
 
+:CheckOutputExist
+find /i "%1" test1.txt >nul 2>&1
+if errorlevel 0 (
+  echo Passed: Found expected %1 in COPY output
+) else (
+  echo Failed: Did not find expected %1 in COPY output
+)
+shift
+if not "%1"=="" goto :CheckOutputExist
+del /q test1.txt >nul 2>&1
+goto :eof
+
+:CheckOutputNotExist
+find /i "%1" test1.txt >nul 2>&1
+if errorlevel 1 (
+  echo Passed: Did not find %1 in COPY output
+) else (
+  echo Failed: Unexpectedly found %1 in COPY output
+)
+shift
+if not "%1"=="" goto :CheckOutputNotExist
+del /q test1.txt >nul 2>&1
+goto :eof
+
 rem Note: No way to check file size on NT4 so skip the test
 :CheckFileSize
 if not exist "%1" (
@@ -3325,28 +3468,33 @@ rem -----------------------
 rem Simple single file copy
 rem -----------------------
 rem Simple single file copy, normally used syntax
-copy file1 dummy.file >nul 2>&1
+copy file1 dummy.file >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputNotExist file1
 call :CheckExist dummy.file
 
 rem Simple single file copy, destination supplied as two forms of directory
-copy file1 dir1 >nul 2>&1
+copy file1 dir1 >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputNotExist file1
 call :CheckExist dir1\file1
 
-copy file1 dir1\ >nul 2>&1
+copy file1 dir1\ >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputNotExist file1
 call :CheckExist dir1\file1
 
 rem Simple single file copy, destination supplied as fully qualified destination
-copy file1 dir1\file99 >nul 2>&1
+copy file1 dir1\file99 >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputNotExist file1
 call :CheckExist dir1\file99
 
 rem Simple single file copy, destination not supplied
 cd dir1
-copy ..\file1 >nul 2>&1
+copy ..\file1 >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputNotExist file1
 call :CheckExist file1
 cd ..
 
@@ -3358,19 +3506,22 @@ call :CheckNotExist dir2 dir2\file1
 rem -----------------------
 rem Wildcarded copy
 rem -----------------------
-rem Simple single file copy, destination supplied as two forms of directory
-copy file? dir1 >nul 2>&1
+rem Simple wildcarded file copy, destination supplied as two forms of directory
+copy file? dir1 >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputExist file1 file2 file3
 call :CheckExist dir1\file1 dir1\file2 dir1\file3
 
-copy file* dir1\ >nul 2>&1
+copy file* dir1\ >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputExist file1 file2 file3
 call :CheckExist dir1\file1 dir1\file2 dir1\file3
 
-rem Simple single file copy, destination not supplied
+rem Simple wildcarded file copy, destination not supplied
 cd dir1
-copy ..\file*.* >nul 2>&1
+copy ..\file*.* >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputExist file1 file2 file3
 call :CheckExist file1 file2 file3
 cd ..
 
@@ -3383,51 +3534,60 @@ rem ------------------------------------------------
 rem Confirm overwrite works (cannot test prompting!)
 rem ------------------------------------------------
 copy file1 testfile >nul 2>&1
-copy /y file2 testfile >nul 2>&1
+copy /y file2 testfile >test1.txt 2>&1
+call :CheckOutputNotExist file2
 call :CheckExist testfile
 
 rem ------------------------------------------------
 rem Test concatenation
 rem ------------------------------------------------
 rem simple case, no wildcards
-copy file1+file2 testfile >nul 2>&1
+copy file1+file2 testfile >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputExist file1 file2
 call :CheckExist testfile
 
 rem simple case, wildcards, no concatenation
-copy file* testfile >nul 2>&1
+copy file* testfile >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputExist file1 file2 file3
 call :CheckExist testfile
 
 rem simple case, wildcards, and concatenation
 echo ddddd > fred
-copy file*+fred testfile >nul 2>&1
+copy file*+fred testfile >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputExist file1 file2 file3 fred
 call :CheckExist testfile
 
 rem simple case, wildcards, and concatenation
-copy fred+file* testfile >nul 2>&1
+copy fred+file* testfile >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputExist fred file1 file2 file3
 call :CheckExist testfile
 
 rem Calculate destination name
-copy fred+file* dir1 >nul 2>&1
+copy fred+file* dir1 >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputExist fred file1 file2 file3
 call :CheckExist dir1\fred
 
 rem Calculate destination name
-copy fred+file* dir1\ >nul 2>&1
+copy fred+file* dir1\ >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputExist fred file1 file2 file3
 call :CheckExist dir1\fred
 
 rem Calculate destination name (none supplied)
 cd dir1
-copy ..\fred+..\file* >nul 2>&1
+copy ..\fred+..\file* >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputExist fred file1 file2 file3
 call :CheckExist fred
 
-copy ..\fr*+..\file1  >nul 2>&1
+copy ..\fr*+..\file1 >test1.txt 2>&1
 if errorlevel 1 echo Incorrect errorlevel
+call :CheckOutputExist fred file1
 call :CheckExist fred
 cd ..
 
@@ -4011,6 +4171,126 @@ echo echo shouldnot >> foobar.bat
 call foobar.bat
 if exist foobar.bat (echo stillthere & erase /q foobar.bat >NUL)
 
+echo ------------ Testing updated code page execution ------------
+echo @echo off>utf8.cmd
+echo chcp 65001>>utf8.cmd
+echo set utf8=@\xE3@@\xA1@@\xA1@@\xE3@@\xA1@@\xA1@>>utf8.cmd
+echo if not %%utf8:~0,2%%==%%utf8%% exit 1 >>utf8.cmd
+start /wait cmd /cutf8.cmd
+if errorlevel 1 (echo Failure) else echo Success
+del utf8.cmd
+
+echo ------------ Testing alteration while executing ------
+rem In all the tests, the offsets (esp. for labels) must remain the same
+rem Calling a non existing label will generate a message on stderr but nothing on stdout
+
+rem overwrite label before current position
+echo @echo off > run.cmd
+echo goto doit >> run.cmd
+echo :labelAA >> run.cmd
+echo echo AA >> run.cmd
+echo goto :eof >> run.cmd
+echo :doit >> run.cmd
+echo copy /Y ovr.cmd run.cmd ^> NUL >> run.cmd
+echo call :labelAA >> run.cmd
+echo call :labelBB >> run.cmd
+
+echo @echo off > ovr.cmd
+echo goto doit >> ovr.cmd
+echo :labelBB >> ovr.cmd
+echo echo BB >> ovr.cmd
+echo goto :eof >> ovr.cmd
+echo :doit >> ovr.cmd
+echo copy /Y ovr.cmd run.cmd ^> NUL >> ovr.cmd
+echo call :labelAA >> ovr.cmd
+echo call :labelBB >> ovr.cmd
+
+call run.cmd
+
+rem overwrite label after current position
+echo ---
+echo @echo off > run.cmd
+echo copy /Y ovr.cmd run.cmd ^> NUL >> run.cmd
+echo call :labelAA >> run.cmd
+echo call :labelBB >> run.cmd
+echo goto :eof >> run.cmd
+echo :labelAA >> run.cmd
+echo echo AA >> run.cmd
+echo goto :eof >> run.cmd
+
+echo @echo off > ovr.cmd
+echo copy /Y ovr.cmd run.cmd ^> NUL >> ovr.cmd
+echo call :labelAA >> ovr.cmd
+echo call :labelBB >> ovr.cmd
+echo goto :eof >> ovr.cmd
+echo :labelBB >> ovr.cmd
+echo echo BB >> ovr.cmd
+echo goto :eof >> ovr.cmd
+
+call run.cmd
+
+rem overwrite label before current position with another label with same name
+echo ---
+echo @echo off > run.cmd
+echo goto doit >> run.cmd
+echo :labelAA >> run.cmd
+echo echo A1 >> run.cmd
+echo goto :eof >> run.cmd
+echo :labelAA >> run.cmd
+echo echo A2 >> run.cmd
+echo goto :eof >> run.cmd
+echo :doit >> run.cmd
+echo copy /Y ovr.cmd run.cmd ^> NUL >> run.cmd
+echo call :labelAA >> run.cmd
+echo call :labelBB >> run.cmd
+
+echo @echo off > ovr.cmd
+echo goto doit >> ovr.cmd
+echo :labelBB >> ovr.cmd
+echo echo BB >> ovr.cmd
+echo goto :eof >> ovr.cmd
+echo :labelAA >> ovr.cmd
+echo echo A2 >> ovr.cmd
+echo goto :eof >> ovr.cmd
+echo :doit >> ovr.cmd
+echo copy /Y ovr.cmd run.cmd ^> NUL >> ovr.cmd
+echo call :labelAA >> ovr.cmd
+echo call :labelBB >> ovr.cmd
+
+call run.cmd
+
+rem overwrite label after current position with another label with same name
+echo ---
+echo @echo off > run.cmd
+echo copy /Y ovr.cmd run.cmd ^> NUL >> run.cmd
+echo call :labelAA >> run.cmd
+echo call :labelBB >> run.cmd
+echo goto :eof >> run.cmd
+echo :labelAA >> run.cmd
+echo echo A1 >> run.cmd
+echo goto :eof >> run.cmd
+echo :labelAA >> run.cmd
+echo echo A2 >> run.cmd
+echo goto :eof >> run.cmd
+
+echo @echo off > ovr.cmd
+echo copy /Y ovr.cmd ovr.cmd ^> NUL >> ovr.cmd
+echo call :labelAA >> ovr.cmd
+echo call :labelBB >> ovr.cmd
+echo goto :eof >> ovr.cmd
+echo :labelBB >> ovr.cmd
+echo echo BB >> ovr.cmd
+echo goto :eof >> ovr.cmd
+echo :labelAA >> ovr.cmd
+echo echo A2 >> ovr.cmd
+echo goto :eof >> ovr.cmd
+
+call run.cmd
+
+rem cleanup
+echo ---
+delete run.cmd
+delete ovr.cmd
 echo ------------ Testing combined CALLs/GOTOs ------------
 echo @echo off>foo.cmd
 echo goto :eof>>foot.cmd

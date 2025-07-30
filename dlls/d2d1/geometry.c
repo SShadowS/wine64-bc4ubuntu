@@ -276,50 +276,30 @@ static float d2d_fp_estimate(float *a, size_t len)
 static void d2d_fp_fast_expansion_sum_zeroelim(float *out, size_t *out_len,
         const float *a, size_t a_len, const float *b, size_t b_len)
 {
-    float sum[2], q, a_curr, b_curr;
+    float sum[2], q;
     size_t a_idx, b_idx, out_idx;
 
-    a_curr = a[0];
-    b_curr = b[0];
     a_idx = b_idx = 0;
-    if ((b_curr > a_curr) == (b_curr > -a_curr))
-    {
-        q = a_curr;
-        a_curr = a[++a_idx];
-    }
+    if ((b[b_idx] > a[a_idx]) == (b[b_idx] > -a[a_idx]))
+        q = a[a_idx++];
     else
-    {
-        q = b_curr;
-        b_curr = b[++b_idx];
-    }
+        q = b[b_idx++];
     out_idx = 0;
     if (a_idx < a_len && b_idx < b_len)
     {
-        if ((b_curr > a_curr) == (b_curr > -a_curr))
-        {
-            d2d_fp_fast_two_sum(sum, a_curr, q);
-            a_curr = a[++a_idx];
-        }
+        if ((b[b_idx] > a[a_idx]) == (b[b_idx] > -a[a_idx]))
+            d2d_fp_fast_two_sum(sum, a[a_idx++], q);
         else
-        {
-            d2d_fp_fast_two_sum(sum, b_curr, q);
-            b_curr = b[++b_idx];
-        }
+            d2d_fp_fast_two_sum(sum, b[b_idx++], q);
         if (sum[0] != 0.0f)
             out[out_idx++] = sum[0];
         q = sum[1];
         while (a_idx < a_len && b_idx < b_len)
         {
-            if ((b_curr > a_curr) == (b_curr > -a_curr))
-            {
-                d2d_fp_two_sum(sum, q, a_curr);
-                a_curr = a[++a_idx];
-            }
+            if ((b[b_idx] > a[a_idx]) == (b[b_idx] > -a[a_idx]))
+                d2d_fp_two_sum(sum, q, a[a_idx++]);
             else
-            {
-                d2d_fp_two_sum(sum, q, b_curr);
-                b_curr = b[++b_idx];
-            }
+                d2d_fp_two_sum(sum, q, b[b_idx++]);
             if (sum[0] != 0.0f)
                 out[out_idx++] = sum[0];
             q = sum[1];
@@ -327,16 +307,14 @@ static void d2d_fp_fast_expansion_sum_zeroelim(float *out, size_t *out_len,
     }
     while (a_idx < a_len)
     {
-        d2d_fp_two_sum(sum, q, a_curr);
-        a_curr = a[++a_idx];
+        d2d_fp_two_sum(sum, q, a[a_idx++]);
         if (sum[0] != 0.0f)
             out[out_idx++] = sum[0];
         q = sum[1];
     }
     while (b_idx < b_len)
     {
-        d2d_fp_two_sum(sum, q, b_curr);
-        b_curr = b[++b_idx];
+        d2d_fp_two_sum(sum, q, b[b_idx++]);
         if (sum[0] != 0.0f)
             out[out_idx++] = sum[0];
         q = sum[1];
@@ -5528,4 +5506,96 @@ struct d2d_geometry *unsafe_impl_from_ID2D1Geometry(ID2D1Geometry *iface)
             || iface->lpVtbl == (const ID2D1GeometryVtbl *)&d2d_transformed_geometry_vtbl
             || iface->lpVtbl == (const ID2D1GeometryVtbl *)&d2d_geometry_group_vtbl);
     return CONTAINING_RECORD(iface, struct d2d_geometry, ID2D1Geometry_iface);
+}
+
+static inline struct d2d_geometry_realization *impl_from_ID2D1GeometryRealization(
+        ID2D1GeometryRealization *iface)
+{
+    return CONTAINING_RECORD(iface, struct d2d_geometry_realization, ID2D1GeometryRealization_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE d2d_geometry_realization_QueryInterface(
+        ID2D1GeometryRealization *iface, REFIID iid, void **out)
+{
+    TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
+
+    if (IsEqualGUID(iid, &IID_ID2D1GeometryRealization)
+            || IsEqualGUID(iid, &IID_ID2D1Resource)
+            || IsEqualGUID(iid, &IID_IUnknown))
+    {
+        ID2D1GeometryRealization_AddRef(iface);
+        *out = iface;
+        return S_OK;
+    }
+
+    WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
+
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE d2d_geometry_realization_AddRef(ID2D1GeometryRealization *iface)
+{
+    struct d2d_geometry_realization *realization = impl_from_ID2D1GeometryRealization(iface);
+    ULONG refcount = InterlockedIncrement(&realization->refcount);
+
+    TRACE("%p increasing refcount to %lu.\n", iface, refcount);
+
+    return refcount;
+}
+
+static ULONG STDMETHODCALLTYPE d2d_geometry_realization_Release(ID2D1GeometryRealization *iface)
+{
+    struct d2d_geometry_realization *realization = impl_from_ID2D1GeometryRealization(iface);
+    ULONG refcount = InterlockedDecrement(&realization->refcount);
+
+    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
+
+    if (!refcount)
+    {
+        if (realization->stroke_style)
+            ID2D1StrokeStyle_Release(realization->stroke_style);
+        ID2D1Geometry_Release(realization->geometry);
+        ID2D1Factory_Release(realization->factory);
+        free(realization);
+    }
+
+    return refcount;
+}
+
+static void STDMETHODCALLTYPE d2d_geometry_realization_GetFactory(ID2D1GeometryRealization *iface,
+        ID2D1Factory **factory)
+{
+    struct d2d_geometry_realization *realization = impl_from_ID2D1GeometryRealization(iface);
+
+    TRACE("iface %p, factory %p.\n", iface, factory);
+
+    ID2D1Factory_AddRef(*factory = realization->factory);
+}
+
+static const ID2D1GeometryRealizationVtbl d2d_geometry_realization_vtbl =
+{
+    d2d_geometry_realization_QueryInterface,
+    d2d_geometry_realization_AddRef,
+    d2d_geometry_realization_Release,
+    d2d_geometry_realization_GetFactory,
+};
+
+HRESULT d2d_geometry_realization_init(struct d2d_geometry_realization *realization,
+        ID2D1Factory *factory, ID2D1Geometry *geometry)
+{
+    realization->ID2D1GeometryRealization_iface.lpVtbl = &d2d_geometry_realization_vtbl;
+    realization->refcount = 1;
+    ID2D1Factory_AddRef(realization->factory = factory);
+    ID2D1Geometry_AddRef(realization->geometry = geometry);
+
+    return S_OK;
+}
+
+struct d2d_geometry_realization *unsafe_impl_from_ID2D1GeometryRealization(ID2D1GeometryRealization *iface)
+{
+    if (!iface)
+        return NULL;
+    assert(iface->lpVtbl == &d2d_geometry_realization_vtbl);
+    return CONTAINING_RECORD(iface, struct d2d_geometry_realization, ID2D1GeometryRealization_iface);
 }

@@ -24,6 +24,7 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
+#include "mshtmdid.h"
 
 #include "wine/debug.h"
 
@@ -519,7 +520,7 @@ static HRESULT WINAPI HTMLFormElement_submit(IHTMLFormElement *iface)
 
     if(This->element.node.doc) {
         HTMLDocumentNode *doc = This->element.node.doc;
-        if(doc->window && doc->window->base.outer_window)
+        if(doc->window && !is_detached_window(doc->window))
             this_window = doc->window->base.outer_window;
     }
     if(!this_window) {
@@ -887,6 +888,21 @@ static const NodeImplVtbl HTMLFormElementImplVtbl = {
     .get_attr_col          = HTMLElement_get_attr_col,
 };
 
+static void HTMLFormElement_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
+{
+    static const dispex_hook_t hooks[] = {
+        {DISPID_IHTMLFORMELEMENT_DIR},
+        {DISPID_IHTMLFORMELEMENT_ENCODING, .noattr = TRUE},
+        {DISPID_IHTMLFORMELEMENT_ELEMENTS, .noattr = TRUE},
+        {DISPID_NEWENUM,                   .noattr = TRUE},
+        {DISPID_COLLECTION,                .noattr = TRUE},
+        {DISPID_UNKNOWN}
+    };
+    dispex_info_add_interface(info, IHTMLFormElement_tid, hooks);
+
+    HTMLElement_init_dispex_info(info, mode);
+}
+
 static const event_target_vtbl_t HTMLFormElement_event_target_vtbl = {
     {
         HTMLELEMENT_DISPEX_VTBL_ENTRIES,
@@ -902,19 +918,12 @@ static const event_target_vtbl_t HTMLFormElement_event_target_vtbl = {
     .handle_event       = HTMLFormElement_handle_event
 };
 
-static const tid_t HTMLFormElement_iface_tids[] = {
-    HTMLELEMENT_TIDS,
-    IHTMLFormElement_tid,
-    0
-};
-
 dispex_static_data_t HTMLFormElement_dispex = {
-    .id           = PROT_HTMLFormElement,
-    .prototype_id = PROT_HTMLElement,
+    .id           = OBJID_HTMLFormElement,
+    .prototype_id = OBJID_HTMLElement,
     .vtbl         = &HTMLFormElement_event_target_vtbl.dispex_vtbl,
     .disp_tid     = DispHTMLFormElement_tid,
-    .iface_tids   = HTMLFormElement_iface_tids,
-    .init_info    = HTMLElement_init_dispex_info,
+    .init_info    = HTMLFormElement_init_dispex_info,
 };
 
 HRESULT HTMLFormElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLElement **elem)

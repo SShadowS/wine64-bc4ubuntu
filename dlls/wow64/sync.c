@@ -522,6 +522,19 @@ NTSTATUS WINAPI wow64_NtDuplicateObject( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtImpersonateClientOfPort
+ */
+NTSTATUS WINAPI wow64_NtImpersonateClientOfPort( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    LPC_MESSAGE *msg = get_ptr( &args );
+
+    FIXME( "%p %p: stub\n", handle, msg );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/**********************************************************************
  *           wow64_NtListenPort
  */
 NTSTATUS WINAPI wow64_NtListenPort( UINT *args )
@@ -1260,6 +1273,36 @@ NTSTATUS WINAPI wow64_NtReleaseSemaphore( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtReadRequestData
+ */
+NTSTATUS WINAPI wow64_NtReadRequestData( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    LPC_MESSAGE *request = get_ptr( &args );
+    ULONG id = get_ulong( &args );
+    void *buffer = get_ptr( &args );
+    ULONG len = get_ulong( &args );
+    ULONG *retlen = get_ptr( &args );
+
+    FIXME( "%p %p %lu %p %lu %p: stub\n", handle, request, id, buffer, len, retlen );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/**********************************************************************
+ *           wow64_NtReplyPort
+ */
+NTSTATUS WINAPI wow64_NtReplyPort( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    LPC_MESSAGE *reply = get_ptr( &args );
+
+    FIXME( "%p %p: stub\n", handle, reply );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/**********************************************************************
  *           wow64_NtReplyWaitReceivePort
  */
 NTSTATUS WINAPI wow64_NtReplyWaitReceivePort( UINT *args )
@@ -1270,6 +1313,22 @@ NTSTATUS WINAPI wow64_NtReplyWaitReceivePort( UINT *args )
     LPC_MESSAGE *msg = get_ptr( &args );
 
     FIXME( "%p %p %p %p: stub\n", handle, id, reply, msg );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/**********************************************************************
+ *           wow64_NtReplyWaitReceivePortEx
+ */
+NTSTATUS WINAPI wow64_NtReplyWaitReceivePortEx( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    ULONG *id = get_ptr( &args );
+    LPC_MESSAGE *reply = get_ptr( &args );
+    LPC_MESSAGE *msg = get_ptr( &args );
+    LARGE_INTEGER *timeout = get_ptr( &args );
+
+    FIXME( "%p %p %p %p %p: stub\n", handle, id, reply, msg, timeout );
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -1744,6 +1803,23 @@ NTSTATUS WINAPI wow64_NtWaitForSingleObject( UINT *args )
 
 
 /**********************************************************************
+ *           wow64_NtWriteRequestData
+ */
+NTSTATUS WINAPI wow64_NtWriteRequestData( UINT *args )
+{
+    HANDLE handle = get_handle( &args );
+    LPC_MESSAGE *request = get_ptr( &args );
+    ULONG id = get_ulong( &args );
+    void *buffer = get_ptr( &args );
+    ULONG len = get_ulong( &args );
+    ULONG *retlen = get_ptr( &args );
+
+    FIXME( "%p %p %lu %p %lu %p: stub\n", handle, request, id, buffer, len, retlen );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/**********************************************************************
  *           wow64_NtYieldExecution
  */
 NTSTATUS WINAPI wow64_NtYieldExecution( UINT *args )
@@ -1803,4 +1879,18 @@ NTSTATUS WINAPI wow64_NtRollbackTransaction( UINT *args )
     BOOLEAN wait = get_ulong( &args );
 
     return NtRollbackTransaction( handle, wait );
+}
+
+
+/**********************************************************************
+ *           wow64_NtConvertBetweenAuxiliaryCounterAndPerformanceCounter
+ */
+NTSTATUS WINAPI wow64_NtConvertBetweenAuxiliaryCounterAndPerformanceCounter( UINT *args )
+{
+    ULONG flags = get_ulong( &args );
+    ULONGLONG *from = get_ptr( &args );
+    ULONGLONG *to = get_ptr( &args );
+    ULONGLONG *error = get_ptr( &args );
+
+    return NtConvertBetweenAuxiliaryCounterAndPerformanceCounter( flags, from, to, error );
 }

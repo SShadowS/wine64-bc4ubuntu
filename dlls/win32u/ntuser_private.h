@@ -27,6 +27,7 @@
 #include "shlobj.h"
 #include "wine/list.h"
 #include "wine/vulkan.h"
+#include "wine/vulkan_driver.h"
 
 
 #define WM_POPUPSYSTEMMENU  0x0313
@@ -37,23 +38,16 @@ enum system_timer_id
     SYSTEM_TIMER_CARET = 0xffff,
 };
 
-struct user_object
-{
-    HANDLE       handle;
-    unsigned int type;
-};
-
 #define OBJ_OTHER_PROCESS ((void *)1)  /* returned by get_user_handle_ptr on unknown handles */
 
 typedef struct tagWND
 {
-    struct user_object obj;           /* object header */
+    HWND               handle;        /* window full handle */
     HWND               parent;        /* Window parent */
     HWND               owner;         /* Window owner */
     struct tagCLASS   *class;         /* Window class */
     struct dce        *dce;           /* DCE pointer */
     WNDPROC            winproc;       /* Window procedure */
-    UINT               tid;           /* Owner thread id */
     HINSTANCE          hInstance;     /* Window hInstance (from CreateWindow) */
     struct window_rects rects;        /* window rects in window DPI, relative to the parent client area */
     RECT               normal_rect;   /* Normal window rect saved when maximized/minimized */
@@ -71,10 +65,10 @@ typedef struct tagWND
     HICON              hIconSmall;    /* window's small icon */
     HICON              hIconSmall2;   /* window's secondary small icon, derived from hIcon */
     HIMC               imc;           /* window's input context */
-    UINT               dpi_context;   /* window DPI awareness context */
     struct window_surface *surface;   /* Window surface if any */
-    struct list        vulkan_surfaces; /* list of vulkan surfaces created for this window */
+    struct opengl_drawable *opengl_drawable; /* last GL client surface for this window */
     struct tagDIALOGINFO *dlgInfo;    /* Dialog additional info (dialogs only) */
+    int                swap_interval; /* OpenGL surface swap interval */
     int                pixel_format;  /* Pixel format set by the graphics driver */
     int                internal_pixel_format; /* Internal pixel format set via WGL_WINE_pixel_format_passthrough */
     int                cbWndExtra;    /* class cbWndExtra at window creation */
@@ -108,7 +102,7 @@ struct user_thread_info
     struct ntuser_thread_info     client_info;            /* Data shared with client */
     HANDLE                        server_queue;           /* Handle to server-side queue */
     DWORD                         last_getmsg_time;       /* Get/PeekMessage last request time */
-    DWORD                         last_driver_time;       /* Get/PeekMessage driver event time */
+    LONGLONG                      last_driver_time;       /* Get/PeekMessage driver event time */
     WORD                          hook_call_depth;        /* Number of recursively called hook procs */
     WORD                          hook_unicode;           /* Is current hook unicode? */
     HHOOK                         hook;                   /* Current hook */
@@ -222,18 +216,17 @@ extern int peek_message( MSG *msg, const struct peek_message_filter *filter );
 extern LRESULT system_tray_call( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, void *data );
 
 /* vulkan.c */
-extern void *(*p_vkGetDeviceProcAddr)(VkDevice, const char *);
-extern void *(*p_vkGetInstanceProcAddr)(VkInstance, const char *);
+extern PFN_vkGetDeviceProcAddr p_vkGetDeviceProcAddr;
+extern PFN_vkGetInstanceProcAddr p_vkGetInstanceProcAddr;
 
 extern BOOL vulkan_init(void);
-extern void vulkan_detach_surfaces( struct list *surfaces );
 
 /* window.c */
-HANDLE alloc_user_handle( struct user_object *ptr, unsigned int type );
-void *free_user_handle( HANDLE handle, unsigned int type );
-void *get_user_handle_ptr( HANDLE handle, unsigned int type );
+HANDLE alloc_user_handle( void *ptr, unsigned short type );
+void *free_user_handle( HANDLE handle, unsigned short type );
+void *get_user_handle_ptr( HANDLE handle, unsigned short type );
 void release_user_handle_ptr( void *ptr );
-void *next_process_user_handle_ptr( HANDLE *handle, unsigned int type );
+void *next_thread_user_object( UINT tid, HANDLE *handle, unsigned short type );
 UINT win_set_flags( HWND hwnd, UINT set_mask, UINT clear_mask );
 
 static inline UINT win_get_flags( HWND hwnd )

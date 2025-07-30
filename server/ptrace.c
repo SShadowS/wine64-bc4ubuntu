@@ -101,6 +101,30 @@ static inline int ptrace(int req, ...) { errno = EPERM; return -1; /*FAIL*/ }
 #define __WALL 0
 #endif
 
+static const char *get_signal_name( int sig )
+{
+    static char buffer[20];
+    switch (sig)
+    {
+#define X(x) case x: return #x
+    X(SIGABRT);
+    X(SIGBUS);
+    X(SIGFPE);
+    X(SIGILL);
+    X(SIGINT);
+    X(SIGQUIT);
+    X(SIGSEGV);
+    X(SIGSTOP);
+    X(SIGTRAP);
+    X(SIGUSR1);
+    X(SIGUSR2);
+#undef X
+    default:
+        sprintf( buffer, "signal=%d", sig );
+        return buffer;
+    }
+}
+
 /* handle a status returned by waitpid */
 static int handle_child_status( struct thread *thread, int pid, int status, int want_sig )
 {
@@ -108,7 +132,7 @@ static int handle_child_status( struct thread *thread, int pid, int status, int 
     {
         int sig = WSTOPSIG(status);
         if (debug_level && thread)
-            fprintf( stderr, "%04x: *signal* signal=%d\n", thread->id, sig );
+            fprintf( stderr, "%04x: *signal* %s\n", thread->id, get_signal_name( sig ));
         if (sig != want_sig)
         {
             /* ignore other signals for now */
@@ -123,8 +147,8 @@ static int handle_child_status( struct thread *thread, int pid, int status, int 
         if (debug_level)
         {
             if (WIFSIGNALED(status))
-                fprintf( stderr, "%04x: *exited* signal=%d\n",
-                         thread->id, WTERMSIG(status) );
+                fprintf( stderr, "%04x: *exited* %s\n",
+                         thread->id, get_signal_name( WTERMSIG(status) ));
             else
                 fprintf( stderr, "%04x: *exited* status=%d\n",
                          thread->id, WEXITSTATUS(status) );
@@ -155,15 +179,8 @@ void sigchld_callback(void)
 static int get_ptrace_pid( struct thread *thread )
 {
 #ifdef linux  /* linux always uses thread id */
-    if (thread->unix_tid != -1) return thread->unix_tid;
+    return thread->unix_tid;
 #endif
-    return thread->unix_pid;
-}
-
-/* return the Unix tid to use in ptrace calls for a given thread */
-static int get_ptrace_tid( struct thread *thread )
-{
-    if (thread->unix_tid != -1) return thread->unix_tid;
     return thread->unix_pid;
 }
 
@@ -235,23 +252,19 @@ int send_thread_signal( struct thread *thread, int sig )
 {
     int ret = -1;
 
-    if (thread->unix_pid != -1)
+    if (thread->unix_tid != -1)
     {
-        if (thread->unix_tid != -1)
-        {
-            ret = tkill( thread->unix_pid, thread->unix_tid, sig );
-            if (ret == -1 && errno == ENOSYS) ret = kill( thread->unix_pid, sig );
-        }
-        else ret = kill( thread->unix_pid, sig );
-
-        if (ret == -1 && errno == ESRCH) /* thread got killed */
-        {
-            thread->unix_pid = -1;
-            thread->unix_tid = -1;
-        }
+        ret = tkill( thread->unix_pid, thread->unix_tid, sig );
+        if (ret == -1 && errno == ENOSYS) ret = kill( thread->unix_pid, sig );
     }
+    if (ret == -1 && errno == ESRCH) /* thread got killed */
+    {
+        thread->unix_pid = -1;
+        thread->unix_tid = -1;
+    }
+
     if (debug_level && ret != -1)
-        fprintf( stderr, "%04x: *sent signal* signal=%d\n", thread->id, sig );
+        fprintf( stderr, "%04x: *sent signal* %s\n", thread->id, get_signal_name( sig ));
     return (ret != -1);
 }
 
@@ -408,7 +421,7 @@ int read_process_memory( struct process *process, client_ptr_t ptr, data_size_t 
 /* len is the total size (in longs) */
 static int check_process_write_access( struct thread *thread, long *addr, data_size_t len )
 {
-    int page = get_page_size() / sizeof(long);
+    size_t page = get_page_size() / sizeof(long);
 
     for (;;)
     {
@@ -558,9 +571,9 @@ void init_thread_context( struct thread *thread )
 }
 
 /* retrieve the thread x86 registers */
-void get_thread_context( struct thread *thread, context_t *context, unsigned int flags )
+void get_thread_context( struct thread *thread, struct context_data *context, unsigned int flags )
 {
-    int i, pid = get_ptrace_tid(thread);
+    int i;
     long data[8];
 
     /* all other regs are handled on the client side */
@@ -579,7 +592,7 @@ void get_thread_context( struct thread *thread, context_t *context, unsigned int
     {
         if (i == 4 || i == 5) continue;
         errno = 0;
-        data[i] = ptrace( PTRACE_PEEKUSER, pid, DR_OFFSET(i), 0 );
+        data[i] = ptrace( PTRACE_PEEKUSER, thread->unix_tid, DR_OFFSET(i), 0 );
         if ((data[i] == -1) && errno)
         {
             file_set_error();
@@ -614,9 +627,9 @@ done:
 }
 
 /* set the thread x86 registers */
-void set_thread_context( struct thread *thread, const context_t *context, unsigned int flags )
+void set_thread_context( struct thread *thread, const struct context_data *context, unsigned int flags )
 {
-    int pid = get_ptrace_tid( thread );
+    int pid = thread->unix_tid;
 
     /* all other regs are handled on the client side */
     assert( flags == SERVER_CTX_DEBUG_REGISTERS );
@@ -674,16 +687,15 @@ void init_thread_context( struct thread *thread )
         struct dbreg dbregs;
 
         memset( &dbregs, 0, sizeof(dbregs) );
-        ptrace( PTRACE_SETDBREGS, get_ptrace_tid( thread ), (caddr_t)&dbregs, 0 );
+        ptrace( PTRACE_SETDBREGS, thread->unix_tid, (caddr_t)&dbregs, 0 );
         resume_after_ptrace( thread );
     }
     thread->system_regs = 0;
 }
 
 /* retrieve the thread x86 registers */
-void get_thread_context( struct thread *thread, context_t *context, unsigned int flags )
+void get_thread_context( struct thread *thread, struct context_data *context, unsigned int flags )
 {
-    int pid = get_ptrace_tid(thread);
     struct dbreg dbregs;
 
     /* all other regs are handled on the client side */
@@ -691,7 +703,7 @@ void get_thread_context( struct thread *thread, context_t *context, unsigned int
 
     if (!suspend_for_ptrace( thread )) return;
 
-    if (ptrace( PTRACE_GETDBREGS, pid, (caddr_t) &dbregs, 0 ) == -1) file_set_error();
+    if (ptrace( PTRACE_GETDBREGS, thread->unix_tid, (caddr_t) &dbregs, 0 ) == -1) file_set_error();
     else
     {
 #ifdef DBREG_DRX
@@ -723,9 +735,8 @@ void get_thread_context( struct thread *thread, context_t *context, unsigned int
 }
 
 /* set the thread x86 registers */
-void set_thread_context( struct thread *thread, const context_t *context, unsigned int flags )
+void set_thread_context( struct thread *thread, const struct context_data *context, unsigned int flags )
 {
-    int pid = get_ptrace_tid(thread);
     struct dbreg dbregs;
 
     /* all other regs are handled on the client side */
@@ -762,7 +773,7 @@ void set_thread_context( struct thread *thread, const context_t *context, unsign
     dbregs.dr6 = context->debug.i386_regs.dr6;
     dbregs.dr7 = context->debug.i386_regs.dr7;
 #endif
-    if (ptrace( PTRACE_SETDBREGS, pid, (caddr_t)&dbregs, 0 ) != -1)
+    if (ptrace( PTRACE_SETDBREGS, thread->unix_tid, (caddr_t)&dbregs, 0 ) != -1)
     {
         thread->system_regs |= SERVER_CTX_DEBUG_REGISTERS;
     }
@@ -779,12 +790,12 @@ void init_thread_context( struct thread *thread )
 }
 
 /* retrieve the thread x86 registers */
-void get_thread_context( struct thread *thread, context_t *context, unsigned int flags )
+void get_thread_context( struct thread *thread, struct context_data *context, unsigned int flags )
 {
 }
 
 /* set the thread x86 debug registers */
-void set_thread_context( struct thread *thread, const context_t *context, unsigned int flags )
+void set_thread_context( struct thread *thread, const struct context_data *context, unsigned int flags )
 {
 }
 

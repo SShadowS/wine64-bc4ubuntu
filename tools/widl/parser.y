@@ -379,6 +379,8 @@ input: gbl_statements m_acf			{ $1 = append_parameterized_type_stmts($1);
 						  write_typelib_regscript($1);
 						  write_dlldata($1);
 						  write_local_stubs($1);
+						  write_metadata($1);
+                                                  (void)parser_nerrs;  /* avoid unused variable warning */
 						}
 	;
 
@@ -2560,6 +2562,108 @@ static void check_remoting_fields(const var_t *var, type_t *type)
         if (field->declspec.type) check_field_common(type, type->name, field);
 }
 
+static void check_eventadd_args( const var_t *func, const var_list_t *args )
+{
+    const var_t *arg;
+    unsigned int count = 0;
+
+    LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
+    {
+        const type_t *type = arg->declspec.type;
+        const type_t *ref_type = is_ptr( type ) ? type_pointer_get_ref_type( type ) : NULL;
+
+        count++;
+        if (count == 1 && (!ref_type || ref_type->type_type != TYPE_DELEGATE))
+            error_at( &arg->where, "first parameter '%s' of function '%s' must be a delegate pointer\n",
+                      arg->name, func->name );
+
+        if (count == 2 && (!ref_type || !ref_type->name || strcmp( ref_type->name, "EventRegistrationToken" ) ||
+            !is_attr( arg->attrs, ATTR_RETVAL )))
+            error_at( &arg->where, "second parameter '%s' of function '%s' must be an [out, retval] EventRegistrationToken pointer\n",
+                      arg->name, func->name );
+
+        if (count > 2) error_at( &arg->where, "eventadd function '%s' has too many parameters\n", func->name );
+    }
+}
+
+static void check_eventremove_args( const var_t *func, const var_list_t *args )
+{
+    const var_t *arg;
+    unsigned int count = 0;
+
+    LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
+    {
+        const type_t *type = arg->declspec.type;
+
+        count++;
+        if (count == 1 && (!type->name || strcmp( type->name, "EventRegistrationToken" )))
+            error_at( &arg->where, "first parameter '%s' of function '%s' must be an EventRegistrationToken\n",
+                      arg->name, func->name );
+
+        if (count > 1) error_at( &arg->where, "eventremove function '%s' has too many parameters\n", func->name );
+    }
+}
+
+static int is_size_parameter( const var_t *param, const var_list_t *args )
+{
+    const var_t *arg;
+
+    LIST_FOR_EACH_ENTRY( arg, args, const var_t, entry )
+    {
+        const type_t *type = arg->declspec.type;
+        const expr_t *size_is;
+
+        if (is_ptr( type )) type = type_pointer_get_ref_type( type );
+        if (type->type_type != TYPE_ARRAY || !(size_is = type_array_get_conformance( type ))) continue;
+
+        if (size_is->type == EXPR_PPTR) size_is = size_is->ref;
+        if (!strcmp( param->name, size_is->u.sval )) return 1;
+    }
+    return 0;
+}
+
+static void check_propget_args( const var_t *func, const var_list_t *args )
+{
+    const var_t *arg;
+    unsigned int count = 0;
+
+    LIST_FOR_EACH_ENTRY_REV( arg, args, const var_t, entry )
+    {
+        const type_t *type = arg->declspec.type;
+        int is_size = is_size_parameter( arg, args );
+
+        count++;
+        if (count == 1 && (!is_ptr( type ) || !is_attr( arg->attrs, ATTR_RETVAL )))
+            error_at( &arg->where, "last parameter '%s' of function '%s' must be an [out, retval] pointer\n",
+                      arg->name, func->name );
+
+        if (count == 2 && !is_size)
+            error_at( &arg->where, "parameter '%s' of function '%s' must be a size_is parameter\n",
+                      arg->name, func->name );
+
+        if ((is_size && count > 2) || (!is_size && count > 1))
+            error_at( &arg->where, "propget function '%s' has too many parameters\n", func->name );
+    }
+}
+
+static void check_propput_args( const var_t *func, const var_list_t *args )
+{
+    const var_t *arg;
+    unsigned int count = 0;
+
+    LIST_FOR_EACH_ENTRY_REV( arg, args, const var_t, entry )
+    {
+        int is_size = is_size_parameter( arg, args );
+
+        count++;
+        if (is_attr( arg->attrs, ATTR_OUT ))
+            error_at( &arg->where, "parameter '%s' of function '%s' must be an [in] parameter\n", arg->name, func->name );
+
+        if ((is_size && count > 2) || (!is_size && count > 1))
+            error_at( &arg->where, "propput function '%s' has too many parameters\n", func->name );
+    }
+}
+
 /* checks that arguments for a function make sense for marshalling and unmarshalling */
 static void check_remoting_args(const var_t *func)
 {
@@ -2610,6 +2714,8 @@ static void check_remoting_args(const var_t *func)
                 break;
             }
         }
+        else if (is_attr( arg->attrs, ATTR_RETVAL ))
+            error_at( &arg->where, "retval parameter \'%s\' of function \'%s\' must have out attribute\n", arg->name, funcname );
 
         check_field_common(func->declspec.type, funcname, arg);
     }
@@ -2681,6 +2787,19 @@ static void check_functions(const type_t *iface, int is_inside_library)
             const var_t *func = stmt->u.var;
             if (!is_attr(func->attrs, ATTR_LOCAL))
                 check_remoting_args(func);
+        }
+    }
+    if (winrt_mode)
+    {
+        STATEMENTS_FOR_EACH_FUNC( stmt, type_iface_get_stmts( iface ) )
+        {
+            const var_t *func = stmt->u.var;
+            const var_list_t *args = type_function_get_args( func->declspec.type );
+
+            if (args && is_attr( func->attrs, ATTR_EVENTADD )) check_eventadd_args( func, args );
+            if (args && is_attr( func->attrs, ATTR_EVENTREMOVE )) check_eventremove_args( func, args );
+            if (args && is_attr( func->attrs, ATTR_PROPGET )) check_propget_args( func, args );
+            if (args && is_attr( func->attrs, ATTR_PROPPUT )) check_propput_args( func, args );
         }
     }
 }
@@ -2824,6 +2943,11 @@ static void check_all_user_types(const statement_list_t *stmts)
              !is_local(stmt->u.type->attrs))
     {
       const statement_t *stmt_func;
+      const type_t *type = stmt->u.type;
+      if (type->details.iface && type->details.iface->inherit && !type_is_complete(type->details.iface->inherit))
+          error_at(&type->where, "interface %s can't inherit from incomplete interface %s\n",
+                   type->name, type->details.iface->inherit->name);
+
       STATEMENTS_FOR_EACH_FUNC(stmt_func, type_iface_get_stmts(stmt->u.type)) {
         const var_t *func = stmt_func->u.var;
         if (type_function_get_args(func->declspec.type))

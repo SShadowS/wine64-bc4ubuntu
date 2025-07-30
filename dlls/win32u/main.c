@@ -39,8 +39,8 @@ void *__wine_syscall_dispatcher = NULL;
 #ifdef __arm64ec__
 enum syscall_ids
 {
-#define SYSCALL_ENTRY(id,name,args) __id_##name = id + 0x1000,
-ALL_SYSCALLS64
+#define SYSCALL_ENTRY(id,name,args) __id_##name = id,
+ALL_SYSCALLS
 #undef SYSCALL_ENTRY
 };
 
@@ -782,6 +782,11 @@ BOOL SYSCALL_API NtGdiLineTo( HDC hdc, INT x, INT y )
     SYSCALL_FUNC( NtGdiLineTo );
 }
 
+ULONG SYSCALL_API NtGdiMakeFontDir( DWORD embed, BYTE *buffer, UINT size, const WCHAR *path, UINT len )
+{
+    SYSCALL_FUNC( NtGdiMakeFontDir );
+}
+
 BOOL SYSCALL_API NtGdiMaskBlt( HDC hdcDest, INT nXDest, INT nYDest, INT nWidth, INT nHeight,
                                HDC hdcSrc, INT nXSrc, INT nYSrc, HBITMAP hbmMask,
                                INT xMask, INT yMask, DWORD dwRop, DWORD bk_color )
@@ -1107,6 +1112,16 @@ BOOL SYSCALL_API NtUserAddClipboardFormatListener( HWND hwnd )
     SYSCALL_FUNC( NtUserAddClipboardFormatListener );
 }
 
+ULONG SYSCALL_API NtUserAlterWindowStyle( HWND hwnd, UINT mask, UINT style )
+{
+    SYSCALL_FUNC( NtUserAlterWindowStyle );
+}
+
+UINT SYSCALL_API NtUserArrangeIconicWindows( HWND parent )
+{
+    SYSCALL_FUNC( NtUserArrangeIconicWindows );
+}
+
 UINT SYSCALL_API NtUserAssociateInputContext( HWND hwnd, HIMC ctx, ULONG flags )
 {
     SYSCALL_FUNC( NtUserAssociateInputContext );
@@ -1115,6 +1130,11 @@ UINT SYSCALL_API NtUserAssociateInputContext( HWND hwnd, HIMC ctx, ULONG flags )
 BOOL SYSCALL_API NtUserAttachThreadInput( DWORD from, DWORD to, BOOL attach )
 {
     SYSCALL_FUNC( NtUserAttachThreadInput );
+}
+
+HDWP SYSCALL_API NtUserBeginDeferWindowPos( INT count )
+{
+    SYSCALL_FUNC( NtUserBeginDeferWindowPos );
 }
 
 HDC SYSCALL_API NtUserBeginPaint( HWND hwnd, PAINTSTRUCT *ps )
@@ -1127,10 +1147,20 @@ NTSTATUS SYSCALL_API NtUserBuildHimcList( UINT thread_id, UINT count, HIMC *buff
     SYSCALL_FUNC( NtUserBuildHimcList );
 }
 
-NTSTATUS SYSCALL_API NtUserBuildHwndList( HDESK desktop, ULONG unk2, ULONG unk3, ULONG unk4,
+NTSTATUS SYSCALL_API NtUserBuildHwndList( HDESK desktop, HWND hwnd, BOOL children, BOOL non_immersive,
                                           ULONG thread_id, ULONG count, HWND *buffer, ULONG *size )
 {
     SYSCALL_FUNC( NtUserBuildHwndList );
+}
+
+NTSTATUS SYSCALL_API NtUserBuildNameList( HWINSTA winsta, ULONG size, struct ntuser_name_list *buffer, ULONG *ret_size )
+{
+    SYSCALL_FUNC( NtUserBuildNameList );
+}
+
+NTSTATUS SYSCALL_API NtUserBuildPropList( HWND hwnd, ULONG count, struct ntuser_property_list *buffer, ULONG *ret_count )
+{
+    SYSCALL_FUNC( NtUserBuildPropList );
 }
 
 ULONG_PTR SYSCALL_API NtUserCallHwnd( HWND hwnd, DWORD code )
@@ -1241,6 +1271,16 @@ HIMC SYSCALL_API NtUserCreateInputContext( UINT_PTR client_ptr )
     SYSCALL_FUNC( NtUserCreateInputContext );
 }
 
+HMENU SYSCALL_API NtUserCreateMenu(void)
+{
+    SYSCALL_FUNC( NtUserCreateMenu );
+}
+
+HMENU SYSCALL_API NtUserCreatePopupMenu(void)
+{
+    SYSCALL_FUNC( NtUserCreatePopupMenu );
+}
+
 HWND SYSCALL_API NtUserCreateWindowEx( DWORD ex_style, UNICODE_STRING *class_name,
                                        UNICODE_STRING *version, UNICODE_STRING *window_name,
                                        DWORD style, INT x, INT y, INT cx, INT cy,
@@ -1271,6 +1311,11 @@ BOOL SYSCALL_API NtUserDeleteMenu( HMENU handle, UINT id, UINT flags )
 BOOL SYSCALL_API NtUserDestroyAcceleratorTable( HACCEL handle )
 {
     SYSCALL_FUNC( NtUserDestroyAcceleratorTable );
+}
+
+BOOL SYSCALL_API NtUserDestroyCaret(void)
+{
+    SYSCALL_FUNC( NtUserDestroyCaret );
 }
 
 BOOL SYSCALL_API NtUserDestroyCursor( HCURSOR cursor, ULONG arg )
@@ -1330,6 +1375,11 @@ BOOL SYSCALL_API NtUserDrawIconEx( HDC hdc, INT x0, INT y0, HICON icon, INT widt
     SYSCALL_FUNC( NtUserDrawIconEx );
 }
 
+BOOL SYSCALL_API NtUserDrawMenuBar( HWND hwnd )
+{
+    SYSCALL_FUNC( NtUserDrawMenuBar );
+}
+
 DWORD SYSCALL_API NtUserDrawMenuBarTemp( HWND hwnd, HDC hdc, RECT *rect, HMENU handle, HFONT font )
 {
     SYSCALL_FUNC( NtUserDrawMenuBarTemp );
@@ -1360,6 +1410,11 @@ BOOL SYSCALL_API NtUserEnableScrollBar( HWND hwnd, UINT bar, UINT flags )
     SYSCALL_FUNC( NtUserEnableScrollBar );
 }
 
+BOOL SYSCALL_API NtUserEnableWindow( HWND hwnd, BOOL enable )
+{
+    SYSCALL_FUNC( NtUserEnableWindow );
+}
+
 BOOL SYSCALL_API NtUserEndDeferWindowPosEx( HDWP hdwp, BOOL async )
 {
     SYSCALL_FUNC( NtUserEndDeferWindowPosEx );
@@ -1373,6 +1428,11 @@ BOOL SYSCALL_API NtUserEndMenu(void)
 BOOL SYSCALL_API NtUserEndPaint( HWND hwnd, const PAINTSTRUCT *ps )
 {
     SYSCALL_FUNC( NtUserEndPaint );
+}
+
+UINT SYSCALL_API NtUserEnumClipboardFormats( UINT format )
+{
+    SYSCALL_FUNC( NtUserEnumClipboardFormats );
 }
 
 NTSTATUS SYSCALL_API NtUserEnumDisplayDevices( UNICODE_STRING *device, DWORD index,
@@ -1448,6 +1508,11 @@ INT SYSCALL_API NtUserGetClassName( HWND hwnd, BOOL real, UNICODE_STRING *name )
     SYSCALL_FUNC( NtUserGetClassName );
 }
 
+BOOL SYSCALL_API NtUserGetClipCursor( RECT *rect )
+{
+    SYSCALL_FUNC( NtUserGetClipCursor );
+}
+
 HANDLE SYSCALL_API NtUserGetClipboardData( UINT format, struct get_clipboard_params *params )
 {
     SYSCALL_FUNC( NtUserGetClipboardData );
@@ -1471,6 +1536,11 @@ DWORD SYSCALL_API NtUserGetClipboardSequenceNumber(void)
 HWND SYSCALL_API NtUserGetClipboardViewer(void)
 {
     SYSCALL_FUNC( NtUserGetClipboardViewer );
+}
+
+BOOL SYSCALL_API NtUserGetCurrentInputMessageSource( INPUT_MESSAGE_SOURCE *source )
+{
+    SYSCALL_FUNC( NtUserGetCurrentInputMessageSource );
 }
 
 HCURSOR SYSCALL_API NtUserGetCursor(void)
@@ -1619,6 +1689,11 @@ INT SYSCALL_API NtUserGetPriorityClipboardFormat( UINT *list, INT count )
     SYSCALL_FUNC( NtUserGetPriorityClipboardFormat );
 }
 
+BOOL SYSCALL_API NtUserGetProcessDefaultLayout( ULONG *layout )
+{
+    SYSCALL_FUNC( NtUserGetProcessDefaultLayout );
+}
+
 ULONG SYSCALL_API NtUserGetProcessDpiAwarenessContext( HANDLE process )
 {
     SYSCALL_FUNC( NtUserGetProcessDpiAwarenessContext );
@@ -1684,6 +1759,11 @@ HDESK SYSCALL_API NtUserGetThreadDesktop( DWORD thread )
     SYSCALL_FUNC( NtUserGetThreadDesktop );
 }
 
+ULONG_PTR SYSCALL_API NtUserGetThreadState( USERTHREADSTATECLASS cls )
+{
+    SYSCALL_FUNC( NtUserGetThreadState );
+}
+
 BOOL SYSCALL_API NtUserGetTitleBarInfo( HWND hwnd, TITLEBARINFO *info )
 {
     SYSCALL_FUNC( NtUserGetTitleBarInfo );
@@ -1702,6 +1782,11 @@ INT SYSCALL_API NtUserGetUpdateRgn( HWND hwnd, HRGN hrgn, BOOL erase )
 BOOL SYSCALL_API NtUserGetUpdatedClipboardFormats( UINT *formats, UINT size, UINT *out_size )
 {
     SYSCALL_FUNC( NtUserGetUpdatedClipboardFormats );
+}
+
+DWORD SYSCALL_API NtUserGetWindowContextHelpId( HWND hwnd )
+{
+    SYSCALL_FUNC( NtUserGetWindowContextHelpId );
 }
 
 HDC SYSCALL_API NtUserGetWindowDC( HWND hwnd )
@@ -1756,6 +1841,11 @@ BOOL SYSCALL_API NtUserInvalidateRgn( HWND hwnd, HRGN hrgn, BOOL erase )
     SYSCALL_FUNC( NtUserInvalidateRgn );
 }
 
+BOOL SYSCALL_API NtUserIsChildWindowDpiMessageEnabled( HWND hwnd )
+{
+    SYSCALL_FUNC( NtUserIsChildWindowDpiMessageEnabled );
+}
+
 BOOL SYSCALL_API NtUserIsClipboardFormatAvailable( UINT format )
 {
     SYSCALL_FUNC( NtUserIsClipboardFormatAvailable );
@@ -1764,6 +1854,11 @@ BOOL SYSCALL_API NtUserIsClipboardFormatAvailable( UINT format )
 BOOL SYSCALL_API NtUserIsMouseInPointerEnabled(void)
 {
     SYSCALL_FUNC( NtUserIsMouseInPointerEnabled );
+}
+
+BOOL SYSCALL_API NtUserKillSystemTimer( HWND hwnd, UINT_PTR id )
+{
+    SYSCALL_FUNC( NtUserKillSystemTimer );
 }
 
 BOOL SYSCALL_API NtUserKillTimer( HWND hwnd, UINT_PTR id )
@@ -1789,6 +1884,11 @@ UINT SYSCALL_API NtUserMapVirtualKeyEx( UINT code, UINT type, HKL layout )
 INT SYSCALL_API NtUserMenuItemFromPoint( HWND hwnd, HMENU handle, int x, int y )
 {
     SYSCALL_FUNC( NtUserMenuItemFromPoint );
+}
+
+BOOL SYSCALL_API NtUserMessageBeep( UINT type )
+{
+    SYSCALL_FUNC( NtUserMessageBeep );
 }
 
 LRESULT SYSCALL_API NtUserMessageCall( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
@@ -1853,6 +1953,11 @@ BOOL SYSCALL_API NtUserPostMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     SYSCALL_FUNC( NtUserPostMessage );
 }
 
+BOOL SYSCALL_API NtUserPostQuitMessage( INT exit_code )
+{
+    SYSCALL_FUNC( NtUserPostQuitMessage );
+}
+
 BOOL SYSCALL_API NtUserPostThreadMessage( DWORD thread, UINT msg, WPARAM wparam, LPARAM lparam )
 {
     SYSCALL_FUNC( NtUserPostThreadMessage );
@@ -1875,9 +1980,19 @@ UINT_PTR SYSCALL_API NtUserQueryInputContext( HIMC handle, UINT attr )
     SYSCALL_FUNC( NtUserQueryInputContext );
 }
 
+HANDLE SYSCALL_API NtUserQueryWindow( HWND hwnd, WINDOWINFOCLASS cls )
+{
+    SYSCALL_FUNC( NtUserQueryWindow );
+}
+
 HWND SYSCALL_API NtUserRealChildWindowFromPoint( HWND parent, LONG x, LONG y )
 {
     SYSCALL_FUNC( NtUserRealChildWindowFromPoint );
+}
+
+UINT SYSCALL_API NtUserRealizePalette( HDC hdc )
+{
+    SYSCALL_FUNC( NtUserRealizePalette );
 }
 
 BOOL SYSCALL_API NtUserRedrawWindow( HWND hwnd, const RECT *rect, HRGN hrgn, UINT flags )
@@ -1907,6 +2022,16 @@ BOOL SYSCALL_API NtUserRegisterTouchPadCapable( BOOL capable )
     SYSCALL_FUNC( NtUserRegisterTouchPadCapable );
 }
 
+ATOM SYSCALL_API NtUserRegisterWindowMessage( UNICODE_STRING *name )
+{
+    SYSCALL_FUNC( NtUserRegisterWindowMessage );
+}
+
+BOOL SYSCALL_API NtUserReleaseCapture(void)
+{
+    SYSCALL_FUNC( NtUserReleaseCapture );
+}
+
 INT SYSCALL_API NtUserReleaseDC( HWND hwnd, HDC hdc )
 {
     SYSCALL_FUNC( NtUserReleaseDC );
@@ -1925,6 +2050,16 @@ BOOL SYSCALL_API NtUserRemoveMenu( HMENU handle, UINT id, UINT flags )
 HANDLE SYSCALL_API NtUserRemoveProp( HWND hwnd, const WCHAR *str )
 {
     SYSCALL_FUNC( NtUserRemoveProp );
+}
+
+BOOL SYSCALL_API NtUserReplyMessage( LRESULT result )
+{
+    SYSCALL_FUNC( NtUserReplyMessage );
+}
+
+INT SYSCALL_API NtUserScheduleDispatchNotification( HWND hwnd )
+{
+    SYSCALL_FUNC( NtUserScheduleDispatchNotification );
 }
 
 BOOL SYSCALL_API NtUserScrollDC( HDC hdc, INT dx, INT dy, const RECT *scroll, const RECT *clip,
@@ -1955,9 +2090,24 @@ HWND SYSCALL_API NtUserSetActiveWindow( HWND hwnd )
     SYSCALL_FUNC( NtUserSetActiveWindow );
 }
 
+BOOL SYSCALL_API NtUserSetAdditionalForegroundBoostProcesses( HWND hwnd, DWORD count, HANDLE *handles )
+{
+    SYSCALL_FUNC( NtUserSetAdditionalForegroundBoostProcesses );
+}
+
 HWND SYSCALL_API NtUserSetCapture( HWND hwnd )
 {
     SYSCALL_FUNC( NtUserSetCapture );
+}
+
+BOOL SYSCALL_API NtUserSetCaretBlinkTime( unsigned int time )
+{
+    SYSCALL_FUNC( NtUserSetCaretBlinkTime );
+}
+
+BOOL SYSCALL_API NtUserSetCaretPos( INT x, INT y )
+{
+    SYSCALL_FUNC( NtUserSetCaretPos );
 }
 
 DWORD SYSCALL_API NtUserSetClassLong( HWND hwnd, INT offset, LONG newval, BOOL ansi )
@@ -2006,6 +2156,11 @@ HWND SYSCALL_API NtUserSetFocus( HWND hwnd )
     SYSCALL_FUNC( NtUserSetFocus );
 }
 
+BOOL SYSCALL_API NtUserSetForegroundWindow( HWND hwnd )
+{
+    SYSCALL_FUNC( NtUserSetForegroundWindow );
+}
+
 void SYSCALL_API NtUserSetInternalWindowPos( HWND hwnd, UINT cmd, RECT *rect, POINT *pt )
 {
     SYSCALL_FUNC( NtUserSetInternalWindowPos );
@@ -2046,6 +2201,11 @@ HWND SYSCALL_API NtUserSetParent( HWND hwnd, HWND parent )
     SYSCALL_FUNC( NtUserSetParent );
 }
 
+BOOL SYSCALL_API NtUserSetProcessDefaultLayout( ULONG layout )
+{
+    SYSCALL_FUNC( NtUserSetProcessDefaultLayout );
+}
+
 BOOL SYSCALL_API NtUserSetProcessDpiAwarenessContext( ULONG awareness, ULONG unknown )
 {
     SYSCALL_FUNC( NtUserSetProcessDpiAwarenessContext );
@@ -2054,6 +2214,11 @@ BOOL SYSCALL_API NtUserSetProcessDpiAwarenessContext( ULONG awareness, ULONG unk
 BOOL SYSCALL_API NtUserSetProcessWindowStation( HWINSTA handle )
 {
     SYSCALL_FUNC( NtUserSetProcessWindowStation );
+}
+
+HWND SYSCALL_API NtUserSetProgmanWindow( HWND hwnd )
+{
+    SYSCALL_FUNC( NtUserSetProgmanWindow );
 }
 
 BOOL SYSCALL_API NtUserSetProp( HWND hwnd, const WCHAR *str, HANDLE handle )
@@ -2086,6 +2251,11 @@ UINT_PTR SYSCALL_API NtUserSetSystemTimer( HWND hwnd, UINT_PTR id, UINT timeout 
     SYSCALL_FUNC( NtUserSetSystemTimer );
 }
 
+HWND SYSCALL_API NtUserSetTaskmanWindow( HWND hwnd )
+{
+    SYSCALL_FUNC( NtUserSetTaskmanWindow );
+}
+
 BOOL SYSCALL_API NtUserSetThreadDesktop( HDESK handle )
 {
     SYSCALL_FUNC( NtUserSetThreadDesktop );
@@ -2101,6 +2271,11 @@ HWINEVENTHOOK SYSCALL_API NtUserSetWinEventHook( DWORD event_min, DWORD event_ma
                                                  DWORD pid, DWORD tid, DWORD flags )
 {
     SYSCALL_FUNC( NtUserSetWinEventHook );
+}
+
+BOOL SYSCALL_API NtUserSetWindowContextHelpId( HWND hwnd, DWORD id )
+{
+    SYSCALL_FUNC( NtUserSetWindowContextHelpId );
 }
 
 LONG SYSCALL_API NtUserSetWindowLong( HWND hwnd, INT offset, LONG newval, BOOL ansi )
@@ -2147,6 +2322,11 @@ BOOL SYSCALL_API NtUserShowCaret( HWND hwnd )
 INT SYSCALL_API NtUserShowCursor( BOOL show )
 {
     SYSCALL_FUNC( NtUserShowCursor );
+}
+
+BOOL SYSCALL_API NtUserShowOwnedPopups( HWND owner, BOOL show )
+{
+    SYSCALL_FUNC( NtUserShowOwnedPopups );
 }
 
 BOOL SYSCALL_API NtUserShowScrollBar( HWND hwnd, INT bar, BOOL show )
@@ -2222,6 +2402,11 @@ BOOL SYSCALL_API NtUserUnhookWinEvent( HWINEVENTHOOK handle )
     SYSCALL_FUNC( NtUserUnhookWinEvent );
 }
 
+BOOL SYSCALL_API NtUserUnhookWindowsHook( INT id, HOOKPROC proc )
+{
+    SYSCALL_FUNC( NtUserUnhookWindowsHook );
+}
+
 BOOL SYSCALL_API NtUserUnhookWindowsHookEx( HHOOK handle )
 {
     SYSCALL_FUNC( NtUserUnhookWindowsHookEx );
@@ -2255,6 +2440,11 @@ BOOL SYSCALL_API NtUserValidateRect( HWND hwnd, const RECT *rect )
     SYSCALL_FUNC( NtUserValidateRect );
 }
 
+BOOL SYSCALL_API NtUserValidateRgn( HWND hwnd, HRGN hrgn )
+{
+    SYSCALL_FUNC( NtUserValidateRgn );
+}
+
 WORD SYSCALL_API NtUserVkKeyScanEx( WCHAR chr, HKL layout )
 {
     SYSCALL_FUNC( NtUserVkKeyScanEx );
@@ -2280,12 +2470,6 @@ HWND SYSCALL_API NtUserWindowFromPoint( LONG x, LONG y )
     SYSCALL_FUNC( NtUserWindowFromPoint );
 }
 
-BOOL SYSCALL_API __wine_get_file_outline_text_metric( const WCHAR *path, TEXTMETRICW *otm,
-                                                      UINT *em_square, WCHAR *face_name )
-{
-    SYSCALL_FUNC( __wine_get_file_outline_text_metric );
-}
-
 BOOL SYSCALL_API __wine_get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size, WCHAR *filename )
 {
     SYSCALL_FUNC( __wine_get_icm_profile );
@@ -2294,13 +2478,12 @@ BOOL SYSCALL_API __wine_get_icm_profile( HDC hdc, BOOL allow_default, DWORD *siz
 #else /*  __arm64ec__ */
 
 #ifdef _WIN64
-#define SYSCALL_ENTRY(id,name,args) __ASM_SYSCALL_FUNC( id + 0x1000, name )
-ALL_SYSCALLS64
+#define SYSCALL_ENTRY(id,name,args) __ASM_SYSCALL_FUNC( id, name )
 #else
-#define SYSCALL_ENTRY(id,name,args) __ASM_SYSCALL_FUNC( id + 0x1000, name, args )
+#define SYSCALL_ENTRY(id,name,args) __ASM_SYSCALL_FUNC( id, name, args )
 DEFINE_SYSCALL_HELPER32()
-ALL_SYSCALLS32
 #endif
+ALL_SYSCALLS
 #undef SYSCALL_ENTRY
 
 #endif /*  __arm64ec__ */

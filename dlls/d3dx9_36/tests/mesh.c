@@ -5221,6 +5221,8 @@ static void test_create_skin_info(void)
         D3DXMATRIX *transform;
         D3DXMATRIX identity_matrix;
 
+        D3DXMatrixIdentity(&identity_matrix);
+
         /* test initial values */
         hr = skininfo->lpVtbl->GetDeclaration(skininfo, declaration_out);
         ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
@@ -5260,7 +5262,6 @@ static void test_create_skin_info(void)
             hr = skininfo->lpVtbl->SetBoneOffsetMatrix(skininfo, 0, NULL);
             ok(hr == D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, got %#lx\n", hr);
 
-            D3DXMatrixIdentity(&identity_matrix);
             hr = skininfo->lpVtbl->SetBoneOffsetMatrix(skininfo, 0, &identity_matrix);
             ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
 
@@ -6854,7 +6855,7 @@ static void check_vertex_components(int line, int mesh_number, int vertex_number
                 BOOL same = got[0] == exp[0] && got[1] == exp[1]
                             && got[2] == exp[2] && got[3] == exp[3];
                 ok_(__FILE__,line)(same, "Mesh %d: Got (%hx, %hx, %hx, %hx) for vertex %d %s, expected (%hx, %hx, %hx, %hx).\n",
-                    mesh_number, got[0], got[1], got[2], got[3], vertex_number, usage_strings[decl_ptr->Usage], exp[0], exp[1], exp[3], exp[4]);
+                    mesh_number, got[0], got[1], got[2], got[3], vertex_number, usage_strings[decl_ptr->Usage], exp[0], exp[1], exp[2], exp[3]);
                 break;
             }
             default:

@@ -39,7 +39,6 @@
 #include "unixlib.h"
 
 
-extern BOOL skip_single_buffer_flushes;
 extern BOOL allow_vsync;
 extern BOOL allow_set_gamma;
 extern BOOL allow_software_rendering;
@@ -136,7 +135,7 @@ extern void macdrv_CleanupIcons(HWND hwnd);
 extern LRESULT macdrv_DesktopWindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
 extern void macdrv_DestroyWindow(HWND hwnd);
 extern void macdrv_SetDesktopWindow(HWND hwnd);
-extern void macdrv_SetFocus(HWND hwnd);
+extern void macdrv_ActivateWindow(HWND hwnd, HWND previous);
 extern void macdrv_SetLayeredWindowAttributes(HWND hwnd, COLORREF key, BYTE alpha,
                                               DWORD flags);
 extern void macdrv_SetParent(HWND hwnd, HWND parent, HWND old_parent);
@@ -144,8 +143,8 @@ extern void macdrv_SetWindowRgn(HWND hwnd, HRGN hrgn, BOOL redraw);
 extern void macdrv_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style);
 extern void macdrv_SetWindowText(HWND hwnd, LPCWSTR text);
 extern UINT macdrv_ShowWindow(HWND hwnd, INT cmd, RECT *rect, UINT swp);
-extern LRESULT macdrv_SysCommand(HWND hwnd, WPARAM wparam, LPARAM lparam);
-extern void macdrv_UpdateLayeredWindow(HWND hwnd, UINT flags);
+extern LRESULT macdrv_SysCommand(HWND hwnd, WPARAM wparam, LPARAM lparam, const POINT *pos);
+extern void macdrv_UpdateLayeredWindow(HWND hwnd, BYTE alpha, UINT flags);
 extern LRESULT macdrv_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 extern BOOL macdrv_WindowPosChanging(HWND hwnd, UINT swp_flags, BOOL shaped, const struct window_rects *rects);
 extern BOOL macdrv_GetWindowStyleMasks(HWND hwnd, UINT style, UINT ex_style, UINT *style_mask, UINT *ex_style_mask);
@@ -190,7 +189,6 @@ struct macdrv_win_data
     unsigned int        ulw_layered : 1;        /* has UpdateLayeredWindow() been called for window? */
     unsigned int        per_pixel_alpha : 1;    /* is window using per-pixel alpha? */
     unsigned int        minimized : 1;          /* is window minimized? */
-    unsigned int        swap_interval : 1;      /* GL swap interval for window */
 };
 
 extern struct macdrv_win_data *get_win_data(HWND hwnd);
@@ -241,9 +239,8 @@ extern void macdrv_UpdateClipboard(void);
 extern BOOL query_pasteboard_data(HWND hwnd, CFStringRef type);
 extern void macdrv_lost_pasteboard_ownership(HWND hwnd);
 
-extern struct opengl_funcs *macdrv_wine_get_wgl_driver(UINT version);
+extern UINT macdrv_OpenGLInit(UINT version, const struct opengl_funcs *opengl_funcs, const struct opengl_driver_funcs **driver_funcs);
 extern UINT macdrv_VulkanInit(UINT version, void *vulkan_handle, const struct vulkan_driver_funcs **driver_funcs);
-extern void sync_gl_view(struct macdrv_win_data* data, const struct window_rects *old_rects);
 
 extern CGImageRef create_cgimage_from_icon_bitmaps(HDC hdc, HANDLE icon, HBITMAP hbmColor,
                                                    unsigned char *color_bits, int color_size, HBITMAP hbmMask,

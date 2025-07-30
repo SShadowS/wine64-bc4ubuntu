@@ -268,7 +268,7 @@
 @ stdcall CopyLZFile(long long) LZCopy
 @ stdcall CreateActCtxA(ptr)
 @ stdcall -import CreateActCtxW(ptr)
-# @ stub CreateBoundaryDescriptorA
+@ stdcall CreateBoundaryDescriptorA(str long)
 @ stdcall -import CreateBoundaryDescriptorW(wstr long)
 @ stdcall -import CreateConsoleScreenBuffer(long long ptr long ptr)
 @ stdcall -import CreateDirectoryA(str ptr)
@@ -634,9 +634,11 @@
 @ stdcall -import GetCurrentConsoleFontEx(long long ptr)
 @ stdcall -import GetCurrentDirectoryA(long ptr)
 @ stdcall -import GetCurrentDirectoryW(long ptr)
+@ stdcall GetCurrentApplicationUserModelId(ptr ptr) kernelbase.GetCurrentApplicationUserModelId
 @ stdcall GetCurrentPackageFamilyName(ptr ptr) kernelbase.GetCurrentPackageFamilyName
 @ stdcall GetCurrentPackageFullName(ptr ptr) kernelbase.GetCurrentPackageFullName
 @ stdcall GetCurrentPackageId(ptr ptr) kernelbase.GetCurrentPackageId
+@ stdcall GetCurrentPackageInfo(long ptr ptr ptr) kernelbase.GetCurrentPackageInfo
 @ stdcall GetCurrentPackagePath(ptr ptr) kernelbase.GetCurrentPackagePath
 @ stdcall -norelay GetCurrentProcess() KERNEL32_GetCurrentProcess
 @ stdcall -norelay GetCurrentProcessId() KERNEL32_GetCurrentProcessId
@@ -658,6 +660,8 @@
 @ stdcall -import GetDiskFreeSpaceExA (str ptr ptr ptr)
 @ stdcall -import GetDiskFreeSpaceExW (wstr ptr ptr ptr)
 @ stdcall -import GetDiskFreeSpaceW(wstr ptr ptr ptr ptr)
+@ stdcall -import GetDiskSpaceInformationA(str ptr)
+@ stdcall -import GetDiskSpaceInformationW(wstr ptr)
 @ stdcall GetDllDirectoryA(long ptr)
 @ stdcall GetDllDirectoryW(long ptr)
 @ stdcall -import GetDriveTypeA(str)
@@ -945,7 +949,7 @@
 @ stub HeapCreateTagsW
 @ stdcall HeapDestroy(long)
 @ stub HeapExtend
-@ stdcall HeapFree(long long ptr)
+@ stdcall -import HeapFree(long long ptr)
 @ stdcall -import HeapLock(long)
 @ stdcall -import HeapQueryInformation(long long ptr long ptr)
 @ stub HeapQueryTagW
@@ -953,7 +957,7 @@
 @ stub HeapSetFlags
 @ stdcall -import HeapSetInformation(ptr long ptr long)
 @ stdcall HeapSize(long long ptr) NTDLL.RtlSizeHeap
-@ stub HeapSummary
+@ stdcall -import HeapSummary(long long ptr)
 @ stdcall -import HeapUnlock(long)
 @ stub HeapUsage
 @ stdcall -import HeapValidate(long long ptr)
@@ -1278,7 +1282,7 @@
 @ stub RegisterConsoleVDM
 @ stdcall RegisterServiceProcess(long long)
 @ stub RegisterSysMsgHandler
-@ stub RegisterWaitForInputIdle
+@ stdcall RegisterWaitForInputIdle(ptr)
 @ stdcall RegisterWaitForSingleObject(ptr long ptr ptr long long)
 @ stdcall -import RegisterWaitForSingleObjectEx(long ptr ptr long long)
 @ stub RegisterWowBaseHandlers
@@ -1625,10 +1629,12 @@
 @ stdcall WakeAllConditionVariable(ptr) NTDLL.RtlWakeAllConditionVariable
 @ stdcall WakeConditionVariable(ptr) NTDLL.RtlWakeConditionVariable
 @ stdcall -import WerGetFlags(ptr ptr)
+@ stdcall -import WerRegisterCustomMetadata(wstr wstr)
 @ stdcall -import WerRegisterFile(wstr long long)
 @ stdcall -import WerRegisterMemoryBlock(ptr long)
 @ stdcall -import WerRegisterRuntimeExceptionModule(wstr ptr)
 @ stdcall -import WerSetFlags(long)
+@ stdcall -import WerUnregisterCustomMetadata(wstr)
 @ stdcall -import WerUnregisterFile(wstr)
 @ stdcall -import WerUnregisterMemoryBlock(ptr)
 @ stdcall -import WerUnregisterRuntimeExceptionModule(wstr ptr)

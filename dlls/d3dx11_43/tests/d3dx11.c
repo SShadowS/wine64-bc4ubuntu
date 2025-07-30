@@ -310,7 +310,7 @@ static void test_D3DX11CreateAsyncMemoryLoader(void)
 {
     ID3DX11DataLoader *loader;
     SIZE_T size;
-    DWORD data;
+    DWORD data = 0;
     HRESULT hr;
     void *ptr;
 
@@ -336,7 +336,6 @@ static void test_D3DX11CreateAsyncMemoryLoader(void)
     hr = ID3DX11DataLoader_Destroy(loader);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
-    data = 0;
     hr = D3DX11CreateAsyncMemoryLoader(&data, sizeof(data), &loader);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
@@ -578,16 +577,8 @@ static void test_D3DX11CompileFromFile(void)
     ok(hr == S_OK && hr == result, "Got unexpected hr %#lx, result %#lx.\n", hr, result);
     ok(!!blob, "Got unexpected blob.\n");
     ok(!errors, "Got unexpected errors.\n");
-    if (errors)
-    {
-        ID3D10Blob_Release(errors);
-        errors = NULL;
-    }
-    if (blob)
-    {
-        ID3D10Blob_Release(blob);
-        blob = NULL;
-    }
+    ID3D10Blob_Release(blob);
+    blob = NULL;
 
     /* Windows always seems to resolve includes from the initial file location
      * instead of using the immediate parent, as it would be the case for
@@ -596,16 +587,8 @@ static void test_D3DX11CompileFromFile(void)
     ok(hr == S_OK && hr == result, "Got unexpected hr %#lx, result %#lx.\n", hr, result);
     ok(!!blob, "Got unexpected blob.\n");
     ok(!errors, "Got unexpected errors.\n");
-    if (errors)
-    {
-        ID3D10Blob_Release(errors);
-        errors = NULL;
-    }
-    if (blob)
-    {
-        ID3D10Blob_Release(blob);
-        blob = NULL;
-    }
+    ID3D10Blob_Release(blob);
+    blob = NULL;
 
     len = WideCharToMultiByte(CP_ACP, 0, filename, -1, NULL, 0, NULL, NULL);
     WideCharToMultiByte(CP_ACP, 0, filename, -1, filename_a, len, NULL, NULL);
@@ -613,16 +596,8 @@ static void test_D3DX11CompileFromFile(void)
     ok(hr == S_OK && hr == result, "Got unexpected hr %#lx, result %#lx.\n", hr, result);
     ok(!!blob, "Got unexpected blob.\n");
     ok(!errors, "Got unexpected errors.\n");
-    if (errors)
-    {
-        ID3D10Blob_Release(errors);
-        errors = NULL;
-    }
-    if (blob)
-    {
-        ID3D10Blob_Release(blob);
-        blob = NULL;
-    }
+    ID3D10Blob_Release(blob);
+    blob = NULL;
 
     GetCurrentDirectoryW(MAX_PATH, directory);
     SetCurrentDirectoryW(temp_dir);
@@ -631,16 +606,8 @@ static void test_D3DX11CompileFromFile(void)
     ok(hr == S_OK && hr == result, "Got unexpected hr %#lx, result %#lx.\n", hr, result);
     ok(!!blob, "Got unexpected blob.\n");
     ok(!errors, "Got unexpected errors.\n");
-    if (errors)
-    {
-        ID3D10Blob_Release(errors);
-        errors = NULL;
-    }
-    if (blob)
-    {
-        ID3D10Blob_Release(blob);
-        blob = NULL;
-    }
+    ID3D10Blob_Release(blob);
+    blob = NULL;
 
     SetCurrentDirectoryW(directory);
 

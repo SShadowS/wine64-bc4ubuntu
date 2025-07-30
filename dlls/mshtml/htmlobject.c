@@ -25,6 +25,7 @@
 #include "winuser.h"
 #include "winreg.h"
 #include "ole2.h"
+#include "mshtmdid.h"
 
 #include "wine/debug.h"
 
@@ -661,6 +662,21 @@ static const NodeImplVtbl HTMLObjectElementImplVtbl = {
     .get_readystate        = HTMLObjectElement_get_readystate,
 };
 
+static void HTMLObjectElement_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
+{
+    static const dispex_hook_t hooks[] = {
+        {DISPID_IHTMLOBJECTELEMENT_READYSTATE},
+        {DISPID_IHTMLOBJECTELEMENT_BASEHREF, .noattr = TRUE},
+        {DISPID_IHTMLOBJECTELEMENT_FORM,     .noattr = TRUE},
+        {DISPID_IHTMLOBJECTELEMENT_ALTHTML,  .noattr = TRUE},
+        {DISPID_UNKNOWN}
+    };
+    dispex_info_add_interface(info, IHTMLObjectElement2_tid, NULL);
+    dispex_info_add_interface(info, IHTMLObjectElement_tid, hooks);
+
+    HTMLElement_init_dispex_info(info, mode);
+}
+
 static const event_target_vtbl_t HTMLObjectElement_event_target_vtbl = {
     {
         HTMLELEMENT_DISPEX_VTBL_ENTRIES,
@@ -676,19 +692,12 @@ static const event_target_vtbl_t HTMLObjectElement_event_target_vtbl = {
     .handle_event       = HTMLElement_handle_event
 };
 
-static const tid_t HTMLObjectElement_iface_tids[] = {
-    IHTMLObjectElement2_tid,
-    IHTMLObjectElement_tid,
-    HTMLELEMENT_TIDS,
-    0
-};
 dispex_static_data_t HTMLObjectElement_dispex = {
-    .id           = PROT_HTMLObjectElement,
-    .prototype_id = PROT_HTMLElement,
+    .id           = OBJID_HTMLObjectElement,
+    .prototype_id = OBJID_HTMLElement,
     .vtbl         = &HTMLObjectElement_event_target_vtbl.dispex_vtbl,
     .disp_tid     = DispHTMLObjectElement_tid,
-    .iface_tids   = HTMLObjectElement_iface_tids,
-    .init_info    = HTMLElement_init_dispex_info,
+    .init_info    = HTMLObjectElement_init_dispex_info,
 };
 
 HRESULT HTMLObjectElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLElement **elem)
@@ -884,13 +893,12 @@ static const event_target_vtbl_t HTMLEmbedElement_event_target_vtbl = {
 };
 
 static const tid_t HTMLEmbedElement_iface_tids[] = {
-    HTMLELEMENT_TIDS,
     IHTMLEmbedElement_tid,
     0
 };
 dispex_static_data_t HTMLEmbedElement_dispex = {
-    .id           = PROT_HTMLEmbedElement,
-    .prototype_id = PROT_HTMLElement,
+    .id           = OBJID_HTMLEmbedElement,
+    .prototype_id = OBJID_HTMLElement,
     .vtbl         = &HTMLEmbedElement_event_target_vtbl.dispex_vtbl,
     .disp_tid     = DispHTMLEmbed_tid,
     .iface_tids   = HTMLEmbedElement_iface_tids,

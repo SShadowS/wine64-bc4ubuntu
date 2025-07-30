@@ -59,25 +59,20 @@ static inline void *get_stack( CONTEXT *context )
     return ldt_get_ptr( context->SegSs, context->Esp );
 }
 
-#include "pshpack1.h"
+#pragma pack(push,1)
 struct idtr
 {
     WORD  limit;
     BYTE *base;
 };
-#include "poppack.h"
+#pragma pack(pop)
 
 static LDT_ENTRY idt[256];
 
 static inline struct idtr get_idtr(void)
 {
     struct idtr ret;
-#if defined(__i386__) && defined(__GNUC__)
     __asm__( "sidtl %0" : "=m" (ret) );
-#else
-    ret.base = (BYTE *)idt;
-    ret.limit = sizeof(idt) - 1;
-#endif
     return ret;
 }
 

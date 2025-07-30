@@ -268,13 +268,22 @@ static dispex_prop_t *lookup_dispex_prop(jsdisp_t *obj, unsigned hash, const WCH
     return NULL;
 }
 
-static HRESULT update_external_prop(jsdisp_t *obj, dispex_prop_t *prop, const struct property_info *desc)
+static HRESULT update_external_prop(jsdisp_t *obj, const WCHAR *name, dispex_prop_t *prop, const struct property_info *desc, dispex_prop_t **ret)
 {
     HRESULT hres;
 
+    if(desc->name)
+        name = desc->name;
+
     if(!desc->iid) {
+        if(!prop && !(prop = alloc_prop(obj, name, PROP_DELETED, 0)))
+            return E_OUTOFMEMORY;
         prop->type = PROP_EXTERN;
         prop->u.id = desc->id;
+    }else if(prop) {
+        /* If a property for a host non-volatile already exists, it must have been deleted. */
+        *ret = prop;
+        return S_OK;
     }else if(desc->flags & PROPF_METHOD) {
         jsdisp_t *func;
 
@@ -282,7 +291,8 @@ static HRESULT update_external_prop(jsdisp_t *obj, dispex_prop_t *prop, const st
         if(FAILED(hres))
             return hres;
 
-        prop->type = PROP_JSVAL;
+        if(!(prop = alloc_prop(obj, name, PROP_JSVAL, 0)))
+            return E_OUTOFMEMORY;
         prop->u.val = jsval_obj(func);
     }else {
         jsdisp_t *getter, *setter = NULL;
@@ -299,12 +309,14 @@ static HRESULT update_external_prop(jsdisp_t *obj, dispex_prop_t *prop, const st
             }
         }
 
-        prop->type = PROP_ACCESSOR;
+        if(!(prop = alloc_prop(obj, name, PROP_ACCESSOR, 0)))
+            return E_OUTOFMEMORY;
         prop->u.accessor.getter = getter;
         prop->u.accessor.setter = setter;
     }
 
     prop->flags = desc->flags & PROPF_ALL;
+    *ret = prop;
     return S_OK;
 }
 
@@ -327,12 +339,8 @@ static HRESULT find_external_prop(jsdisp_t *This, const WCHAR *name, BOOL case_i
                     return S_OK;
                 }
             }
-            if(!prop && !(prop = alloc_prop(This, desc.name ? desc.name : name, PROP_DELETED, 0)))
-                return E_OUTOFMEMORY;
 
-            hres = update_external_prop(This, prop, &desc);
-            *ret = prop;
-            return hres;
+            return update_external_prop(This, name, prop, &desc, ret);
         }else if(prop && prop->type == PROP_EXTERN) {
             prop->type = PROP_DELETED;
         }
@@ -456,13 +464,8 @@ static HRESULT ensure_prop_name(jsdisp_t *This, const WCHAR *name, DWORD create_
         if(This->builtin_info->lookup_prop) {
             struct property_info desc;
             hres = This->builtin_info->lookup_prop(This, name, fdexNameEnsure, &desc);
-            if(hres == S_OK) {
-                hres = update_external_prop(This, prop, &desc);
-                if(FAILED(hres))
-                    return hres;
-                *ret = prop;
-                return S_OK;
-            }
+            if(hres == S_OK)
+                return update_external_prop(This, name, prop, &desc, ret);
         }
 
         hres = S_OK;
@@ -494,21 +497,6 @@ HRESULT jsdisp_index_lookup(jsdisp_t *obj, const WCHAR *name, unsigned length, s
         desc->flags |= PROPF_WRITABLE;
     desc->name = NULL;
     desc->index = idx;
-    desc->iid = 0;
-    return S_OK;
-}
-
-HRESULT jsdisp_next_index(jsdisp_t *obj, unsigned length, unsigned id, struct property_info *desc)
-{
-    if(id + 1 == length)
-        return S_FALSE;
-
-    desc->id = id + 1;
-    desc->flags = PROPF_ENUMERABLE;
-    if(obj->builtin_info->prop_put)
-        desc->flags |= PROPF_WRITABLE;
-    desc->name = NULL;
-    desc->index = desc->id;
     desc->iid = 0;
     return S_OK;
 }
@@ -656,6 +644,8 @@ static HRESULT prop_put(jsdisp_t *This, dispex_prop_t *prop, jsval_t val)
             TRACE("no prop_put\n");
             return S_OK;
         }
+        if(!(prop->flags & PROPF_WRITABLE))
+            return S_OK;
         hres = This->builtin_info->prop_put(This, prop->u.id, val);
         if(hres != S_FALSE)
             return hres;
@@ -745,37 +735,26 @@ static HRESULT fill_props(jsdisp_t *obj)
 {
     dispex_prop_t *prop;
     HRESULT hres;
+    DWORD i;
 
-    if(obj->builtin_info->next_prop) {
-        struct property_info desc;
-        unsigned id = ~0;
-        WCHAR buf[12];
+    if(obj->props_filled)
+        return S_OK;
 
-        for(;;) {
-            hres = obj->builtin_info->next_prop(obj, id, &desc);
-            if(FAILED(hres))
-                return hres;
-            if(hres == S_FALSE)
-                break;
+    for(i = 0; i < obj->builtin_info->props_cnt; i++) {
+        hres = find_prop_name(obj, string_hash(obj->builtin_info->props[i].name), obj->builtin_info->props[i].name, FALSE, NULL, &prop);
+        if(FAILED(hres))
+            return hres;
+    }
+    hres = S_OK;
 
-            if(!desc.name) {
-                swprintf(buf, ARRAYSIZE(buf), L"%u", desc.index);
-                desc.name = buf;
-            }
-
-            prop = lookup_dispex_prop(obj, string_hash(desc.name), desc.name, FALSE);
-            if(!prop) {
-                prop = alloc_prop(obj, desc.name, PROP_DELETED, 0);
-                if(!prop)
-                    return E_OUTOFMEMORY;
-                hres = update_external_prop(obj, prop, &desc);
-                if(FAILED(hres))
-                    return hres;
-            }
-            id = desc.id;
-        }
+    if(obj->builtin_info->fill_props) {
+        hres = obj->builtin_info->fill_props(obj);
+        if(FAILED(hres))
+            return hres;
     }
 
+    if(hres == S_OK)
+        obj->props_filled = TRUE;
     return S_OK;
 }
 
@@ -2402,6 +2381,40 @@ static HRESULT WINAPI WineJSDispatch_GetPropertyFlags(IWineJSDispatch *iface, DI
     return S_OK;
 }
 
+static HRESULT WINAPI WineJSDispatch_DefineProperty(IWineJSDispatch *iface, const WCHAR *name, unsigned flags, VARIANT *v)
+{
+    jsdisp_t *This = impl_from_IWineJSDispatch(iface);
+    HRESULT hres;
+    jsval_t val;
+
+    hres = variant_to_jsval(This->ctx, v, &val);
+    if(FAILED(hres))
+        return hres;
+
+    hres = jsdisp_define_data_property(This, name, flags, val);
+    jsval_release(val);
+    return hres;
+}
+
+static HRESULT WINAPI WineJSDispatch_UpdateProperty(IWineJSDispatch *iface, struct property_info *desc)
+{
+    jsdisp_t *This = impl_from_IWineJSDispatch(iface);
+    const WCHAR *name = desc->name;
+    dispex_prop_t *prop;
+    HRESULT hres = S_OK;
+    WCHAR buf[12];
+
+    if(!name) {
+        swprintf(buf, ARRAYSIZE(buf), L"%u", desc->index);
+        name = buf;
+    }
+
+    if(!(prop = lookup_dispex_prop(This, string_hash(name), name, FALSE)))
+        hres = update_external_prop(This, name, NULL, desc, &prop);
+
+    return hres;
+}
+
 static HRESULT WINAPI WineJSDispatch_GetScriptGlobal(IWineJSDispatch *iface, IWineJSDispatchHost **ret)
 {
    jsdisp_t *This = impl_from_IWineJSDispatch(iface);
@@ -2435,6 +2448,8 @@ static IWineJSDispatchVtbl DispatchExVtbl = {
     DispatchEx_GetNameSpaceParent,
     WineJSDispatch_Free,
     WineJSDispatch_GetPropertyFlags,
+    WineJSDispatch_DefineProperty,
+    WineJSDispatch_UpdateProperty,
     WineJSDispatch_GetScriptGlobal,
 };
 
@@ -3070,6 +3085,27 @@ HRESULT disp_delete(IDispatch *disp, DISPID id, BOOL *ret)
     return S_OK;
 }
 
+HRESULT jsdisp_fill_indices(jsdisp_t *obj, unsigned length)
+{
+    struct property_info desc;
+    HRESULT hres;
+
+    desc.flags = PROPF_ENUMERABLE;
+    if(obj->builtin_info->prop_put)
+        desc.flags |= PROPF_WRITABLE;
+    desc.name = NULL;
+    desc.iid = 0;
+
+    for(desc.index = 0; desc.index < length; desc.index++) {
+        desc.id = desc.index;
+        hres = WineJSDispatch_UpdateProperty(&obj->IWineJSDispatch_iface, &desc);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    return S_OK;
+}
+
 HRESULT jsdisp_next_prop(jsdisp_t *obj, DISPID id, enum jsdisp_enum_type enum_type, DISPID *ret)
 {
     dispex_prop_t *iter;
@@ -3505,13 +3541,6 @@ static HRESULT HostObject_prop_put(jsdisp_t *jsdisp, unsigned idx, jsval_t v)
     return hres;
 }
 
-static HRESULT HostObject_next_prop(jsdisp_t *jsdisp, unsigned id, struct property_info *desc)
-{
-    HostObject *This = HostObject_from_jsdisp(jsdisp);
-
-    return IWineJSDispatchHost_NextProperty(This->host_iface, id, desc);
-}
-
 static HRESULT HostObject_prop_delete(jsdisp_t *jsdisp, unsigned id)
 {
     HostObject *This = HostObject_from_jsdisp(jsdisp);
@@ -3524,6 +3553,13 @@ static HRESULT HostObject_prop_config(jsdisp_t *jsdisp, unsigned id, unsigned fl
     HostObject *This = HostObject_from_jsdisp(jsdisp);
 
     return IWineJSDispatchHost_ConfigureProperty(This->host_iface, id, flags);
+}
+
+static HRESULT HostObject_fill_props(jsdisp_t *jsdisp)
+{
+    HostObject *This = HostObject_from_jsdisp(jsdisp);
+
+    return IWineJSDispatchHost_FillProperties(This->host_iface);
 }
 
 static HRESULT HostObject_to_string(jsdisp_t *jsdisp, jsstr_t **ret)
@@ -3548,9 +3584,9 @@ static const builtin_info_t HostObject_info = {
     .lookup_prop = HostObject_lookup_prop,
     .prop_get    = HostObject_prop_get,
     .prop_put    = HostObject_prop_put,
-    .next_prop   = HostObject_next_prop,
     .prop_delete = HostObject_prop_delete,
     .prop_config = HostObject_prop_config,
+    .fill_props  = HostObject_fill_props,
     .to_string   = HostObject_to_string,
 };
 
@@ -3595,4 +3631,26 @@ IWineJSDispatchHost *get_host_dispatch(IDispatch *disp)
     host_obj = HostObject_from_jsdisp(jsdisp);
     IWineJSDispatchHost_GetOuterDispatch(host_obj->host_iface, &ret);
     return ret;
+}
+
+HRESULT fill_globals(script_ctx_t *ctx, IWineJSDispatchHost *script_global)
+{
+    jsdisp_t *global = ctx->global;
+    DISPID id = DISPID_STARTENUM;
+    struct property_info desc;
+    HRESULT hres;
+
+    for(;;) {
+        hres = jsdisp_next_prop(global, id, JSDISP_ENUM_OWN, &id);
+        if(hres == S_FALSE)
+            break;
+        if(FAILED(hres))
+            return hres;
+
+        hres = IWineJSDispatchHost_LookupProperty(script_global, get_prop(global, id)->name, fdexNameCaseSensitive, &desc);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    return S_OK;
 }

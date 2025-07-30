@@ -971,7 +971,7 @@ static void CBDropDown( LPHEADCOMBO lphc )
 
         if (lphc->dwStyle & CBS_NOINTEGRALHEIGHT)
         {
-            nDroppedHeight -= 1;
+            nDroppedHeight = min(nItems * nIHeight + COMBO_YBORDERSIZE(), nDroppedHeight - 1);
         }
         else
         {
@@ -1745,6 +1745,11 @@ static LRESULT CALLBACK COMBO_WindowProc( HWND hwnd, UINT message, WPARAM wParam
     case WM_SIZE:
         COMBO_Size( lphc );
         return  TRUE;
+
+    case WM_GETOBJECT:
+        if ((LONG)lParam == OBJID_QUERYCLASSNAMEIDX)
+            return 0x10005;
+        break;
 
     case WM_SETFONT:
         COMBO_Font( lphc, (HFONT)wParam, (BOOL)lParam );

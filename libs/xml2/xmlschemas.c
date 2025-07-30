@@ -13133,12 +13133,14 @@ xmlSchemaBuildContentModel(xmlSchemaTypePtr type,
 	    XML_SCHEMAP_INTERNAL,
 	    WXS_BASIC_CAST type, type->node,
 	    "Failed to compile the content model", NULL);
+#if 0  /* disabled in Wine */
     } else if (xmlRegexpIsDeterminist(type->contModel) != 1) {
         xmlSchemaPCustomErr(ctxt,
 	    XML_SCHEMAP_NOT_DETERMINISTIC,
 	    /* XML_SCHEMAS_ERR_NOTDETERMINIST, */
 	    WXS_BASIC_CAST type, type->node,
 	    "The content model is not determinist", NULL);
+#endif
     } else {
     }
     ctxt->state = NULL;
@@ -23388,6 +23390,7 @@ xmlSchemaIDCFillNodeTables(xmlSchemaValidCtxtPtr vctxt,
 			}
 			if (xmlSchemaItemListAdd(bind->dupls, bind->nodeTable[j]) == -1)
 			    goto internal_error;
+                        dupls = (xmlSchemaPSVIIDCNodePtr *) bind->dupls->items;
 			/*
 			* Remove the duplicate entry from the IDC node-table.
 			*/
@@ -23604,6 +23607,8 @@ xmlSchemaBubbleIDCNodeTables(xmlSchemaValidCtxtPtr vctxt)
 				goto internal_error;
 			}
 			xmlSchemaItemListAdd(parBind->dupls, parNode);
+		        dupls = (xmlSchemaPSVIIDCNodePtr *)
+                            parBind->dupls->items;
 		    } else {
 			/*
 			* Add the node-table entry (node and key-sequence) of

@@ -3620,9 +3620,9 @@ static void test_GlobalMemoryStatus(void)
 
     ok( memex.dwMemoryLoad == expect.dwMemoryLoad, "got dwMemoryLoad %lu\n", memex.dwMemoryLoad );
     ok( memex.ullTotalPhys == expect.ullTotalPhys, "got ullTotalPhys %#I64x\n", memex.ullTotalPhys );
-    ok( IS_WITHIN_RANGE( memex.ullAvailPhys, expect.ullAvailPhys ), "got ullAvailPhys %#I64x\n", memex.ullAvailPhys );
+    flaky ok( IS_WITHIN_RANGE( memex.ullAvailPhys, expect.ullAvailPhys ), "got ullAvailPhys %#I64x\n", memex.ullAvailPhys );
     ok( memex.ullTotalPageFile == expect.ullTotalPageFile, "got ullTotalPageFile %#I64x\n", memex.ullTotalPageFile );
-    ok( IS_WITHIN_RANGE( memex.ullAvailPageFile, expect.ullAvailPageFile ), "got ullAvailPageFile %#I64x\n", memex.ullAvailPageFile );
+    flaky ok( IS_WITHIN_RANGE( memex.ullAvailPageFile, expect.ullAvailPageFile ), "got ullAvailPageFile %#I64x\n", memex.ullAvailPageFile );
     ok( memex.ullTotalVirtual == expect.ullTotalVirtual, "got ullTotalVirtual %#I64x\n", memex.ullTotalVirtual );
     ok( memex.ullAvailVirtual <= expect.ullAvailVirtual, "got ullAvailVirtual %#I64x\n", memex.ullAvailVirtual );
     ok( memex.ullAvailExtendedVirtual == 0, "got ullAvailExtendedVirtual %#I64x\n", memex.ullAvailExtendedVirtual );
@@ -3721,9 +3721,70 @@ static void test_heap_size( SIZE_T initial_size )
 
 static void test_heap_sizes(void)
 {
+    unsigned int i;
+    SIZE_T size, round_size = 0x400 * sizeof(void*);
+    char *base;
+
     test_heap_size( 0 );
     test_heap_size( 0x80000 );
     test_heap_size( 0x150000 );
+
+    for (i = 1; i < 0x100; i++)
+    {
+        HANDLE heap = HeapCreate( 0, i * 0x100, i * 0x100 );
+        ok( heap != NULL, "%x: creation failed\n", i * 0x100 );
+        get_valloc_info( heap, &base, &size );
+        ok( size == ((i * 0x100 + round_size - 1) & ~(round_size - 1)),
+            "%x: wrong size %Ix\n", i * 0x100, size );
+        HeapDestroy( heap );
+    }
+}
+
+static void test_HeapSummary(void)
+{
+    HANDLE heap;
+    HEAP_SUMMARY heap_summary;
+    BOOL ret;
+    DWORD err;
+    void *p;
+
+    /* setup */
+
+    heap = HeapCreate( 0, 0, 0 ); /* growable heap */
+    ok( heap != NULL, "creation failed\n" );
+
+    HeapAlloc( heap , 0, 0x100 );
+    HeapAlloc( heap , 0, 0x200 );
+    p = HeapAlloc( heap , 0, 0x300 );
+    HeapAlloc( heap, 0, 0x60000 );
+    HeapFree( heap, 0, p );
+
+    memset( &heap_summary, 0, sizeof(heap_summary) );
+
+    /* test cases */
+
+    ret = HeapSummary( heap, 0, &heap_summary );
+    err = GetLastError();
+    ok( !ret, "HeapSummary() with cb != sizeof(HEAP_SUMMARY) returned TRUE\n" );
+    ok( err == ERROR_INVALID_PARAMETER,
+        "HeapSummary() with cb != sizeof(HEAP_SUMMARY) set last error to %lu\n", err );
+
+    heap_summary.cb = sizeof(heap_summary);
+    ret = HeapSummary( heap, 0, &heap_summary );
+    ok( ret, "HeapSummary() returned FALSE\n" );
+
+    ok( heap_summary.cbAllocated == 0x100 + 0x200 + 0x60000,
+        "HeapSummary: wrong cbAllocated value %#Ix\n", heap_summary.cbAllocated );
+    ok( heap_summary.cbCommitted >= heap_summary.cbAllocated,
+        "HeapSummary: cbCommitted %#Ix < cbAllocated %#Ix\n",
+        heap_summary.cbCommitted, heap_summary.cbAllocated );
+    ok( heap_summary.cbReserved >= heap_summary.cbCommitted,
+        "HeapSummary: cbReserved %#Ix < cbCommitted %#Ix\n",
+        heap_summary.cbReserved, heap_summary.cbCommitted );
+
+    /* cleanup */
+
+    HeapDestroy( heap );
 }
 
 START_TEST(heap)
@@ -3746,6 +3807,7 @@ START_TEST(heap)
 
     test_GetPhysicallyInstalledSystemMemory();
     test_GlobalMemoryStatus();
+    test_HeapSummary();
 
     if (pRtlGetNtGlobalFlags)
     {

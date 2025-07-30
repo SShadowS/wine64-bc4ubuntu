@@ -77,7 +77,7 @@
 @ stub PSFormatPropertyValue
 @ stub PSGetItemPropertyHandler
 @ stub PSGetItemPropertyHandlerWithCreateObject
-@ stub PSGetNameFromPropertyKey
+@ stdcall PSGetNameFromPropertyKey(ptr ptr)
 @ stub PSGetNamedPropertyFromPropertyStorage
 @ stdcall PSGetPropertyDescription(ptr ptr ptr)
 @ stub PSGetPropertyDescriptionByName
@@ -102,11 +102,11 @@
 @ stub PropVariantGetInt16Elem
 @ stub PropVariantGetInt32Elem
 @ stub PropVariantGetInt64Elem
-@ stub PropVariantGetStringElem
+@ stdcall PropVariantGetStringElem(ptr long ptr)
 @ stub PropVariantGetUInt16Elem
 @ stub PropVariantGetUInt32Elem
 @ stub PropVariantGetUInt64Elem
-@ stub PropVariantToBSTR
+@ stdcall PropVariantToBSTR(ptr ptr)
 @ stdcall PropVariantToBoolean(ptr ptr)
 @ stub PropVariantToBooleanVector
 @ stub PropVariantToBooleanVectorAlloc

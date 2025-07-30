@@ -150,7 +150,7 @@ static void dump_uints64( const char *prefix, const unsigned __int64 *ptr, int l
     fputc( '}', stderr );
 }
 
-static void dump_rectangle( const char *prefix, const rectangle_t *rect )
+static void dump_rectangle( const char *prefix, const struct rectangle *rect )
 {
     fprintf( stderr, "%s{%d,%d;%d,%d}", prefix,
              rect->left, rect->top, rect->right, rect->bottom );
@@ -490,7 +490,7 @@ static void dump_hw_input( const char *prefix, const union hw_input *input )
     }
 }
 
-static void dump_obj_locator( const char *prefix, const obj_locator_t *locator )
+static void dump_obj_locator( const char *prefix, const struct obj_locator *locator )
 {
     fprintf( stderr, "%s{", prefix );
     dump_uint64( "id=", &locator->id );
@@ -503,7 +503,7 @@ static void dump_luid( const char *prefix, const struct luid *luid )
     fprintf( stderr, "%s%d.%u", prefix, luid->high_part, luid->low_part );
 }
 
-static void dump_generic_map( const char *prefix, const generic_map_t *map )
+static void dump_generic_map( const char *prefix, const struct generic_map *map )
 {
     fprintf( stderr, "%s{r=%08x,w=%08x,x=%08x,a=%08x}",
              prefix, map->read, map->write, map->exec, map->all );
@@ -669,10 +669,29 @@ static void dump_varargs_unicode_str( const char *prefix, data_size_t size )
     remove_data( size );
 }
 
+static void dump_varargs_unicode_strings( const char *prefix, data_size_t size )
+{
+    fprintf( stderr, "%s{", prefix );
+    while (cur_size >= sizeof(WCHAR))
+    {
+        const WCHAR *str = cur_data;
+        unsigned int len = 0;
+
+        while (len < cur_size / sizeof(WCHAR) && str[len]) len++;
+        fputs( "L\"", stderr );
+        dump_strW( cur_data, len * sizeof(WCHAR), stderr, "\"\"" );
+        fputc( '\"', stderr );
+        if (len < cur_size / sizeof(WCHAR)) len++;  /* skip terminating null */
+        remove_data( len * sizeof(WCHAR) );
+        if (cur_size >= sizeof(WCHAR)) fputc( ',', stderr );
+    }
+    fputc( '}', stderr );
+}
+
 static void dump_varargs_context( const char *prefix, data_size_t size )
 {
-    const context_t *context = cur_data;
-    context_t ctx;
+    const struct context_data *context = cur_data;
+    struct context_data ctx;
     unsigned int i;
 
     if (!size)
@@ -735,7 +754,6 @@ static void dump_varargs_context( const char *prefix, data_size_t size )
         if (ctx.flags & SERVER_CTX_CONTROL)
         {
             dump_uint64( ",rip=", &ctx.ctl.x86_64_regs.rip );
-            dump_uint64( ",rbp=", &ctx.ctl.x86_64_regs.rbp );
             dump_uint64( ",rsp=", &ctx.ctl.x86_64_regs.rsp );
             fprintf( stderr, ",cs=%04x,ss=%04x,flags=%08x",
                      ctx.ctl.x86_64_regs.cs, ctx.ctl.x86_64_regs.ss, ctx.ctl.x86_64_regs.flags );
@@ -746,6 +764,7 @@ static void dump_varargs_context( const char *prefix, data_size_t size )
             dump_uint64( ",rbx=", &ctx.integer.x86_64_regs.rbx );
             dump_uint64( ",rcx=", &ctx.integer.x86_64_regs.rcx );
             dump_uint64( ",rdx=", &ctx.integer.x86_64_regs.rdx );
+            dump_uint64( ",rbp=", &ctx.integer.x86_64_regs.rbp );
             dump_uint64( ",rsi=", &ctx.integer.x86_64_regs.rsi );
             dump_uint64( ",rdi=", &ctx.integer.x86_64_regs.rdi );
             dump_uint64( ",r8=",  &ctx.integer.x86_64_regs.r8 );
@@ -972,7 +991,7 @@ static data_size_t dump_inline_unicode_string( const char *prefix, data_size_t p
 
 static void dump_varargs_startup_info( const char *prefix, data_size_t size )
 {
-    startup_info_t info;
+    struct startup_info_data info;
     data_size_t pos = sizeof(info);
 
     memset( &info, 0, sizeof(info) );
@@ -999,7 +1018,7 @@ static void dump_varargs_startup_info( const char *prefix, data_size_t size )
 
 static void dump_varargs_rectangles( const char *prefix, data_size_t size )
 {
-    const rectangle_t *rect = cur_data;
+    const struct rectangle *rect = cur_data;
     data_size_t len = size / sizeof(*rect);
 
     fprintf( stderr,"%s{", prefix );
@@ -1014,7 +1033,7 @@ static void dump_varargs_rectangles( const char *prefix, data_size_t size )
 
 static void dump_varargs_cursor_positions( const char *prefix, data_size_t size )
 {
-    const cursor_pos_t *pos = cur_data;
+    const struct cursor_pos *pos = cur_data;
     data_size_t len = size / sizeof(*pos);
 
     fprintf( stderr, "%s{", prefix );
@@ -1038,7 +1057,7 @@ static void dump_varargs_message_data( const char *prefix, data_size_t size )
 
 static void dump_varargs_properties( const char *prefix, data_size_t size )
 {
-    const property_data_t *prop = cur_data;
+    const struct property_data *prop = cur_data;
     data_size_t len = size / sizeof(*prop);
 
     fprintf( stderr,"%s{", prefix );
@@ -1343,7 +1362,7 @@ static void dump_varargs_filesystem_event( const char *prefix, data_size_t size 
 
 static void dump_varargs_pe_image_info( const char *prefix, data_size_t size )
 {
-    pe_image_info_t info;
+    struct pe_image_info info;
 
     if (!size)
     {
@@ -1419,7 +1438,7 @@ static void dump_varargs_tcp_connections( const char *prefix, data_size_t size )
         "TIME_WAIT",
         "DELETE_TCB"
     };
-    const tcp_connection *conn;
+    const union tcp_connection *conn;
 
     fprintf( stderr, "%s{", prefix );
     while (size >= sizeof(*conn))
@@ -1458,7 +1477,7 @@ static void dump_varargs_tcp_connections( const char *prefix, data_size_t size )
 
 static void dump_varargs_udp_endpoints( const char *prefix, data_size_t size )
 {
-    const udp_endpoint *endpt;
+    const union udp_endpoint *endpt;
 
     fprintf( stderr, "%s{", prefix );
     while (size >= sizeof(*endpt))

@@ -369,10 +369,6 @@ struct strarray get_ld_command(void)
             break;
         }
     }
-
-    if (target.cpu == CPU_ARM && !is_pe())
-        strarray_add( &args, "--no-wchar-size-warning" );
-
     return args;
 }
 
@@ -680,7 +676,7 @@ char *make_c_identifier( const char *str )
  *
  * Generate an internal name for a stub entry point.
  */
-const char *get_stub_name( const ORDDEF *odp, const DLLSPEC *spec )
+static const char *get_stub_name( const ORDDEF *odp )
 {
     static char *buffer;
 
@@ -694,7 +690,7 @@ const char *get_stub_name( const ORDDEF *odp, const DLLSPEC *spec )
         if (!*p) return buffer;
         free( buffer );
     }
-    buffer = strmake( "__wine_stub_%s_%d", make_c_identifier(spec->file_name), odp->ordinal );
+    buffer = strmake( "__wine_stub_%d", odp->ordinal );
     return buffer;
 }
 
@@ -708,6 +704,7 @@ const char *get_abi_name( const ORDDEF *odp, const char *name )
 
     switch (odp->type)
     {
+    case TYPE_STUB:
     case TYPE_STDCALL:
         if (is_pe())
         {
@@ -745,6 +742,8 @@ const char *get_abi_name( const ORDDEF *odp, const char *name )
 
 const char *get_link_name( const ORDDEF *odp )
 {
+    if (odp->type == TYPE_STUB && !(odp->flags & FLAG_SYSCALL)) return get_stub_name( odp );
+
     return get_abi_name( odp, odp->link_name );
 }
 
@@ -764,10 +763,17 @@ int sort_func_list( ORDDEF **list, int count, int (*compare)(const void *, const
 }
 
 
-/* return the page size for the target CPU */
-unsigned int get_page_size(void)
+/* return the section alignment for the target CPU */
+unsigned int get_section_alignment(void)
 {
-    return 0x1000;  /* same on all platforms */
+    switch (target.cpu)
+    {
+    case CPU_ARM64:
+    case CPU_ARM64EC:
+        return 0x10000;
+    default:
+        return 0x1000;
+    }
 }
 
 /* return the total size in bytes of the arguments on the stack */
@@ -903,19 +909,17 @@ void output_rva( const char *format, ... )
     va_list valist;
 
     va_start( valist, format );
-    switch (target.platform)
+    if (is_pe())
     {
-    case PLATFORM_MINGW:
-    case PLATFORM_WINDOWS:
         output( "\t.rva " );
         vfprintf( output_file, format, valist );
         fputc( '\n', output_file );
-        break;
-    default:
+    }
+    else
+    {
         output( "\t.long " );
         vfprintf( output_file, format, valist );
         output( " - .L__wine_spec_rva_base\n" );
-        break;
     }
     va_end( valist );
 }
@@ -928,20 +932,18 @@ void output_thunk_rva( int ordinal, const char *format, ... )
         va_list valist;
 
         va_start( valist, format );
-        switch (target.platform)
+        if (is_pe())
         {
-        case PLATFORM_MINGW:
-        case PLATFORM_WINDOWS:
             output( "\t.rva " );
             vfprintf( output_file, format, valist );
             fputc( '\n', output_file );
             if (get_ptr_size() == 8) output( "\t.long 0\n" );
-            break;
-        default:
+        }
+        else
+        {
             output( "\t%s ", get_asm_ptr_keyword() );
             vfprintf( output_file, format, valist );
             output( " - .L__wine_spec_rva_base\n" );
-            break;
         }
         va_end( valist );
     }

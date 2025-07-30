@@ -143,6 +143,7 @@ _ACRTIMP void   __cdecl rewind(FILE*);
 _ACRTIMP void   __cdecl setbuf(FILE*,char*);
 _ACRTIMP int    __cdecl setvbuf(FILE*,char*,int,size_t);
 _ACRTIMP FILE*  __cdecl tmpfile(void);
+_ACRTIMP errno_t __cdecl tmpfile_s(FILE**);
 _ACRTIMP char*  __cdecl tmpnam(char*);
 _ACRTIMP int    __cdecl ungetc(int,FILE*);
 _ACRTIMP unsigned int __cdecl _get_output_format(void);
@@ -326,6 +327,19 @@ static inline int __cdecl printf_s(const char *format, ...)
     return ret;
 }
 
+static inline int __cdecl _sprintf_l(char *buffer, const char *format, _locale_t locale, ...) __WINE_CRT_PRINTF_ATTR(2, 4);
+static inline int __cdecl _sprintf_l(char *buffer, const char *format, _locale_t locale, ...)
+{
+    int ret;
+    va_list args;
+
+    va_start(args, locale);
+    ret = __stdio_common_vsprintf(_CRT_INTERNAL_LOCAL_PRINTF_OPTIONS | _CRT_INTERNAL_PRINTF_LEGACY_VSPRINTF_NULL_TERMINATION,
+                                  buffer, -1, format, locale, args);
+    va_end(args);
+    return ret < 0 ? -1 : ret;
+}
+
 static inline int __cdecl sscanf(const char *buffer, const char *format, ...) __WINE_CRT_SCANF_ATTR(2, 3);
 static inline int __cdecl sscanf(const char *buffer, const char *format, ...)
 {
@@ -454,6 +468,7 @@ _ACRTIMP int __cdecl scanf(const char*,...) __WINE_CRT_SCANF_ATTR(1, 2);
 _ACRTIMP int __cdecl scanf_s(const char*,...) __WINE_CRT_SCANF_ATTR(1, 2);
 _ACRTIMP int __cdecl sscanf(const char*,const char*,...) __WINE_CRT_SCANF_ATTR(2, 3);
 _ACRTIMP int __cdecl sscanf_s(const char*,const char*,...) __WINE_CRT_SCANF_ATTR(2, 3);
+_ACRTIMP int __cdecl vsscanf(const char*, const char*, va_list) __WINE_CRT_SCANF_ATTR(2, 0);
 
 #endif /* _UCRT && !_NO_CRT_STDIO_INLINE */
 
@@ -519,6 +534,7 @@ static inline int __cdecl sprintf(char *buffer, const char *format, ...)
 _ACRTIMP int __cdecl snprintf(char*,size_t,const char*,...) __WINE_CRT_PRINTF_ATTR(3, 4);
 _ACRTIMP int __cdecl _snprintf(char*,size_t,const char*,...) __WINE_CRT_PRINTF_ATTR(3, 4);
 _ACRTIMP int __cdecl sprintf(char*,const char*,...) __WINE_CRT_PRINTF_ATTR(2, 3);
+_ACRTIMP int __cdecl _sprintf_l(char*,const char*,_locale_t,...) __WINE_CRT_PRINTF_ATTR(2, 4);
 
 #endif /* !_NO_CRT_STDIO_INLINE */
 

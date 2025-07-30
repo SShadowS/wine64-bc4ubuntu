@@ -35,6 +35,8 @@
 
 #define NTDLL_TLS_ERRNO 16  /* TLS slot for _errno() */
 
+#define NTDLL_ACTCTX_STACK_FRAME_HEAP_ALLOCATED 0x8 /* RTL_ACTIVATION_CONTEXT_STACK_FRAME.Flags */
+
 #ifdef __i386__
 static const USHORT current_machine = IMAGE_FILE_MACHINE_I386;
 #elif defined(__x86_64__)
@@ -47,11 +49,7 @@ static const USHORT current_machine = IMAGE_FILE_MACHINE_ARM64;
 static const USHORT current_machine = IMAGE_FILE_MACHINE_UNKNOWN;
 #endif
 
-#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
 static const UINT_PTR page_size = 0x1000;
-#else
-extern UINT_PTR page_size;
-#endif
 
 /* exceptions */
 extern NTSTATUS call_seh_handlers( EXCEPTION_RECORD *rec, CONTEXT *context );
@@ -100,7 +98,6 @@ extern FARPROC SNOOP_GetProcAddress( HMODULE hmod, const IMAGE_EXPORT_DIRECTORY 
 extern void RELAY_SetupDLL( HMODULE hmod );
 extern void SNOOP_SetupDLL( HMODULE hmod );
 extern const WCHAR windows_dir[];
-extern const WCHAR system_dir[];
 
 extern void (FASTCALL *pBaseThreadInitThunk)(DWORD,LPTHREAD_START_ROUTINE,void *);
 
@@ -111,6 +108,11 @@ static inline TEB64 *NtCurrentTeb64(void) { return NULL; }
 #else
 static inline TEB64 *NtCurrentTeb64(void) { return (TEB64 *)NtCurrentTeb()->GdiBatchCount; }
 #endif
+
+static inline void *get_rva( HMODULE module, DWORD va )
+{
+    return (void *)((char *)module + va);
+}
 
 /* convert from straight ASCII to Unicode without depending on the current codepage */
 static inline void ascii_to_unicode( WCHAR *dst, const char *src, size_t len )
@@ -164,6 +166,9 @@ extern void heap_thread_detach(void);
 
 extern NTSTATUS arm64ec_process_init( HMODULE module );
 extern NTSTATUS arm64ec_thread_init(void);
+extern IMAGE_ARM64EC_METADATA *arm64ec_get_module_metadata( HMODULE module );
+extern void arm64ec_update_hybrid_metadata( void *module, IMAGE_NT_HEADERS *nt,
+                                            const IMAGE_ARM64EC_METADATA *metadata );
 extern void invoke_arm64ec_syscall(void);
 
 extern void *__os_arm64x_check_call;

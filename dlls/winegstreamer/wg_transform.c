@@ -42,11 +42,43 @@
 
 #define GST_SAMPLE_FLAG_WG_CAPS_CHANGED (GST_MINI_OBJECT_FLAG_LAST << 0)
 
+/* This GstElement takes buffers and events from its sink pad, instead of pushing them
+ * out the src pad, it keeps them in a internal queue until the step function
+ * is called manually.
+ */
+typedef struct _WgStepper
+{
+    GstElement element;
+    GstPad *src, *sink;
+    GstAtomicQueue *fifo;
+} WgStepper;
+
+typedef struct _WgStepperClass
+{
+    GstElementClass parent_class;
+} WgStepperClass;
+
+#define GST_TYPE_WG_STEPPER (wg_stepper_get_type())
+#define WG_STEPPER(obj) (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_WG_STEPPER, WgStepper))
+#define GST_WG_STEPPER_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_WG_STEPPER,WgStepperClass))
+#define GST_IS_WG_STEPPER(obj) (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_WG_STEPPER))
+#define GST_IS_WG_STEPPER_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_WG_STEPPER))
+
+G_DEFINE_TYPE (WgStepper, wg_stepper, GST_TYPE_ELEMENT);
+gboolean gst_element_register_winegstreamerstepper(GstPlugin *plugin)
+{
+    return gst_element_register(plugin, "winegstreamerstepper", GST_RANK_NONE, GST_TYPE_WG_STEPPER);
+}
+
+static bool wg_stepper_step(WgStepper *stepper);
+static void wg_stepper_flush(WgStepper *stepper);
+
 struct wg_transform
 {
     struct wg_transform_attrs attrs;
 
     GstElement *container;
+    WgStepper *stepper;
     GstAllocator *allocator;
     GstPad *my_src, *my_sink;
     GstSegment segment;
@@ -64,6 +96,7 @@ struct wg_transform
     GstCaps *input_caps;
 
     bool draining;
+    INT64 ts_offset;
 };
 
 static struct wg_transform *get_transform(wg_transform_t trans)
@@ -97,9 +130,6 @@ static void align_video_info_planes(MFVideoInfo *video_info, gsize plane_align,
     }
 
     align->stride_align[0] = plane_align;
-    align->stride_align[1] = plane_align;
-    align->stride_align[2] = plane_align;
-    align->stride_align[3] = plane_align;
 
     gst_video_info_align(info, align);
 
@@ -465,7 +495,15 @@ static GstCaps *transform_get_parsed_caps(GstCaps *caps, const char *media_type)
     else if (gst_structure_get_int(structure, "wmvversion", &value))
         gst_caps_set_simple(parsed_caps, "parsed", G_TYPE_BOOLEAN, true, "wmvversion", G_TYPE_INT, value, NULL);
     else
+    {
+        if (!strcmp(media_type, "video/x-h264"))
+        {
+            gst_caps_set_simple(parsed_caps, "stream-format", G_TYPE_STRING, "byte-stream", NULL);
+            gst_caps_set_simple(parsed_caps, "alignment", G_TYPE_STRING, "au", NULL);
+        }
+
         gst_caps_set_simple(parsed_caps, "parsed", G_TYPE_BOOLEAN, true, NULL);
+    }
 
     return parsed_caps;
 }
@@ -476,6 +514,7 @@ static bool transform_create_decoder_elements(struct wg_transform *transform,
     GstCaps *parsed_caps = NULL, *sink_caps = NULL;
     GstElement *element;
     bool ret = false;
+    char *str;
 
     if (!strcmp(input_mime, "audio/x-raw") || !strcmp(input_mime, "video/x-raw"))
         return true;
@@ -493,7 +532,27 @@ static bool transform_create_decoder_elements(struct wg_transform *transform,
     if ((element = find_element(GST_ELEMENT_FACTORY_TYPE_PARSER, transform->input_caps, parsed_caps))
             && !append_element(transform->container, element, first, last))
         goto done;
-    else if (!element)
+
+    if (element)
+    {
+        if (!(element = create_element("capsfilter", "good")) ||
+                !append_element(transform->container, element, first, last))
+            goto done;
+        if ((str = gst_caps_to_string(parsed_caps)))
+        {
+            gst_util_set_object_arg(G_OBJECT(element), "caps", str);
+            free(str);
+        }
+
+        /* We try to intercept buffers produced by the parser, so if we push a large buffer into the
+         * parser, it won't push everything into the decoder all in one go.
+         */
+        if ((element = create_element("winegstreamerstepper", NULL)) &&
+                append_element(transform->container, element, first, last))
+            /* element is owned by the container */
+            transform->stepper = WG_STEPPER(element);
+    }
+    else
     {
         gst_caps_unref(parsed_caps);
         parsed_caps = gst_caps_ref(transform->input_caps);
@@ -780,6 +839,7 @@ NTSTATUS wg_transform_push_data(void *args)
     struct wg_transform_push_data_params *params = args;
     struct wg_transform *transform = get_transform(params->transform);
     struct wg_sample *sample = params->sample;
+    GstCaps *transform_timestamp;
     const gchar *input_mime;
     GstVideoInfo video_info;
     GstBuffer *buffer;
@@ -821,21 +881,41 @@ NTSTATUS wg_transform_push_data(void *args)
     }
 
     if (sample->flags & WG_SAMPLE_FLAG_HAS_PTS)
-        GST_BUFFER_PTS(buffer) = sample->pts * 100;
+    {
+        if (sample->pts < transform->ts_offset)
+        {
+            if (transform->ts_offset)
+                GST_FIXME("ts_offset is already set to %"GST_TIME_FORMAT", overwriting",
+                        GST_TIME_ARGS(-transform->ts_offset));
+
+            GST_TRACE("Setting ts_offset to %"GST_TIME_FORMAT, GST_TIME_ARGS(-sample->pts));
+            transform->ts_offset = sample->pts;
+        }
+
+        GST_BUFFER_PTS(buffer) = (sample->pts - transform->ts_offset) * 100;
+    }
     if (sample->flags & WG_SAMPLE_FLAG_HAS_DURATION)
         GST_BUFFER_DURATION(buffer) = sample->duration * 100;
     if (!(sample->flags & WG_SAMPLE_FLAG_SYNC_POINT))
         GST_BUFFER_FLAG_SET(buffer, GST_BUFFER_FLAG_DELTA_UNIT);
     if (sample->flags & WG_SAMPLE_FLAG_DISCONTINUITY)
         GST_BUFFER_FLAG_SET(buffer, GST_BUFFER_FLAG_DISCONT);
+
+    if (transform->attrs.preserve_timestamps && (sample->flags & WG_SAMPLE_FLAG_HAS_PTS)
+            && (transform_timestamp = gst_caps_new_empty_simple("timestamp/x-wg-transform")))
+    {
+        gst_buffer_add_reference_timestamp_meta(buffer, transform_timestamp, GST_BUFFER_PTS(buffer), GST_BUFFER_DURATION(buffer));
+        gst_caps_unref(transform_timestamp);
+    }
+
     gst_atomic_queue_push(transform->input_queue, buffer);
 
     params->result = S_OK;
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS copy_video_buffer(GstBuffer *buffer, const GstVideoInfo *src_video_info,
-        const GstVideoInfo *dst_video_info, struct wg_sample *sample, gsize *total_size)
+static NTSTATUS copy_video_buffer(GstBuffer *buffer, GstVideoInfo *src_video_info,
+        GstVideoInfo *dst_video_info, struct wg_sample *sample, gsize *total_size)
 {
     NTSTATUS status = STATUS_UNSUCCESSFUL;
     GstVideoFrame src_frame, dst_frame;
@@ -904,22 +984,43 @@ static NTSTATUS copy_buffer(GstBuffer *buffer, struct wg_sample *sample, gsize *
 
 static void set_sample_flags_from_buffer(struct wg_sample *sample, GstBuffer *buffer, gsize total_size)
 {
-    if (GST_BUFFER_PTS_IS_VALID(buffer))
+    GstReferenceTimestampMeta *timestamps;
+    GstCaps *transform_timestamp;
+
+    transform_timestamp = gst_caps_new_empty_simple("timestamp/x-wg-transform");
+    timestamps = gst_buffer_get_reference_timestamp_meta(buffer, transform_timestamp);
+    gst_caps_unref(transform_timestamp);
+
+    if (timestamps)
     {
-        sample->flags |= WG_SAMPLE_FLAG_HAS_PTS;
-        sample->pts = GST_BUFFER_PTS(buffer) / 100;
+        /* GStreamer can overwrite our timestamps, so we use the wg-transform timestamps instead */
+        sample->flags |= WG_SAMPLE_FLAG_HAS_PTS | WG_SAMPLE_FLAG_PRESERVE_TIMESTAMPS;
+        sample->pts = timestamps->timestamp / 100;
+        if (timestamps->duration != GST_CLOCK_TIME_NONE)
+        {
+            sample->flags |= WG_SAMPLE_FLAG_HAS_DURATION;
+            sample->duration = timestamps->duration / 100;
+        }
     }
-    if (GST_BUFFER_DURATION_IS_VALID(buffer))
+    else
     {
-        GstClockTime duration = GST_BUFFER_DURATION(buffer) / 100;
-
-        duration = (duration * sample->size) / total_size;
-        GST_BUFFER_DURATION(buffer) -= duration * 100;
         if (GST_BUFFER_PTS_IS_VALID(buffer))
-            GST_BUFFER_PTS(buffer) += duration * 100;
+        {
+            sample->flags |= WG_SAMPLE_FLAG_HAS_PTS;
+            sample->pts = GST_BUFFER_PTS(buffer) / 100;
+        }
+        if (GST_BUFFER_DURATION_IS_VALID(buffer))
+        {
+            GstClockTime duration = GST_BUFFER_DURATION(buffer) / 100;
 
-        sample->flags |= WG_SAMPLE_FLAG_HAS_DURATION;
-        sample->duration = duration;
+            duration = (duration * sample->size) / total_size;
+            GST_BUFFER_DURATION(buffer) -= duration * 100;
+            if (GST_BUFFER_PTS_IS_VALID(buffer))
+                GST_BUFFER_PTS(buffer) += duration * 100;
+
+            sample->flags |= WG_SAMPLE_FLAG_HAS_DURATION;
+            sample->duration = duration;
+        }
     }
     if (!GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DELTA_UNIT))
         sample->flags |= WG_SAMPLE_FLAG_SYNC_POINT;
@@ -946,7 +1047,7 @@ static bool sample_needs_buffer_copy(struct wg_sample *sample, GstBuffer *buffer
 }
 
 static NTSTATUS read_transform_output_video(struct wg_sample *sample, GstBuffer *buffer,
-        const GstVideoInfo *src_video_info, const GstVideoInfo *dst_video_info)
+        GstVideoInfo *src_video_info, GstVideoInfo *dst_video_info)
 {
     gsize total_size;
     NTSTATUS status;
@@ -1008,7 +1109,8 @@ static NTSTATUS read_transform_output(struct wg_sample *sample, GstBuffer *buffe
 
 static NTSTATUS complete_drain(struct wg_transform *transform)
 {
-    if (transform->draining && gst_atomic_queue_length(transform->input_queue) == 0)
+    bool stepper_empty = transform->stepper == NULL || gst_atomic_queue_length(transform->stepper->fifo) == 0;
+    if (transform->draining && gst_atomic_queue_length(transform->input_queue) == 0 && stepper_empty)
     {
         GstEvent *event;
         transform->draining = false;
@@ -1035,14 +1137,23 @@ error:
 
 static bool get_transform_output(struct wg_transform *transform, struct wg_sample *sample)
 {
-    GstBuffer *input_buffer;
     GstFlowReturn ret;
 
     wg_allocator_provide_sample(transform->allocator, sample);
 
-    while (!(transform->output_sample = gst_atomic_queue_pop(transform->output_queue))
-            && (input_buffer = gst_atomic_queue_pop(transform->input_queue)))
+    while (!(transform->output_sample = gst_atomic_queue_pop(transform->output_queue)))
     {
+        GstBuffer *input_buffer;
+        if (transform->stepper && wg_stepper_step(transform->stepper))
+        {
+            /* If we pushed anything from the stepper, we don't need to dequeue more buffers. */
+            complete_drain(transform);
+            continue;
+        }
+
+        if (!(input_buffer = gst_atomic_queue_pop(transform->input_queue)))
+            break;
+
         if ((ret = gst_pad_push(transform->my_src, input_buffer)))
             GST_WARNING("Failed to push transform input, error %d", ret);
 
@@ -1116,6 +1227,10 @@ NTSTATUS wg_transform_read_data(void *args)
     else
         status = read_transform_output(sample, output_buffer);
 
+    if ((sample->flags & (WG_SAMPLE_FLAG_PRESERVE_TIMESTAMPS | WG_SAMPLE_FLAG_HAS_PTS)) ==
+            (WG_SAMPLE_FLAG_PRESERVE_TIMESTAMPS | WG_SAMPLE_FLAG_HAS_PTS))
+        sample->pts += transform->ts_offset;
+
     if (status)
     {
         wg_allocator_release_sample(transform->allocator, sample, false);
@@ -1175,12 +1290,23 @@ NTSTATUS wg_transform_flush(void *args)
     struct wg_transform *transform = get_transform(*(wg_transform_t *)args);
     GstBuffer *input_buffer;
     GstSample *sample;
+    GstEvent *event;
     NTSTATUS status;
 
     GST_LOG("transform %p", transform);
 
+    /* this ensures no messages are travelling through the pipeline whilst we flush */
+    event = gst_event_new_flush_start();
+    gst_pad_push_event(transform->my_src, event);
+
     while ((input_buffer = gst_atomic_queue_pop(transform->input_queue)))
         gst_buffer_unref(input_buffer);
+
+    if (transform->stepper)
+        wg_stepper_flush(transform->stepper);
+
+    event = gst_event_new_flush_stop(true);
+    gst_pad_push_event(transform->my_src, event);
 
     if ((status = wg_transform_drain(args)))
         return status;
@@ -1220,4 +1346,125 @@ NTSTATUS wg_transform_notify_qos(void *args)
     push_event(transform->my_sink, event);
 
     return S_OK;
+}
+
+/* Move events and at most one buffer from the internal fifo queue to the output src pad.
+ * Returns true if anything is moved, or false if the fifo is empty.
+ */
+static bool wg_stepper_step(WgStepper *stepper)
+{
+    bool pushed = false;
+    gpointer ptr;
+    while ((ptr = gst_atomic_queue_pop(stepper->fifo)))
+    {
+        if (GST_IS_BUFFER(ptr))
+        {
+            GST_TRACE("Forwarding buffer %"GST_PTR_FORMAT" from fifo", ptr);
+            gst_pad_push(stepper->src, GST_BUFFER(ptr));
+            pushed = true;
+            break;
+        }
+
+        if (GST_IS_EVENT(ptr))
+        {
+            GST_TRACE("Processing event %"GST_PTR_FORMAT" from fifo", ptr);
+            gst_pad_event_default(stepper->sink, GST_OBJECT(stepper), GST_EVENT(ptr));
+            pushed = true;
+        }
+    }
+    return pushed;
+}
+
+static void wg_stepper_flush(WgStepper *stepper)
+{
+    gpointer ptr;
+    GST_TRACE("Discarding all objects in the fifo");
+    while ((ptr = gst_atomic_queue_pop(stepper->fifo)))
+    {
+        if (GST_IS_EVENT(ptr))
+            gst_event_unref(ptr);
+        else if (GST_IS_BUFFER(ptr))
+            gst_buffer_unref(ptr);
+    }
+}
+
+static GstStateChangeReturn wg_stepper_change_state(GstElement *element, GstStateChange transition)
+{
+    WgStepper *this = WG_STEPPER(element);
+    if (transition == GST_STATE_CHANGE_READY_TO_NULL)
+        wg_stepper_flush(this);
+    return GST_STATE_CHANGE_SUCCESS;
+}
+
+static void wg_stepper_class_init(WgStepperClass *klass)
+{
+    gst_element_class_set_metadata(GST_ELEMENT_CLASS(klass), "winegstreamer buffer stepper", "Connector",
+        "Hold incoming buffer for manual pushing", "Yuxuan Shui <yshui@codeweavers.com>");
+    klass->parent_class.change_state = wg_stepper_change_state;
+}
+
+static GstFlowReturn wg_stepper_chain_cb(GstPad *pad, GstObject *parent, GstBuffer *buf)
+{
+    WgStepper *this = WG_STEPPER(parent);
+    GST_TRACE("Pushing buffer %"GST_PTR_FORMAT" into fifo", buf);
+    gst_atomic_queue_push(this->fifo, buf);
+    return GST_FLOW_OK;
+}
+
+static gboolean wg_stepper_event_cb(GstPad *pad, GstObject *parent, GstEvent *event)
+{
+    WgStepper *this = WG_STEPPER(parent);
+    if (gst_atomic_queue_length(this->fifo) == 0)
+    {
+        GST_TRACE("Processing event %"GST_PTR_FORMAT" immediately", event);
+        gst_pad_event_default(pad, parent, event);
+    }
+    else
+    {
+        GST_TRACE("Pushing event %"GST_PTR_FORMAT" into fifo", event);
+        gst_atomic_queue_push(this->fifo, event);
+    }
+    return true;
+}
+
+static gboolean wg_stepper_src_query_cb(GstPad *pad, GstObject *parent, GstQuery *query)
+{
+    WgStepper *this = WG_STEPPER(parent);
+    GstPad *peer = gst_pad_get_peer(this->sink);
+    if (!peer) return gst_pad_query_default(pad, parent, query);
+    GST_TRACE("Forwarding query %"GST_PTR_FORMAT" to upstream", query);
+    return gst_pad_query(peer, query);
+}
+
+static void wg_stepper_init(WgStepper *stepper)
+{
+    static GstStaticPadTemplate sink_factory =
+        GST_STATIC_PAD_TEMPLATE (
+            "sink",
+            GST_PAD_SINK,
+            GST_PAD_ALWAYS,
+            GST_STATIC_CAPS ("ANY")
+        );
+    static GstStaticPadTemplate src_factory =
+        GST_STATIC_PAD_TEMPLATE(
+            "src",
+            GST_PAD_SRC,
+            GST_PAD_ALWAYS,
+            GST_STATIC_CAPS("ANY")
+        );
+    stepper->sink = gst_pad_new_from_static_template(&sink_factory, "sink");
+    gst_element_add_pad(GST_ELEMENT(stepper), stepper->sink);
+    gst_pad_set_chain_function(stepper->sink, wg_stepper_chain_cb);
+    gst_pad_set_event_function(stepper->sink, wg_stepper_event_cb);
+    GST_PAD_SET_PROXY_CAPS(stepper->sink);
+    gst_pad_set_active(stepper->sink, true);
+
+    stepper->src = gst_pad_new_from_static_template(&src_factory, "src");
+    gst_element_add_pad(GST_ELEMENT(stepper), stepper->src);
+    gst_pad_set_query_function(stepper->src, wg_stepper_src_query_cb);
+    gst_pad_set_active(stepper->src, true);
+
+    stepper->fifo = gst_atomic_queue_new(4);
+
+    GST_DEBUG("Created new stepper element %"GST_PTR_FORMAT, stepper);
 }

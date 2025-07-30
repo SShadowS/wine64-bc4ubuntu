@@ -37,6 +37,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#ifdef HAVE_SCHED_H
+#include <sched.h>
+#endif
 #ifdef HAVE_SYS_TIMES_H
 #include <sys/times.h>
 #endif
@@ -76,6 +79,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(thread);
 WINE_DECLARE_DEBUG_CHANNEL(seh);
+WINE_DECLARE_DEBUG_CHANNEL(syscall);
 WINE_DECLARE_DEBUG_CHANNEL(threadname);
 
 pthread_key_t teb_key = 0;
@@ -233,7 +237,7 @@ static unsigned int get_native_context_flags( USHORT native_machine, USHORT wow_
  *
  * Copy xstate to the server format.
  */
-static void xstate_to_server( context_t *to, const CONTEXT_EX *xctx )
+static void xstate_to_server( struct context_data *to, const CONTEXT_EX *xctx )
 {
     const XSTATE *xs = (const XSTATE *)((const char *)xctx + xctx->XState.Offset);
 
@@ -248,7 +252,7 @@ static void xstate_to_server( context_t *to, const CONTEXT_EX *xctx )
  *
  * Copy exception reporting flags to the server format.
  */
-static void exception_request_flags_to_server( context_t *to, DWORD context_flags )
+static void exception_request_flags_to_server( struct context_data *to, DWORD context_flags )
 {
     if (!(context_flags & CONTEXT_EXCEPTION_REPORTING)) return;
     to->flags |= SERVER_CTX_EXEC_SPACE;
@@ -263,7 +267,7 @@ static void exception_request_flags_to_server( context_t *to, DWORD context_flag
  *
  * Convert a register context to the server format.
  */
-static NTSTATUS context_to_server( context_t *to, USHORT to_machine, const void *src, USHORT from_machine )
+static NTSTATUS context_to_server( struct context_data *to, USHORT to_machine, const void *src, USHORT from_machine )
 {
     DWORD i, flags;
 
@@ -347,12 +351,13 @@ static NTSTATUS context_to_server( context_t *to, USHORT to_machine, const void 
         if (flags & CONTEXT_I386_CONTROL)
         {
             to->flags |= SERVER_CTX_CONTROL;
-            to->ctl.x86_64_regs.rbp    = from->Ebp;
             to->ctl.x86_64_regs.rsp    = from->Esp;
             to->ctl.x86_64_regs.rip    = from->Eip;
             to->ctl.x86_64_regs.cs     = from->SegCs;
             to->ctl.x86_64_regs.ss     = from->SegSs;
             to->ctl.x86_64_regs.flags  = from->EFlags;
+
+            to->integer.x86_64_regs.rbp = from->Ebp;
         }
         if (flags & CONTEXT_I386_INTEGER)
         {
@@ -406,7 +411,6 @@ static NTSTATUS context_to_server( context_t *to, USHORT to_machine, const void 
         if (flags & CONTEXT_AMD64_CONTROL)
         {
             to->flags |= SERVER_CTX_CONTROL;
-            to->ctl.x86_64_regs.rbp   = from->Rbp;
             to->ctl.x86_64_regs.rip   = from->Rip;
             to->ctl.x86_64_regs.rsp   = from->Rsp;
             to->ctl.x86_64_regs.cs    = from->SegCs;
@@ -420,6 +424,7 @@ static NTSTATUS context_to_server( context_t *to, USHORT to_machine, const void 
             to->integer.x86_64_regs.rcx = from->Rcx;
             to->integer.x86_64_regs.rdx = from->Rdx;
             to->integer.x86_64_regs.rbx = from->Rbx;
+            to->integer.x86_64_regs.rbp = from->Rbp;
             to->integer.x86_64_regs.rsi = from->Rsi;
             to->integer.x86_64_regs.rdi = from->Rdi;
             to->integer.x86_64_regs.r8  = from->R8;
@@ -468,7 +473,6 @@ static NTSTATUS context_to_server( context_t *to, USHORT to_machine, const void 
         if (flags & CONTEXT_AMD64_CONTROL)
         {
             to->flags |= SERVER_CTX_CONTROL;
-            to->ctl.i386_regs.ebp    = from->Rbp;
             to->ctl.i386_regs.eip    = from->Rip;
             to->ctl.i386_regs.esp    = from->Rsp;
             to->ctl.i386_regs.cs     = from->SegCs;
@@ -484,6 +488,8 @@ static NTSTATUS context_to_server( context_t *to, USHORT to_machine, const void 
             to->integer.i386_regs.ebx = from->Rbx;
             to->integer.i386_regs.esi = from->Rsi;
             to->integer.i386_regs.edi = from->Rdi;
+
+            to->ctl.i386_regs.ebp = from->Rbp;
         }
         if (flags & CONTEXT_AMD64_SEGMENTS)
         {
@@ -631,7 +637,7 @@ static NTSTATUS context_to_server( context_t *to, USHORT to_machine, const void 
  *
  * Copy xstate from the server format.
  */
-static void xstate_from_server( CONTEXT_EX *xctx, const context_t *from )
+static void xstate_from_server( CONTEXT_EX *xctx, const struct context_data *from )
 {
     XSTATE *xs = (XSTATE *)((char *)xctx + xctx->XState.Offset);
     unsigned int i;
@@ -659,7 +665,7 @@ static void xstate_from_server( CONTEXT_EX *xctx, const context_t *from )
  *
  * Copy exception reporting flags from the server format.
  */
-static void exception_request_flags_from_server( DWORD *context_flags, const context_t *from )
+static void exception_request_flags_from_server( DWORD *context_flags, const struct context_data *from )
 {
     if (!(*context_flags & CONTEXT_EXCEPTION_REQUEST) || !(from->flags & SERVER_CTX_EXEC_SPACE)) return;
     *context_flags = (*context_flags & ~(CONTEXT_SERVICE_ACTIVE | CONTEXT_EXCEPTION_ACTIVE)) | CONTEXT_EXCEPTION_REPORTING;
@@ -673,7 +679,7 @@ static void exception_request_flags_from_server( DWORD *context_flags, const con
  *
  * Convert a register context from the server format.
  */
-static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT machine )
+static NTSTATUS context_from_server( void *dst, const struct context_data *from, USHORT machine )
 {
     DWORD i, to_flags;
 
@@ -754,7 +760,6 @@ static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT ma
         if ((from->flags & SERVER_CTX_CONTROL) && (to_flags & CONTEXT_I386_CONTROL))
         {
             to->ContextFlags |= CONTEXT_I386_CONTROL;
-            to->Ebp    = from->ctl.x86_64_regs.rbp;
             to->Esp    = from->ctl.x86_64_regs.rsp;
             to->Eip    = from->ctl.x86_64_regs.rip;
             to->SegCs  = from->ctl.x86_64_regs.cs;
@@ -770,6 +775,10 @@ static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT ma
             to->Edx = from->integer.x86_64_regs.rdx;
             to->Esi = from->integer.x86_64_regs.rsi;
             to->Edi = from->integer.x86_64_regs.rdi;
+        }
+        if ((from->flags & SERVER_CTX_INTEGER) && (to_flags & CONTEXT_I386_CONTROL))
+        {
+            to->Ebp = from->integer.x86_64_regs.rbp;
         }
         if ((from->flags & SERVER_CTX_SEGMENTS) && (to_flags & CONTEXT_I386_SEGMENTS))
         {
@@ -816,7 +825,6 @@ static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT ma
         if ((from->flags & SERVER_CTX_CONTROL) && (to_flags & CONTEXT_AMD64_CONTROL))
         {
             to->ContextFlags |= CONTEXT_AMD64_CONTROL;
-            to->Rbp    = from->ctl.x86_64_regs.rbp;
             to->Rip    = from->ctl.x86_64_regs.rip;
             to->Rsp    = from->ctl.x86_64_regs.rsp;
             to->SegCs  = from->ctl.x86_64_regs.cs;
@@ -830,6 +838,7 @@ static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT ma
             to->Rcx = from->integer.x86_64_regs.rcx;
             to->Rdx = from->integer.x86_64_regs.rdx;
             to->Rbx = from->integer.x86_64_regs.rbx;
+            to->Rbp = from->integer.x86_64_regs.rbp;
             to->Rsi = from->integer.x86_64_regs.rsi;
             to->Rdi = from->integer.x86_64_regs.rdi;
             to->R8  = from->integer.x86_64_regs.r8;
@@ -879,7 +888,6 @@ static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT ma
         if ((from->flags & SERVER_CTX_CONTROL) && (to_flags & CONTEXT_AMD64_CONTROL))
         {
             to->ContextFlags |= CONTEXT_AMD64_CONTROL;
-            to->Rbp    = from->ctl.i386_regs.ebp;
             to->Rip    = from->ctl.i386_regs.eip;
             to->Rsp    = from->ctl.i386_regs.esp;
             to->SegCs  = from->ctl.i386_regs.cs;
@@ -895,6 +903,10 @@ static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT ma
             to->Rbx = from->integer.i386_regs.ebx;
             to->Rsi = from->integer.i386_regs.esi;
             to->Rdi = from->integer.i386_regs.edi;
+        }
+        if ((from->flags & SERVER_CTX_CONTROL) && (to_flags & CONTEXT_AMD64_INTEGER))
+        {
+            to->Rbp = from->ctl.i386_regs.ebp;
         }
         if ((from->flags & SERVER_CTX_SEGMENTS) && (to_flags & CONTEXT_AMD64_SEGMENTS))
         {
@@ -1044,7 +1056,7 @@ static NTSTATUS context_from_server( void *dst, const context_t *from, USHORT ma
 /***********************************************************************
  *           contexts_to_server
  */
-static void contexts_to_server( context_t server_contexts[2], CONTEXT *context )
+static void contexts_to_server( struct context_data server_contexts[2], CONTEXT *context )
 {
     unsigned int count = 0;
     void *native_context = get_native_context( context );
@@ -1070,7 +1082,7 @@ static void contexts_to_server( context_t server_contexts[2], CONTEXT *context )
 /***********************************************************************
  *           contexts_from_server
  */
-static void contexts_from_server( CONTEXT *context, context_t server_contexts[2] )
+static void contexts_from_server( CONTEXT *context, struct context_data server_contexts[2] )
 {
     void *native_context = get_native_context( context );
     void *wow_context = get_wow_context( context );
@@ -1110,6 +1122,8 @@ static void start_thread( TEB *teb )
     struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)&teb->GdiTebBatch;
     BOOL suspend;
 
+    thread_data->syscall_table = KeServiceDescriptorTable;
+    thread_data->syscall_trace = TRACE_ON(syscall);
     thread_data->pthread_id = pthread_self();
     pthread_setspecific( teb_key, teb );
     server_init_thread( thread_data->start, &suspend );
@@ -1289,7 +1303,7 @@ NTSTATUS WINAPI NtCreateThread( HANDLE *handle, ACCESS_MASK access, OBJECT_ATTRI
                                 BOOLEAN suspended )
 {
     FIXME( "%p %d %p %p %p %p %p %d, stub!\n",
-           handle, (int)access, attr, process, id, ctx, teb, suspended );
+           handle, access, attr, process, id, ctx, teb, suspended );
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -1314,7 +1328,7 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
     unsigned int status;
 
     if (flags & ~supported_flags)
-        FIXME( "Unsupported flags %#x.\n", (int)flags );
+        FIXME( "Unsupported flags %#x.\n", flags );
 
     if (zero_bits > 21 && zero_bits < 32) return STATUS_INVALID_PARAMETER_3;
 #ifndef _WIN64
@@ -1491,7 +1505,7 @@ void exit_process( int status )
 void wait_suspend( CONTEXT *context )
 {
     int saved_errno = errno;
-    context_t server_contexts[2];
+    struct context_data server_contexts[2];
 
     contexts_to_server( server_contexts, context );
     /* wait with 0 timeout, will only return once the thread is no longer suspended */
@@ -1537,7 +1551,7 @@ NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_c
 
     if (handle)
     {
-        context_t server_contexts[2];
+        struct context_data server_contexts[2];
 
         select_op.wait.op = SELECT_WAIT;
         select_op.wait.handles[0] = handle;
@@ -1580,7 +1594,7 @@ NTSTATUS WINAPI NtRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL 
         ERR_(seh)("Process attempted to continue execution after noncontinuable exception.\n");
     else
         ERR_(seh)("Unhandled exception code %x flags %x addr %p\n",
-                  (int)rec->ExceptionCode, (int)rec->ExceptionFlags, rec->ExceptionAddress );
+                  rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress );
 
     NtTerminateProcess( NtCurrentProcess(), rec->ExceptionCode );
     return STATUS_SUCCESS;
@@ -1749,7 +1763,7 @@ NTSTATUS WINAPI NtQueueApcThreadEx( HANDLE handle, HANDLE reserve_handle, PNTAPC
  */
 NTSTATUS set_thread_context( HANDLE handle, const void *context, BOOL *self, USHORT machine )
 {
-    context_t server_contexts[2];
+    struct context_data server_contexts[2];
     unsigned int count = 0;
     unsigned int ret;
 
@@ -1778,7 +1792,7 @@ NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT ma
 {
     unsigned int ret;
     HANDLE context_handle;
-    context_t server_contexts[2];
+    struct context_data server_contexts[2];
     unsigned int count;
     unsigned int flags = get_server_context_flags( context, machine );
 
@@ -2038,7 +2052,7 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
 {
     unsigned int status;
 
-    TRACE("(%p,%d,%p,%x,%p)\n", handle, class, data, (int)length, ret_len);
+    TRACE("(%p,%d,%p,%x,%p)\n", handle, class, data, length, ret_len);
 
     switch (class)
     {
@@ -2058,7 +2072,7 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
                 info.ClientId.UniqueThread  = ULongToHandle(reply->tid);
                 info.AffinityMask           = reply->affinity & affinity_mask;
                 info.Priority               = reply->priority;
-                info.BasePriority           = reply->priority;  /* FIXME */
+                info.BasePriority           = reply->base_priority;
             }
         }
         SERVER_END_REQ;
@@ -2066,7 +2080,7 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
         {
             if (is_old_wow64())
             {
-                if (is_process_wow64( &info.ClientId ))
+                if (info.TebBaseAddress && is_process_wow64( &info.ClientId ))
                     info.TebBaseAddress = (char *)info.TebBaseAddress + teb_offset;
                 else
                     info.TebBaseAddress = NULL;
@@ -2150,7 +2164,7 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
             status = wine_server_call( req );
             if (status == STATUS_SUCCESS)
             {
-                ULONG last = reply->last;
+                ULONG last = !!(reply->flags & GET_THREAD_INFO_FLAG_LAST);
                 if (data) memcpy( data, &last, sizeof(last) );
                 if (ret_len) *ret_len = sizeof(last);
             }
@@ -2272,6 +2286,12 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
         return get_thread_wow64_context( handle, data, length );
 
     case ThreadHideFromDebugger:
+        /* TP Shell Service depends on ThreadHideFromDebugger returning
+         * STATUS_ACCESS_VIOLATION if *ret_len is not writable, before
+         * any other checks. Despite the status, the variable does not
+         * actually seem to be written at that time. */
+        if (ret_len) *(volatile ULONG *)ret_len |= 0;
+
         if (length != sizeof(BOOLEAN)) return STATUS_INFO_LENGTH_MISMATCH;
         if (!data) return STATUS_ACCESS_VIOLATION;
         SERVER_START_REQ( get_thread_info )
@@ -2332,7 +2352,7 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
 {
     unsigned int status;
 
-    TRACE("(%p,%d,%p,%x)\n", handle, class, data, (int)length);
+    TRACE("(%p,%d,%p,%x)\n", handle, class, data, length);
 
     switch (class)
     {
@@ -2362,15 +2382,30 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
         return status;
     }
 
-    case ThreadBasePriority:
+    case ThreadPriority:
     {
-        const DWORD *pprio = data;
+        const DWORD *priority = data;
         if (length != sizeof(DWORD)) return STATUS_INVALID_PARAMETER;
         SERVER_START_REQ( set_thread_info )
         {
-            req->handle   = wine_server_obj_handle( handle );
-            req->priority = *pprio;
-            req->mask     = SET_THREAD_INFO_PRIORITY;
+            req->handle    = wine_server_obj_handle( handle );
+            req->priority  = *priority;
+            req->mask      = SET_THREAD_INFO_PRIORITY;
+            status = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        return status;
+    }
+
+    case ThreadBasePriority:
+    {
+        const DWORD *base_priority = data;
+        if (length != sizeof(DWORD)) return STATUS_INVALID_PARAMETER;
+        SERVER_START_REQ( set_thread_info )
+        {
+            req->handle         = wine_server_obj_handle( handle );
+            req->base_priority  = *base_priority;
+            req->mask           = SET_THREAD_INFO_BASE_PRIORITY;
             status = wine_server_call( req );
         }
         SERVER_END_REQ;
@@ -2464,7 +2499,7 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
         if (handle == GetCurrentThread() || (!status && (HandleToULong(tbi.ClientId.UniqueThread) == GetCurrentThreadId())))
             WARN_(threadname)( "Thread renamed to %s\n", debugstr_us(&info->ThreadName) );
         else if (!status)
-            WARN_(threadname)( "Thread ID %04x renamed to %s\n", (int)HandleToULong( tbi.ClientId.UniqueThread ), debugstr_us(&info->ThreadName) );
+            WARN_(threadname)( "Thread ID %04x renamed to %s\n", HandleToULong( tbi.ClientId.UniqueThread ), debugstr_us(&info->ThreadName) );
         else
             WARN_(threadname)( "Thread handle %p renamed to %s\n", handle, debugstr_us(&info->ThreadName) );
 
@@ -2539,7 +2574,6 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
 
     case ThreadBasicInformation:
     case ThreadTimes:
-    case ThreadPriority:
     case ThreadDescriptorTableEntry:
     case ThreadEventPair_Reusable:
     case ThreadPerformanceCount:
@@ -2560,9 +2594,16 @@ ULONG WINAPI NtGetCurrentProcessorNumber(void)
 {
     ULONG processor;
 
-#if defined(__linux__) && defined(__NR_getcpu)
-    int res = syscall(__NR_getcpu, &processor, NULL, NULL);
-    if (res != -1) return processor;
+#if defined(HAVE_SCHED_GETCPU)
+    int res = sched_getcpu();
+    if (res >= 0) return res;
+#elif defined(__APPLE__) && (defined(__x86_64__) || defined(__i386__))
+    struct {
+        unsigned long p1, p2;
+    } p;
+    __asm__ __volatile__("sidt %[p]" : [p] "=&m"(p));
+    processor = (ULONG)(p.p1 & 0xfff);
+    return processor;
 #endif
 
     if (peb->NumberOfProcessors > 1)
@@ -2579,7 +2620,7 @@ ULONG WINAPI NtGetCurrentProcessorNumber(void)
                 {
                     if (thread_mask != processor_mask)
                         FIXME( "need multicore support (%d processors)\n",
-                               (int)peb->NumberOfProcessors );
+                               peb->NumberOfProcessors );
                     return processor;
                 }
             }
@@ -2600,7 +2641,7 @@ NTSTATUS WINAPI NtGetNextThread( HANDLE process, HANDLE thread, ACCESS_MASK acce
     unsigned int ret;
 
     TRACE( "process %p, thread %p, access %#x, attributes %#x, flags %#x, handle %p.\n",
-            process, thread, (int)access, (int)attributes, (int)flags, handle );
+            process, thread, access, attributes, flags, handle );
 
     SERVER_START_REQ( get_next_thread )
     {

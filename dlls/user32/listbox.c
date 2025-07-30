@@ -608,7 +608,7 @@ static void LISTBOX_PaintItem( LB_DESCR *descr, HDC hdc, const RECT *rect,
     if (index < descr->nb_items)
     {
         item_str = get_item_string(descr, index);
-        selected = is_item_selected(descr, index);
+        selected = !(descr->style & LBS_NOSEL) && is_item_selected(descr, index);
     }
 
     focused = !ignoreFocus && descr->focus_item == index && descr->caret_on && descr->in_focus;
@@ -2233,7 +2233,7 @@ static LRESULT LISTBOX_HandleLButtonDownCombo( LB_DESCR *descr, UINT msg, DWORD 
         /* Check the Non-Client Area */
         screenMousePos = mousePos;
         hWndOldCapture = GetCapture();
-        ReleaseCapture();
+        NtUserReleaseCapture();
         GetWindowRect(descr->self, &screenRect);
         ClientToScreen(descr->self, &screenMousePos);
 
@@ -2285,12 +2285,12 @@ static LRESULT LISTBOX_HandleLButtonDownCombo( LB_DESCR *descr, UINT msg, DWORD 
 static LRESULT LISTBOX_HandleLButtonUp( LB_DESCR *descr )
 {
     if (LISTBOX_Timer != LB_TIMER_NONE)
-        KillSystemTimer( descr->self, LB_TIMER_ID );
+        NtUserKillSystemTimer( descr->self, LB_TIMER_ID );
     LISTBOX_Timer = LB_TIMER_NONE;
     if (descr->captured)
     {
         descr->captured = FALSE;
-        if (GetCapture() == descr->self) ReleaseCapture();
+        if (GetCapture() == descr->self) NtUserReleaseCapture();
         if ((descr->style & LBS_NOTIFY) && descr->nb_items)
             SEND_NOTIFICATION( descr, LBN_SELCHANGE );
     }
@@ -2342,7 +2342,7 @@ static LRESULT LISTBOX_HandleSystemTimer( LB_DESCR *descr )
 {
     if (!LISTBOX_HandleTimer( descr, descr->focus_item, LISTBOX_Timer ))
     {
-        KillSystemTimer( descr->self, LB_TIMER_ID );
+        NtUserKillSystemTimer( descr->self, LB_TIMER_ID );
         LISTBOX_Timer = LB_TIMER_NONE;
     }
     return 0;
@@ -2394,7 +2394,7 @@ static void LISTBOX_HandleMouseMove( LB_DESCR *descr,
     if (dir != LB_TIMER_NONE)
         NtUserSetSystemTimer( descr->self, LB_TIMER_ID, LB_SCROLL_TIMEOUT );
     else if (LISTBOX_Timer != LB_TIMER_NONE)
-        KillSystemTimer( descr->self, LB_TIMER_ID );
+        NtUserKillSystemTimer( descr->self, LB_TIMER_ID );
     LISTBOX_Timer = dir;
 }
 

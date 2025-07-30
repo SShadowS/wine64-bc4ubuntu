@@ -34,6 +34,7 @@ struct HTMLStyle {
     IHTMLStyle4 IHTMLStyle4_iface;
     IHTMLStyle5 IHTMLStyle5_iface;
     IHTMLStyle6 IHTMLStyle6_iface;
+    IWineCSSProperties IWineCSSProperties_iface;
 
     HTMLElement *elem;
 };
@@ -90,6 +91,7 @@ typedef enum {
     STYLEID_COLUMN_RULE_WIDTH,
     STYLEID_COLUMN_SPAN,
     STYLEID_COLUMN_WIDTH,
+    STYLEID_CONTENT,
     STYLEID_CURSOR,
     STYLEID_DIRECTION,
     STYLEID_DISPLAY,
@@ -158,7 +160,7 @@ void CSSStyle_traverse(DispatchEx*,nsCycleCollectionTraversalCallback*);
 void CSSStyle_unlink(DispatchEx*);
 void CSSStyle_destructor(DispatchEx*);
 HRESULT CSSStyle_get_dispid(DispatchEx*,const WCHAR*,DWORD,DISPID*);
-void CSSStyle_init_dispex_info(dispex_data_t *info, compat_mode_t mode);
+void MSCSSProperties_init_dispex_info(dispex_data_t *info, compat_mode_t mode);
 
 HRESULT get_style_property(CSSStyle*,styleid_t,BSTR*);
 HRESULT get_style_property_var(CSSStyle*,styleid_t,VARIANT*);

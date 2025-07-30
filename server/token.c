@@ -148,6 +148,7 @@ static const struct object_ops token_ops =
     NULL,                      /* satisfied */
     no_signal,                 /* signal */
     no_get_fd,                 /* get_fd */
+    default_get_sync,          /* get_sync */
     default_map_access,        /* map_access */
     default_get_sd,            /* get_sd */
     token_set_sd,              /* set_sd */
@@ -917,7 +918,7 @@ static unsigned int token_access_check( struct token *token,
                                  unsigned int desired_access,
                                  struct luid_attr *privs,
                                  unsigned int *priv_count,
-                                 const generic_map_t *mapping,
+                                 const struct generic_map *mapping,
                                  unsigned int *granted_access,
                                  unsigned int *status )
 {
@@ -1085,7 +1086,7 @@ unsigned int token_get_session_id( struct token *token )
 
 int check_object_access(struct token *token, struct object *obj, unsigned int *access)
 {
-    generic_map_t mapping;
+    struct generic_map mapping;
     unsigned int status;
     int res;
 
@@ -1202,8 +1203,10 @@ DECL_HANDLER(create_token)
     token = create_token( req->primary, default_session_id, user, groups, req->group_count,
                           privs, req->priv_count, dacl, NULL, req->primary_group, req->impersonation_level, 0 );
     if (token)
+    {
         reply->token = alloc_handle( current->process, token, req->access, objattr->attributes );
-
+        release_object( token );
+    }
     free( default_dacl );
     free( groups );
 }
@@ -1538,7 +1541,14 @@ DECL_HANDLER(get_token_info)
         reply->session_id = token->session_id;
         reply->primary = token->primary;
         reply->impersonation_level = token->impersonation_level;
-        reply->elevation = token->elevation;
+        reply->elevation_type = token->elevation;
+        /* Tokens with TokenElevationTypeDefault are considered elevated for the
+           purposes of GetTokenInformation(TokenElevation) if they belong to the
+           admins group. */
+        if (token->elevation == TokenElevationTypeDefault)
+            reply->is_elevated = token_sid_present( token, &builtin_admins_sid, FALSE );
+        else
+            reply->is_elevated = token->elevation == TokenElevationTypeFull;
         reply->group_count = list_count( &token->groups );
         reply->privilege_count = list_count( &token->privileges );
         release_object( token );

@@ -5,15 +5,15 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2023-12-15 07:05+0100\n"
+"PO-Revision-Date: 2025-01-04 21:17-0600\n"
 "Last-Translator: Jactry Zeng <jzeng@codeweavers.com>\n"
 "Language-Team: Chinese (PRC)\n"
 "Language: zh_CN\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"X-Generator: Poedit 2.4.2\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
+"X-Generator: Poedit 3.4.4\n"
 
 #: dlls/aclui/aclui.rc:29 dlls/inetcpl.cpl/inetcpl.rc:90
 #: programs/winefile/winefile.rc:114
@@ -36,21 +36,21 @@ msgstr "拒绝"
 msgid "Permissions for %1"
 msgstr "%1 的权限"
 
-#: dlls/appwiz.cpl/appwiz.rc:59
+#: dlls/appwiz.cpl/appwiz.rc:60
 msgid "Install/Uninstall"
 msgstr "安装/卸载"
 
-#: dlls/appwiz.cpl/appwiz.rc:62
+#: dlls/appwiz.cpl/appwiz.rc:63
 msgid ""
 "To install a new program from a floppy disk, CD-ROM drive, or your hard "
 "drive, click Install."
 msgstr "要从软盘，光盘或硬盘安装新程序，请单击“安装”。"
 
-#: dlls/appwiz.cpl/appwiz.rc:63
+#: dlls/appwiz.cpl/appwiz.rc:64
 msgid "&Install..."
 msgstr "安装(&I)..."
 
-#: dlls/appwiz.cpl/appwiz.rc:66
+#: dlls/appwiz.cpl/appwiz.rc:67
 msgid ""
 "The following software can be automatically removed. To remove a program or "
 "to modify its installed components, select it from the list and click Modify/"
@@ -58,27 +58,27 @@ msgid ""
 msgstr ""
 "下列软件可以自动卸载。单击“修改/删除”可卸载选中的程序或修改其已安装的组件。"
 
-#: dlls/appwiz.cpl/appwiz.rc:68
+#: dlls/appwiz.cpl/appwiz.rc:69
 msgid "&Support Information"
 msgstr "技术支持信息(&S)"
 
-#: dlls/appwiz.cpl/appwiz.rc:69 programs/regedit/regedit.rc:136
+#: dlls/appwiz.cpl/appwiz.rc:70 programs/regedit/regedit.rc:136
 #: programs/regedit/regedit.rc:237
 msgid "&Modify..."
 msgstr "修改(&M)..."
 
-#: dlls/appwiz.cpl/appwiz.rc:70 dlls/appwiz.cpl/appwiz.rc:45
+#: dlls/appwiz.cpl/appwiz.rc:71 dlls/appwiz.cpl/appwiz.rc:45
 #: dlls/cryptui/cryptui.rc:351 dlls/msacm32/msacm32.rc:40
 #: programs/winecfg/winecfg.rc:205 programs/winecfg/winecfg.rc:242
 #: programs/wordpad/wordpad.rc:256
 msgid "&Remove"
 msgstr "删除(&R)"
 
-#: dlls/appwiz.cpl/appwiz.rc:76
+#: dlls/appwiz.cpl/appwiz.rc:77
 msgid "Support Information"
 msgstr "技术支持信息"
 
-#: dlls/appwiz.cpl/appwiz.rc:79 dlls/avifil32/avifil32.rc:54
+#: dlls/appwiz.cpl/appwiz.rc:80 dlls/avifil32/avifil32.rc:54
 #: dlls/comctl32/comctl32.rc:71 dlls/comctl32/comctl32.rc:55
 #: dlls/comdlg32/comdlg32.rc:233 dlls/comdlg32/comdlg32.rc:263
 #: dlls/comdlg32/comdlg32.rc:307 dlls/comdlg32/comdlg32.rc:390
@@ -97,7 +97,7 @@ msgstr "技术支持信息"
 #: dlls/user32/user32.rc:94 dlls/user32/user32.rc:109 dlls/user32/user32.rc:73
 #: dlls/wininet/wininet.rc:62 dlls/wininet/wininet.rc:82
 #: dlls/winspool.drv/winspool.rc:42 programs/net/net.rc:48
-#: programs/notepad/notepad.rc:124 programs/oleview/oleview.rc:161
+#: programs/notepad/notepad.rc:125 programs/oleview/oleview.rc:161
 #: programs/oleview/oleview.rc:174 programs/progman/progman.rc:106
 #: programs/progman/progman.rc:124 programs/progman/progman.rc:142
 #: programs/progman/progman.rc:158 programs/progman/progman.rc:180
@@ -115,67 +115,68 @@ msgstr "技术支持信息"
 msgid "OK"
 msgstr "确定"
 
-#: dlls/appwiz.cpl/appwiz.rc:80
+#: dlls/appwiz.cpl/appwiz.rc:81
 msgid "The following information can be used to get technical support for %s:"
 msgstr "以下信息可用于寻求 %s 的技术支持:"
 
-#: dlls/appwiz.cpl/appwiz.rc:81
+#: dlls/appwiz.cpl/appwiz.rc:82
 msgid "Publisher:"
 msgstr "生产商:"
 
-#: dlls/appwiz.cpl/appwiz.rc:82 programs/winefile/winefile.rc:165
+#: dlls/appwiz.cpl/appwiz.rc:83 programs/winefile/winefile.rc:165
 msgid "Version:"
 msgstr "版本:"
 
-#: dlls/appwiz.cpl/appwiz.rc:83
+#: dlls/appwiz.cpl/appwiz.rc:84
 msgid "Contact:"
 msgstr "联系人:"
 
-#: dlls/appwiz.cpl/appwiz.rc:84
+#: dlls/appwiz.cpl/appwiz.rc:85
 msgid "Support Information:"
 msgstr "支持信息:"
 
-#: dlls/appwiz.cpl/appwiz.rc:85
+#: dlls/appwiz.cpl/appwiz.rc:86
 msgid "Support Telephone:"
 msgstr "支持电话:"
 
-#: dlls/appwiz.cpl/appwiz.rc:86
+#: dlls/appwiz.cpl/appwiz.rc:87
 msgid "Readme:"
 msgstr "产品说明:"
 
-#: dlls/appwiz.cpl/appwiz.rc:87
+#: dlls/appwiz.cpl/appwiz.rc:88
 msgid "Product Updates:"
 msgstr "产品更新:"
 
-#: dlls/appwiz.cpl/appwiz.rc:88
+#: dlls/appwiz.cpl/appwiz.rc:89
 msgid "Comments:"
 msgstr "备注:"
 
-#: dlls/appwiz.cpl/appwiz.rc:101
+#: dlls/appwiz.cpl/appwiz.rc:102
 msgid "Wine Gecko Installer"
 msgstr "Wine Gecko 安装器"
 
-#: dlls/appwiz.cpl/appwiz.rc:104
+#: dlls/appwiz.cpl/appwiz.rc:105
 msgid ""
 "Wine could not find a Gecko package which is needed for applications "
 "embedding HTML to work correctly. Wine can automatically download and "
 "install it for you.\n"
 "\n"
 "Note: it is recommended to use your distribution's packages instead. See <a "
-"href=\"https://gitlab.winehq.org/wine/wine/-/wikis/Gecko\">https://gitlab."
-"winehq.org/wine/wine/-/wikis/Gecko</a> for details."
+"href=\"https://gitlab.winehq.org/wine/wine/-/wikis/Gecko\">https://"
+"gitlab.winehq.org/wine/wine/-/wikis/Gecko</a> for details."
 msgstr ""
 "Wine 未找到到用于支持嵌入 HTML 的 Gecko 引擎。Wine 可以自动并下载安装该组"
 "件。\n"
 "\n"
-"注意: 推荐您安装为发行版定制的软件包。具体请参看 <a href=\"https://wiki."
-"winehq.org/Gecko\">https://gitlab.winehq.org/wine/wine/-/wikis/Gecko</a>。"
+"注意: 推荐您安装为发行版定制的软件包。具体请参看 <a href=\"https://"
+"wiki.winehq.org/Gecko\">https://gitlab.winehq.org/wine/wine/-/wikis/Gecko</"
+"a>。"
 
-#: dlls/appwiz.cpl/appwiz.rc:110 dlls/appwiz.cpl/appwiz.rc:125
+#: dlls/appwiz.cpl/appwiz.rc:111 dlls/appwiz.cpl/appwiz.rc:126
 msgid "&Install"
 msgstr "安装(&I)"
 
-#: dlls/appwiz.cpl/appwiz.rc:111 dlls/appwiz.cpl/appwiz.rc:126
+#: dlls/appwiz.cpl/appwiz.rc:112 dlls/appwiz.cpl/appwiz.rc:127
 #: dlls/avifil32/avifil32.rc:55 dlls/browseui/browseui.rc:45
 #: dlls/comctl32/comctl32.rc:72 dlls/comctl32/comctl32.rc:87
 #: dlls/comctl32/comctl32.rc:56 dlls/comdlg32/comdlg32.rc:172
@@ -200,7 +201,7 @@ msgstr "安装(&I)"
 #: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:95 dlls/user32/user32.rc:110
 #: dlls/user32/user32.rc:74 dlls/wininet/wininet.rc:63
 #: dlls/wininet/wininet.rc:83 dlls/winspool.drv/winspool.rc:43
-#: programs/notepad/notepad.rc:125 programs/notepad/notepad.rc:138
+#: programs/notepad/notepad.rc:126 programs/notepad/notepad.rc:139
 #: programs/oleview/oleview.rc:162 programs/oleview/oleview.rc:175
 #: programs/progman/progman.rc:107 programs/progman/progman.rc:125
 #: programs/progman/progman.rc:143 programs/progman/progman.rc:159
@@ -218,11 +219,11 @@ msgstr "安装(&I)"
 msgid "Cancel"
 msgstr "取消"
 
-#: dlls/appwiz.cpl/appwiz.rc:116
+#: dlls/appwiz.cpl/appwiz.rc:117
 msgid "Wine Mono Installer"
 msgstr "Wine Mono 安装器"
 
-#: dlls/appwiz.cpl/appwiz.rc:119
+#: dlls/appwiz.cpl/appwiz.rc:120
 msgid ""
 "Wine could not find a wine-mono package which is needed for .NET "
 "applications to work correctly. Wine can automatically download and install "
@@ -235,9 +236,9 @@ msgstr ""
 "Wine 未找到到用于支持 .NET 应用的 wine-mono 组件。Wine 可以自动并下载安装该组"
 "件。\n"
 "\n"
-"注意: 推荐您安装为发行版定制的软件包。具体请参看 <a https://gitlab.winehq."
-"org/wine/wine/-/wikis/Wine-Mono\">https://gitlab.winehq.org/wine/wine/-/"
-"wikis/Wine-Mono</a>。"
+"注意: 推荐您安装为发行版定制的软件包。具体请参看 <a https://"
+"gitlab.winehq.org/wine/wine/-/wikis/Wine-Mono\">https://gitlab.winehq.org/"
+"wine/wine/-/wikis/Wine-Mono</a>。"
 
 #: dlls/appwiz.cpl/appwiz.rc:31
 msgid "Add/Remove Programs"
@@ -264,7 +265,7 @@ msgstr "不能运行卸载程序 '%s'。您想把这个卸载条目从注册表�
 msgid "Not specified"
 msgstr "未指定"
 
-#: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:38
+#: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:35
 #: dlls/shell32/shell32.rc:141 dlls/shell32/shell32.rc:243
 #: programs/regedit/regedit.rc:150 programs/winefile/winefile.rc:106
 msgid "Name"
@@ -288,7 +289,7 @@ msgstr "程序 (*.exe)"
 
 #: dlls/appwiz.cpl/appwiz.rc:43 dlls/avifil32/avifil32.rc:33
 #: dlls/cryptui/cryptui.rc:83 dlls/shell32/shell32.rc:199
-#: programs/notepad/notepad.rc:81 programs/oleview/oleview.rc:103
+#: programs/notepad/notepad.rc:82 programs/oleview/oleview.rc:103
 #: programs/progman/progman.rc:82 programs/regedit/regedit.rc:230
 #: programs/winedbg/winedbg.rc:43 programs/winhlp32/winhlp32.rc:90
 msgid "All files (*.*)"
@@ -315,6 +316,12 @@ msgstr "已下载的文件校验值错误。放弃安装已损坏的文件。"
 #: dlls/appwiz.cpl/appwiz.rc:47
 msgid "Please wait until the current uninstall/modify process is complete."
 msgstr "请等待当前的卸载/修改进程完成。"
+
+#: dlls/appwiz.cpl/appwiz.rc:55
+#, fuzzy
+#| msgid "Downloading..."
+msgid "Download failed."
+msgstr "正在下载..."
 
 #: dlls/avifil32/avifil32.rc:42
 msgid "Compress options"
@@ -368,6 +375,21 @@ msgstr "Wine AVI-默认处理器"
 msgid "uncompressed"
 msgstr "未压缩"
 
+#: dlls/bluetoothapis/bluetoothapis.rc:31
+#, fuzzy
+#| msgid "&Confirm password:"
+msgid "Confirm pairing"
+msgstr "确认密码(&C):"
+
+#: dlls/bluetoothapis/bluetoothapis.rc:32
+msgid "Pair with '%1!s!' using the following PIN/passkey value: %2!lu!?"
+msgstr ""
+
+#: dlls/bluetoothapis/bluetoothapis.rc:33
+msgid ""
+"Pair with unnamed device %1!s! using the following PIN/passkey value: %2!lu!?"
+msgstr ""
+
 #: dlls/browseui/browseui.rc:28
 msgid "Canceling..."
 msgstr "正在取消..."
@@ -415,7 +437,7 @@ msgstr "向导"
 msgid "< &Back"
 msgstr "< 上一步(&B)"
 
-#: dlls/comctl32/comctl32.rc:85 dlls/oledb32/version.rc:61
+#: dlls/comctl32/comctl32.rc:85 dlls/oledb32/version.rc:58
 msgid "&Next >"
 msgstr "下一步(&N) >"
 
@@ -447,7 +469,7 @@ msgstr "重置(&E)"
 #: dlls/comdlg32/comdlg32.rc:531 dlls/ieframe/ieframe.rc:58
 #: dlls/msacm32/msacm32.rc:52 dlls/oledlg/oledlg.rc:96
 #: dlls/shell32/shell32.rc:125 programs/clock/clock.rc:44
-#: programs/notepad/notepad.rc:65 programs/notepad/notepad.rc:126
+#: programs/notepad/notepad.rc:65 programs/notepad/notepad.rc:127
 #: programs/oleview/oleview.rc:72 programs/progman/progman.rc:55
 #: programs/progman/progman.rc:108 programs/progman/progman.rc:126
 #: programs/progman/progman.rc:144 programs/progman/progman.rc:160
@@ -517,7 +539,7 @@ msgstr "显示详情"
 
 #: dlls/comctl32/comctl32.rc:31 dlls/cryptui/cryptui.rc:235
 #: programs/regedit/regedit.rc:291 programs/taskmgr/taskmgr.rc:434
-#: programs/winedbg/winedbg.rc:61 programs/winedbg/winedbg.rc:76
+#: programs/winedbg/winedbg.rc:62 programs/winedbg/winedbg.rc:77
 #: programs/wordpad/wordpad.rc:180
 msgid "Close"
 msgstr "关闭"
@@ -568,7 +590,7 @@ msgstr "另存为"
 
 #: dlls/comdlg32/comdlg32.rc:202 dlls/comdlg32/comdlg32.rc:211
 #: dlls/comdlg32/comdlg32.rc:358 dlls/comdlg32/comdlg32.rc:55
-#: dlls/hhctrl.ocx/hhctrl.rc:49 programs/wordpad/wordpad.rc:173
+#: dlls/hhctrl.ocx/hhctrl.rc:51 programs/wordpad/wordpad.rc:173
 msgid "Print"
 msgstr "打印"
 
@@ -707,6 +729,7 @@ msgid "Scr&ipt:"
 msgstr "书写系统(&I):"
 
 #: dlls/comdlg32/comdlg32.rc:283 dlls/comdlg32/comdlg32.rc:288
+#: dlls/compstui/compstui.rc:33
 msgid "Color"
 msgstr "颜色"
 
@@ -902,7 +925,7 @@ msgstr "纵向(&P)"
 msgid "L&eft:"
 msgstr "左(&E):"
 
-#: dlls/comdlg32/comdlg32.rc:449 programs/notepad/notepad.rc:119
+#: dlls/comdlg32/comdlg32.rc:449 programs/notepad/notepad.rc:120
 msgid "&Right:"
 msgstr "右(&R):"
 
@@ -910,7 +933,7 @@ msgstr "右(&R):"
 msgid "T&op:"
 msgstr "上(&O):"
 
-#: dlls/comdlg32/comdlg32.rc:453 programs/notepad/notepad.rc:121
+#: dlls/comdlg32/comdlg32.rc:453 programs/notepad/notepad.rc:122
 msgid "&Bottom:"
 msgstr "下(&B):"
 
@@ -1320,7 +1343,7 @@ msgstr "毫米"
 msgid "Properties"
 msgstr "属性"
 
-#: dlls/compstui/compstui.rc:30 dlls/hhctrl.ocx/hhctrl.rc:50
+#: dlls/compstui/compstui.rc:30 dlls/hhctrl.ocx/hhctrl.rc:52
 #: programs/conhost/conhost.rc:51 programs/wordpad/wordpad.rc:166
 msgid "Options"
 msgstr "选项"
@@ -1329,12 +1352,49 @@ msgstr "选项"
 msgid "Default"
 msgstr "默认"
 
+#: dlls/compstui/compstui.rc:35
+#, fuzzy
+#| msgid "&Copy Background"
+msgid "&Copy count"
+msgstr "复制背景(&C)"
+
+#: dlls/compstui/compstui.rc:36
+#, fuzzy
+#| msgid "Print to File"
+msgid "Print on Both Sides"
+msgstr "打印到文件"
+
+#: dlls/compstui/compstui.rc:32
+#, fuzzy
+#| msgid "C&olor:"
+msgid "C&olor"
+msgstr "颜色(&O):"
+
+#: dlls/compstui/compstui.rc:34
+msgid "Bla&ck && White"
+msgstr ""
+
+#: dlls/compstui/compstui.rc:37
+#, fuzzy
+#| msgctxt "hotkey"
+#| msgid "None"
+msgid "&None"
+msgstr "无"
+
+#: dlls/compstui/compstui.rc:38 dlls/compstui/compstui.rc:41
+msgid "Flip on Shor&t Edge"
+msgstr ""
+
+#: dlls/compstui/compstui.rc:39 dlls/compstui/compstui.rc:40
+msgid "Flip on Long E&dge"
+msgstr ""
+
 #: dlls/credui/credui.rc:45
 msgid "&User name:"
 msgstr "用户名(&U):"
 
 #: dlls/credui/credui.rc:48 dlls/cryptui/cryptui.rc:402
-#: dlls/oledb32/version.rc:81
+#: dlls/oledb32/version.rc:78
 msgid "&Password:"
 msgstr "密码(&P):"
 
@@ -2327,7 +2387,7 @@ msgstr "选择证书存储"
 
 #: dlls/cryptui/cryptui.rc:276
 msgid "Select the certificate store you want to use:"
-msgstr "选择您要使用的证书存储"
+msgstr "选择您要使用的证书存储:"
 
 #: dlls/cryptui/cryptui.rc:279
 msgid "&Show physical stores"
@@ -2648,7 +2708,7 @@ msgstr "该证书没有问题。"
 msgid "Field"
 msgstr "域"
 
-#: dlls/cryptui/cryptui.rc:48 dlls/oledb32/version.rc:39
+#: dlls/cryptui/cryptui.rc:48 dlls/oledb32/version.rc:36
 msgid "Value"
 msgstr "亮度"
 
@@ -3102,18 +3162,12 @@ msgid "Not yet implemented"
 msgstr "尚未实现"
 
 #: dlls/desk.cpl/desk.rc:35
-#, fuzzy
-#| msgctxt "display name"
-#| msgid "Desktop"
 msgid "Desktop"
 msgstr "桌面"
 
 #: dlls/desk.cpl/desk.rc:38
-#, fuzzy
-#| msgctxt "display name"
-#| msgid "Desktop"
 msgid "Virtual Desktop"
-msgstr "桌面"
+msgstr "虚拟桌面"
 
 #: dlls/desk.cpl/desk.rc:40 dlls/joy.cpl/joy.rc:41
 msgid "&Reset"
@@ -3121,17 +3175,15 @@ msgstr "重置(&R)"
 
 #: dlls/desk.cpl/desk.rc:42
 msgid "Emulate display mode changes (requires restart)"
-msgstr ""
+msgstr "模拟显示模式改变（需要重启）"
 
 #: dlls/desk.cpl/desk.rc:29
-#, fuzzy
-#| msgid "Default Settings"
 msgid "Display Settings"
-msgstr "默认设置"
+msgstr "显示设置"
 
 #: dlls/desk.cpl/desk.rc:30
 msgid "Configure monitors and display devices."
-msgstr ""
+msgstr "监视器与显示设备配置。"
 
 #: dlls/dinput/dinput.rc:34
 msgid "Configure Devices"
@@ -3245,7 +3297,7 @@ msgstr "符号"
 msgid "OEM/DOS"
 msgstr "OEM/DOS"
 
-#: dlls/gdi32/gdi32.rc:45 dlls/oledb32/version.rc:100
+#: dlls/gdi32/gdi32.rc:45 dlls/oledb32/version.rc:97
 #: dlls/wldap32/wldap32.rc:112
 msgid "Other"
 msgstr "其它"
@@ -3290,60 +3342,60 @@ msgstr "连接照相机"
 msgid "Connecting to camera... Please Wait"
 msgstr "正在连接照相机... 请稍候"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:59
+#: dlls/hhctrl.ocx/hhctrl.rc:61
 msgid "S&ync"
 msgstr "同步(&Y)"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:60 dlls/hhctrl.ocx/hhctrl.rc:73
+#: dlls/hhctrl.ocx/hhctrl.rc:62 dlls/hhctrl.ocx/hhctrl.rc:75
 #: dlls/shdoclc/shdoclc.rc:41 programs/winhlp32/winhlp32.rc:89
 msgid "&Back"
 msgstr "向后(&B)"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:61 dlls/hhctrl.ocx/hhctrl.rc:74
+#: dlls/hhctrl.ocx/hhctrl.rc:63 dlls/hhctrl.ocx/hhctrl.rc:76
 msgid "&Forward"
 msgstr "向前(&F)"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:62
+#: dlls/hhctrl.ocx/hhctrl.rc:64
 msgctxt "table of contents"
 msgid "&Home"
 msgstr "首页(&H)"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:63
+#: dlls/hhctrl.ocx/hhctrl.rc:65
 msgid "&Stop"
 msgstr "停止(&S)"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:64 dlls/hhctrl.ocx/hhctrl.rc:81
-#: dlls/oledb32/version.rc:73 dlls/shdoclc/shdoclc.rc:59
+#: dlls/hhctrl.ocx/hhctrl.rc:66 dlls/hhctrl.ocx/hhctrl.rc:83
+#: dlls/oledb32/version.rc:70 dlls/shdoclc/shdoclc.rc:59
 msgid "&Refresh"
 msgstr "刷新(&R)"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:65 dlls/hhctrl.ocx/hhctrl.rc:80
+#: dlls/hhctrl.ocx/hhctrl.rc:67 dlls/hhctrl.ocx/hhctrl.rc:82
 #: programs/winhlp32/winhlp32.rc:34
 msgid "&Print..."
 msgstr "打印(&P)..."
 
-#: dlls/hhctrl.ocx/hhctrl.rc:76 dlls/hhctrl.ocx/hhctrl.rc:90
+#: dlls/hhctrl.ocx/hhctrl.rc:78 dlls/hhctrl.ocx/hhctrl.rc:92
 #: dlls/shdoclc/shdoclc.rc:49 dlls/shdoclc/shdoclc.rc:98
 #: dlls/shdoclc/shdoclc.rc:120 dlls/user32/user32.rc:65
 msgid "Select &All"
 msgstr "全选(&A)"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:78 dlls/shdoclc/shdoclc.rc:54
+#: dlls/hhctrl.ocx/hhctrl.rc:80 dlls/shdoclc/shdoclc.rc:54
 msgid "&View Source"
 msgstr "查看源代码(&V)"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:83
+#: dlls/hhctrl.ocx/hhctrl.rc:85
 msgid "Proper&ties"
 msgstr "属性(&T)"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:87 dlls/shdoclc/shdoclc.rc:79
+#: dlls/hhctrl.ocx/hhctrl.rc:89 dlls/shdoclc/shdoclc.rc:79
 #: dlls/shdoclc/shdoclc.rc:93 dlls/shdoclc/shdoclc.rc:117
 #: dlls/shdoclc/shdoclc.rc:159 dlls/shdoclc/shdoclc.rc:183
 #: dlls/user32/user32.rc:60 programs/wordpad/wordpad.rc:112
 msgid "Cu&t"
 msgstr "剪切(&T)"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:88 dlls/shdoclc/shdoclc.rc:80
+#: dlls/hhctrl.ocx/hhctrl.rc:90 dlls/shdoclc/shdoclc.rc:80
 #: dlls/shdoclc/shdoclc.rc:94 dlls/shdoclc/shdoclc.rc:118
 #: dlls/shdoclc/shdoclc.rc:133 dlls/shdoclc/shdoclc.rc:160
 #: dlls/shdoclc/shdoclc.rc:184 dlls/shell32/shell32.rc:98
@@ -3352,12 +3404,12 @@ msgstr "剪切(&T)"
 msgid "&Copy"
 msgstr "复制(&C)"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:89 dlls/shdoclc/shdoclc.rc:119
+#: dlls/hhctrl.ocx/hhctrl.rc:91 dlls/shdoclc/shdoclc.rc:119
 #: dlls/shell32/shell32.rc:64
 msgid "Paste"
 msgstr "粘贴"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:91 dlls/shdoclc/shdoclc.rc:121
+#: dlls/hhctrl.ocx/hhctrl.rc:93 dlls/shdoclc/shdoclc.rc:121
 #: dlls/shell32/shell32.rc:166
 msgid "&Print"
 msgstr "打印(&P)"
@@ -3370,7 +3422,7 @@ msgstr "内容(&C)"
 msgid "I&ndex"
 msgstr "目录(&N)"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:33 programs/notepad/notepad.rc:55
+#: dlls/hhctrl.ocx/hhctrl.rc:33
 msgid "&Search"
 msgstr "搜索(&S)"
 
@@ -3386,38 +3438,44 @@ msgstr "隐藏标签页(&T)"
 msgid "Show &Tabs"
 msgstr "显示标签页(&T)"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:42
+#: dlls/hhctrl.ocx/hhctrl.rc:39
+#, fuzzy
+#| msgid "Select Source"
+msgid "Select Topic"
+msgstr "选择来源"
+
+#: dlls/hhctrl.ocx/hhctrl.rc:44
 msgid "Show"
 msgstr "显示"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:43 dlls/winemac.drv/winemac.rc:34
+#: dlls/hhctrl.ocx/hhctrl.rc:45 dlls/winemac.drv/winemac.rc:34
 msgid "Hide"
 msgstr "隐藏"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:44 dlls/ieframe/ieframe.rc:68
+#: dlls/hhctrl.ocx/hhctrl.rc:46 dlls/ieframe/ieframe.rc:68
 #: dlls/shdoclc/shdoclc.rc:167 dlls/shdoclc/shdoclc.rc:191
 msgid "Stop"
 msgstr "停止"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:45 dlls/ieframe/ieframe.rc:69
+#: dlls/hhctrl.ocx/hhctrl.rc:47 dlls/ieframe/ieframe.rc:69
 #: dlls/shell32/shell32.rc:62
 msgid "Refresh"
 msgstr "刷新"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:46 dlls/ieframe/ieframe.rc:66
+#: dlls/hhctrl.ocx/hhctrl.rc:48 dlls/ieframe/ieframe.rc:66
 msgid "Back"
 msgstr "向后"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:47
+#: dlls/hhctrl.ocx/hhctrl.rc:49
 msgctxt "table of contents"
 msgid "Home"
 msgstr "首页"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:48
+#: dlls/hhctrl.ocx/hhctrl.rc:50
 msgid "Sync"
 msgstr "同步"
 
-#: dlls/hhctrl.ocx/hhctrl.rc:51 dlls/ieframe/ieframe.rc:67
+#: dlls/hhctrl.ocx/hhctrl.rc:53 dlls/ieframe/ieframe.rc:67
 msgid "Forward"
 msgstr "向前"
 
@@ -3448,8 +3506,7 @@ msgstr "窗口(&W)"
 msgid "&Open..."
 msgstr "打开(&O)..."
 
-#: dlls/ieframe/ieframe.rc:36 programs/notepad/notepad.rc:33
-#: programs/wordpad/wordpad.rc:34
+#: dlls/ieframe/ieframe.rc:36 programs/wordpad/wordpad.rc:34
 msgid "Save &as..."
 msgstr "另存为(&A)..."
 
@@ -3722,16 +3779,12 @@ msgid "&Enable"
 msgstr "启用(&E)"
 
 #: dlls/joy.cpl/joy.rc:44
-#, fuzzy
-#| msgid "Connected (xinput device)"
 msgid "Connected (DirectInput devices)"
-msgstr "已连接 (xinput 设备)"
+msgstr "已连接 (DirectInput 设备)"
 
 #: dlls/joy.cpl/joy.rc:46
-#, fuzzy
-#| msgid "Connected (xinput device)"
 msgid "Connected (XInput devices)"
-msgstr "已连接 (xinput 设备)"
+msgstr "已连接 (XInput 设备)"
 
 #: dlls/joy.cpl/joy.rc:48
 msgid "Disabled"
@@ -3739,19 +3792,15 @@ msgstr "停用"
 
 #: dlls/joy.cpl/joy.rc:51
 msgid "Advanced settings (restart prefix required to take effect)"
-msgstr ""
+msgstr "高级设置（重启 prefix 后生效）"
 
 #: dlls/joy.cpl/joy.rc:52
-#, fuzzy
-#| msgid "&Enable"
 msgid "Enable SDL"
-msgstr "启用(&E)"
+msgstr "启用 SDL"
 
 #: dlls/joy.cpl/joy.rc:53
-#, fuzzy
-#| msgid "Disabled"
 msgid "Disable hidraw"
-msgstr "停用"
+msgstr "停用 hidraw"
 
 #: dlls/joy.cpl/joy.rc:58
 msgid "DInput"
@@ -3876,7 +3925,7 @@ msgstr "对象不支持此属性或方式"
 msgid "Object doesn't support this action"
 msgstr "对象不支持此动作"
 
-#: dlls/jscript/jscript.rc:36
+#: dlls/jscript/jscript.rc:36 dlls/vbscript/vbscript.rc:54
 msgid "Argument not optional"
 msgstr "参数不是可选参数"
 
@@ -4071,22 +4120,20 @@ msgid "Cannot modify non-writable property '|'"
 msgstr "无法更改不可写的属性 '|'"
 
 #: dlls/jscript/jscript.rc:81
-#, fuzzy
-#| msgid "'this' is not a | object"
 msgid "'this' is not a DataView object"
-msgstr "'this' 不是 | 对象"
+msgstr "'this' 不是 DataView 对象"
 
 #: dlls/jscript/jscript.rc:82
 msgid "Required argument offset or value in DataView method is not specified"
-msgstr ""
+msgstr "未指定 DataView 方法所必需的参数偏移量或值"
 
 #: dlls/jscript/jscript.rc:83
 msgid "DataView operation access beyond specified buffer length"
-msgstr ""
+msgstr "DataView 操作访问超出指定的缓冲区长度"
 
 #: dlls/jscript/jscript.rc:84
 msgid "DataView constructor argument offset is invalid"
-msgstr ""
+msgstr "DataView 构造函数参数偏移量无效"
 
 #: dlls/jscript/jscript.rc:85
 msgid "'this' is not a | object"
@@ -4097,20 +4144,18 @@ msgid "'key' is not an object"
 msgstr "'key' 不是一个对象"
 
 #: dlls/jscript/jscript.rc:87
-#, fuzzy
-#| msgid "Array object expected"
 msgid "ArrayBuffer object expected"
-msgstr "期望得到 Array 对象"
+msgstr "期望得到 ArrayBuffer 对象"
 
 #: dlls/jscript/jscript.rc:88
 msgid "Property cannot have both accessors and a value"
 msgstr "属性不能同时包含存取器和值"
 
-#: include/wine/wine_common_ver.rc:138
+#: include/wine/wine_common_ver.rc:123
 msgid "Wine kernel DLL"
 msgstr "Wine kernel DLL"
 
-#: include/wine/wine_common_ver.rc:143 dlls/winemac.drv/winemac.rc:32
+#: include/wine/wine_common_ver.rc:128 dlls/winemac.drv/winemac.rc:32
 #: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:143
 msgid "Wine"
 msgstr "Wine"
@@ -7125,7 +7170,7 @@ msgstr "无效的参数。\n"
 
 #: dlls/kernelbase/winerror.mc:3778
 msgid "Cannot assign requested address.\n"
-msgstr ""
+msgstr "无法分配所请求的地址。\n"
 
 #: dlls/kernelbase/winerror.mc:3783
 msgid "Connection reset by peer.\n"
@@ -7886,7 +7931,7 @@ msgid "Vector property is required.\n"
 msgstr "要求矢量属性。\n"
 
 #: dlls/mferror/mferror.mc:389
-msgid "Operation was cancelled.\n"
+msgid "Operation was canceled.\n"
 msgstr "操作被取消。\n"
 
 #: dlls/mferror/mferror.mc:396
@@ -8109,7 +8154,7 @@ msgstr "整个网络"
 msgid "Sound Selection"
 msgstr "声音选择"
 
-#: dlls/msacm32/msacm32.rc:39 programs/winedbg/winedbg.rc:77
+#: dlls/msacm32/msacm32.rc:39 programs/winedbg/winedbg.rc:78
 msgid "&Save As..."
 msgstr "保存为(&S)..."
 
@@ -9080,12 +9125,12 @@ msgstr "屏幕外"
 
 #: dlls/oleacc/oleacc.rc:115
 msgctxt "object state"
-msgid "sizeable"
+msgid "sizable"
 msgstr "大小可变"
 
 #: dlls/oleacc/oleacc.rc:116
 msgctxt "object state"
-msgid "moveable"
+msgid "movable"
 msgstr "可移动"
 
 #: dlls/oleacc/oleacc.rc:117
@@ -9164,99 +9209,99 @@ msgstr "开"
 msgid "Off"
 msgstr "关"
 
-#: dlls/oledb32/version.rc:56
+#: dlls/oledb32/version.rc:53
 msgid "Provider"
 msgstr "提供者"
 
-#: dlls/oledb32/version.rc:59
+#: dlls/oledb32/version.rc:56
 msgid "Select the data you want to connect to:"
 msgstr "选择您想要连接的数据源:"
 
-#: dlls/oledb32/version.rc:66
+#: dlls/oledb32/version.rc:63
 msgid "Connection"
 msgstr "连接"
 
-#: dlls/oledb32/version.rc:69
+#: dlls/oledb32/version.rc:66
 msgid "Specify the following to connect to ODBC data:"
 msgstr "指定以下内容以连接到 ODBC 数据源:"
 
-#: dlls/oledb32/version.rc:70
+#: dlls/oledb32/version.rc:67
 msgid "1. Specify the source of data:"
 msgstr "1. 指定数据源:"
 
-#: dlls/oledb32/version.rc:71
+#: dlls/oledb32/version.rc:68
 msgid "Use &data source name"
 msgstr "使用数据源名称(&D)"
 
-#: dlls/oledb32/version.rc:74
+#: dlls/oledb32/version.rc:71
 msgid "Use c&onnection string"
 msgstr "使用连接字符串(&O)"
 
-#: dlls/oledb32/version.rc:75
+#: dlls/oledb32/version.rc:72
 msgid "&Connection string:"
 msgstr "连接字符串(&C):"
 
-#: dlls/oledb32/version.rc:77
+#: dlls/oledb32/version.rc:74
 msgid "B&uild..."
 msgstr "构建(&U)..."
 
-#: dlls/oledb32/version.rc:78
+#: dlls/oledb32/version.rc:75
 msgid "2. Enter information to log on to the server"
 msgstr "2. 输入服务器登录信息"
 
-#: dlls/oledb32/version.rc:79
+#: dlls/oledb32/version.rc:76
 msgid "User &name:"
 msgstr "用户名(&N):"
 
-#: dlls/oledb32/version.rc:83
+#: dlls/oledb32/version.rc:80
 msgid "&Blank password"
 msgstr "空密码(&B)"
 
-#: dlls/oledb32/version.rc:84
+#: dlls/oledb32/version.rc:81
 msgid "Allow &saving password"
 msgstr "允许保存密码(&S)"
 
-#: dlls/oledb32/version.rc:85
+#: dlls/oledb32/version.rc:82
 msgid "3. Enter the &initial catalog to use:"
 msgstr "3. 输入要使用的初始目录:"
 
-#: dlls/oledb32/version.rc:87
+#: dlls/oledb32/version.rc:84
 msgid "&Test Connection"
 msgstr "测试连接(&T)"
 
-#: dlls/oledb32/version.rc:92
+#: dlls/oledb32/version.rc:89
 msgid "Advanced"
 msgstr "高级"
 
-#: dlls/oledb32/version.rc:95
+#: dlls/oledb32/version.rc:92
 msgid "Network settings"
 msgstr "网络设置"
 
-#: dlls/oledb32/version.rc:96
+#: dlls/oledb32/version.rc:93
 msgid "&Impersonation level:"
 msgstr "模拟级别(&I):"
 
-#: dlls/oledb32/version.rc:98
+#: dlls/oledb32/version.rc:95
 msgid "P&rotection level:"
 msgstr "保护级别(&R):"
 
-#: dlls/oledb32/version.rc:101
+#: dlls/oledb32/version.rc:98
 msgid "Connect:"
 msgstr "连接:"
 
-#: dlls/oledb32/version.rc:103
+#: dlls/oledb32/version.rc:100
 msgid "seconds."
 msgstr "秒。"
 
-#: dlls/oledb32/version.rc:104
+#: dlls/oledb32/version.rc:101
 msgid "A&ccess:"
 msgstr "访问(&C):"
 
-#: dlls/oledb32/version.rc:110
+#: dlls/oledb32/version.rc:107
 msgid "All"
 msgstr "全部"
 
-#: dlls/oledb32/version.rc:114
+#: dlls/oledb32/version.rc:111
 msgid ""
 "These are the initialization properties for this type of data. To edit a "
 "value, select a property, then choose Edit Value below."
@@ -9264,57 +9309,57 @@ msgstr ""
 "该数据类型定义了数种初始化属性。要编辑属性值，选择一项属性，然后点选“编辑数"
 "据”。"
 
-#: dlls/oledb32/version.rc:115
+#: dlls/oledb32/version.rc:112
 msgid "&Edit Value..."
 msgstr "编辑数据(&E)..."
 
-#: dlls/oledb32/version.rc:49
+#: dlls/oledb32/version.rc:46
 msgid "Data Link Error"
 msgstr "数据链错误"
 
-#: dlls/oledb32/version.rc:50
+#: dlls/oledb32/version.rc:47
 msgid "Please select a provider."
 msgstr "请选择提供者。"
 
-#: dlls/oledb32/version.rc:51
+#: dlls/oledb32/version.rc:48
 msgid ""
 "Provider is no longer available. Ensure that the provider is installed "
 "properly."
 msgstr "提供者已不再可用。请确保提供者已正确安装。"
 
-#: dlls/oledb32/version.rc:36
+#: dlls/oledb32/version.rc:33
 msgid "Data Link Properties"
 msgstr "数据链路属性"
 
-#: dlls/oledb32/version.rc:37
+#: dlls/oledb32/version.rc:34
 msgid "OLE DB Provider(s)"
 msgstr "OLE DB 提供者"
 
-#: dlls/oledb32/version.rc:41
+#: dlls/oledb32/version.rc:38
 msgid "Read"
 msgstr "读取"
 
-#: dlls/oledb32/version.rc:42
+#: dlls/oledb32/version.rc:39
 msgid "ReadWrite"
 msgstr "读写"
 
-#: dlls/oledb32/version.rc:43
+#: dlls/oledb32/version.rc:40
 msgid "Share Deny None"
 msgstr "共享 拒绝 无"
 
-#: dlls/oledb32/version.rc:44
+#: dlls/oledb32/version.rc:41
 msgid "Share Deny Read"
 msgstr "共享 拒绝 可读"
 
-#: dlls/oledb32/version.rc:45
+#: dlls/oledb32/version.rc:42
 msgid "Share Deny Write"
 msgstr "共享 拒绝 可写"
 
-#: dlls/oledb32/version.rc:46
+#: dlls/oledb32/version.rc:43
 msgid "Share Exclusive"
 msgstr "共享互斥锁"
 
-#: dlls/oledb32/version.rc:47
+#: dlls/oledb32/version.rc:44
 msgid "Write"
 msgstr "写入"
 
@@ -10112,7 +10157,8 @@ msgctxt "display name"
 msgid "Desktop"
 msgstr "桌面"
 
-#: dlls/shell32/shell32.rc:152 programs/regedit/regedit.rc:243
+#: dlls/shell32/shell32.rc:152 dlls/urlmon/urlmon.rc:56
+#: programs/regedit/regedit.rc:243
 msgid "My Computer"
 msgstr "我的电脑"
 
@@ -10122,7 +10168,7 @@ msgstr "控制面板"
 
 #: dlls/shell32/shell32.rc:162
 msgid "Ne&w"
-msgstr ""
+msgstr "新建(&W)"
 
 #: dlls/shell32/shell32.rc:164
 msgid "E&xplore"
@@ -10130,7 +10176,7 @@ msgstr "资源管理器(&X)"
 
 #: dlls/shell32/shell32.rc:167
 msgid "Run as &Administrator"
-msgstr ""
+msgstr "以管理员运行(&A)"
 
 #: dlls/shell32/shell32.rc:189
 msgid "Restart"
@@ -12397,6 +12443,55 @@ msgstr "安装 (%d)"
 msgid "Install"
 msgstr "安装"
 
+#: dlls/urlmon/urlmon.rc:58
+#, fuzzy
+#| msgid "Local Port"
+msgid "Local intranet"
+msgstr "本地端口"
+
+#: dlls/urlmon/urlmon.rc:60
+#, fuzzy
+#| msgid "Trusted Publishers"
+msgid "Trusted sites"
+msgstr "已信任的发布者"
+
+#: dlls/urlmon/urlmon.rc:62
+#, fuzzy
+#| msgid "Ethernet"
+msgid "Internet"
+msgstr "以太网"
+
+#: dlls/urlmon/urlmon.rc:64
+msgid "Restricted sites"
+msgstr ""
+
+#: dlls/urlmon/urlmon.rc:57
+#, fuzzy
+#| msgid "My Computer"
+msgid "Your computer"
+msgstr "我的电脑"
+
+#: dlls/urlmon/urlmon.rc:59
+msgid ""
+"This zone contains all Web sites that are on your organization's intranet."
+msgstr ""
+
+#: dlls/urlmon/urlmon.rc:61
+msgid ""
+"This zone contains Web sites that you trust not to damage your computer or "
+"data."
+msgstr ""
+
+#: dlls/urlmon/urlmon.rc:63
+msgid "This zone contains all Web sites you haven't placed in other zones"
+msgstr ""
+
+#: dlls/urlmon/urlmon.rc:65
+msgid ""
+"This zone contains Web sites that could potentially damage your computer or "
+"data."
+msgstr ""
+
 #: dlls/user32/user32.rc:30 dlls/user32/user32.rc:43
 #: programs/taskmgr/taskmgr.rc:138
 msgctxt "window"
@@ -12538,7 +12633,7 @@ msgstr "对象不支持命名参数"
 msgid "Object doesn't support current locale setting"
 msgstr "对象不支持当前 locale 设置"
 
-#: dlls/vbscript/vbscript.rc:53 dlls/vbscript/vbscript.rc:54
+#: dlls/vbscript/vbscript.rc:53
 msgid "Named argument not found"
 msgstr "未找到命名参数"
 
@@ -13592,7 +13687,7 @@ msgstr "模拟时钟(&L)"
 msgid "Digi&tal"
 msgstr "数字时钟(&T)"
 
-#: programs/clock/clock.rc:35 programs/notepad/notepad.rc:53
+#: programs/clock/clock.rc:35 programs/notepad/notepad.rc:59
 #: programs/winecfg/winecfg.rc:313 programs/winefile/winefile.rc:63
 #: programs/wordpad/wordpad.rc:84
 msgid "&Font..."
@@ -14404,22 +14499,22 @@ msgstr ""
 " 十六进制 (0x34) 或者八进制 (056)。\n"
 
 #: programs/cmd/cmd.rc:407
-#, fuzzy
-#| msgid "Syntax error\n"
 msgid "Syntax error: unexpected %1\n"
-msgstr "语法错误\n"
+msgstr "语法错误: 非预期 %1\n"
 
 #: programs/cmd/cmd.rc:408
-#, fuzzy
-#| msgid "End of file.\n"
 msgid "End of line"
-msgstr "文件尾。\n"
+msgstr "行尾"
 
 #: programs/cmd/cmd.rc:409
-#, fuzzy
-#| msgid "End of file.\n"
 msgid "End of file"
-msgstr "文件尾。\n"
+msgstr "文件尾"
+
+#: programs/cmd/cmd.rc:410
+#, fuzzy
+#| msgid "%1!d! file(s) copied\n"
+msgid "%t%1!u! file(s) copied\n"
+msgstr "已复制 %1!d! 个文件\n"
 
 #: programs/conhost/conhost.rc:54
 msgid "Cursor size"
@@ -14603,11 +14698,8 @@ msgid ""
 msgstr "您确认要关闭所有程序并退出虚拟桌面吗?"
 
 #: programs/explorer/explorer.rc:38
-#, fuzzy
-#| msgctxt "display name"
-#| msgid "Desktop"
 msgid "Wine Desktop"
-msgstr "桌面"
+msgstr "Wine 桌面"
 
 #: programs/findstr/findstr.rc:28
 msgid "Usage: findstr /options string\n"
@@ -14776,8 +14868,6 @@ msgid "Current LogonId is"
 msgstr "当前 LogonId 是"
 
 #: programs/klist/klist.rc:38
-#, fuzzy
-#| msgid "client"
 msgid "Client"
 msgstr "客户端"
 
@@ -15043,6 +15133,12 @@ msgstr "打开(&O)...\tCtrl+O"
 msgid "&Save\tCtrl+S"
 msgstr "保存(&S)\tCtrl+S"
 
+#: programs/notepad/notepad.rc:33
+#, fuzzy
+#| msgid "Save As..."
+msgid "Save &As..."
+msgstr "另存为..."
+
 #: programs/notepad/notepad.rc:35 programs/regedit/regedit.rc:39
 #: programs/wordpad/wordpad.rc:36
 msgid "&Print...\tCtrl+P"
@@ -15072,39 +15168,50 @@ msgstr "复制(&C)\tCtrl+C"
 msgid "&Paste\tCtrl+V"
 msgstr "粘贴(&P)\tCtrl+V"
 
-#: programs/notepad/notepad.rc:47 programs/progman/progman.rc:37
-#: programs/regedit/regedit.rc:57 programs/regedit/regedit.rc:111
-#: programs/regedit/regedit.rc:139 programs/winefile/winefile.rc:32
-msgid "&Delete\tDel"
+#: programs/notepad/notepad.rc:47
+#, fuzzy
+#| msgid "&Delete\tDel"
+msgid "De&lete\tDel"
 msgstr "删除(&D)\tDel"
 
-#: programs/notepad/notepad.rc:49
-msgid "Select &all\tCtrl+A"
-msgstr "全选(&A)\tCtrl+A"
+#: programs/notepad/notepad.rc:49 programs/regedit/regedit.rc:62
+#: programs/regedit/regedit.rc:109 programs/wordpad/wordpad.rc:53
+msgid "&Find...\tCtrl+F"
+msgstr "查找(&F)...\tCtrl+F"
 
 #: programs/notepad/notepad.rc:50
-msgid "&Time/Date\tF5"
-msgstr "插入日期/时间(&T)\tF5"
+#, fuzzy
+#| msgid "Find &next\tF3"
+msgid "Find &Next\tF3"
+msgstr "找下一个(&N)\tF3"
 
-#: programs/notepad/notepad.rc:52
-msgid "&Wrap long lines"
-msgstr "自动换行(&W)"
-
-#: programs/notepad/notepad.rc:56
-msgid "&Search...\tCtrl+F"
-msgstr "搜索(&S)...\tCtrl+F"
-
-#: programs/notepad/notepad.rc:57
-msgid "&Search next\tF3"
-msgstr "搜索下一个(&S)\tF3"
-
-#: programs/notepad/notepad.rc:58 programs/wordpad/wordpad.rc:55
+#: programs/notepad/notepad.rc:51 programs/wordpad/wordpad.rc:55
 msgid "&Replace...\tCtrl+H"
 msgstr "替换(&R)...\tCtrl+H"
 
-#: programs/notepad/notepad.rc:59
+#: programs/notepad/notepad.rc:52
 msgid "&Go To...\tCtrl+G"
 msgstr "跳转到(&G)...\tCtrl+G"
+
+#: programs/notepad/notepad.rc:54
+#, fuzzy
+#| msgid "Select &all\tCtrl+A"
+msgid "Select &All\tCtrl+A"
+msgstr "全选(&A)\tCtrl+A"
+
+#: programs/notepad/notepad.rc:55
+#, fuzzy
+#| msgid "&Time/Date\tF5"
+msgid "Time/&Date\tF5"
+msgstr "插入日期/时间(&T)\tF5"
+
+#: programs/notepad/notepad.rc:57 programs/wordpad/wordpad.rc:82
+msgid "F&ormat"
+msgstr "格式(&O)"
+
+#: programs/notepad/notepad.rc:58
+msgid "&Word Wrap"
+msgstr ""
 
 #: programs/notepad/notepad.rc:63 programs/oleview/oleview.rc:68
 #: programs/oleview/oleview.rc:90 programs/winefile/winefile.rc:67
@@ -15117,134 +15224,134 @@ msgstr "状态栏(&S)"
 msgid "&Contents\tF1"
 msgstr "帮助内容(&C)\tF1"
 
-#: programs/notepad/notepad.rc:67
+#: programs/notepad/notepad.rc:68
 msgid "&About Notepad"
 msgstr "关于记事本(&A)"
 
-#: programs/notepad/notepad.rc:107
+#: programs/notepad/notepad.rc:108
 msgid "Page Setup"
 msgstr "页面设置"
 
-#: programs/notepad/notepad.rc:109
+#: programs/notepad/notepad.rc:110
 msgid "&Header:"
 msgstr "页眉(&H):"
 
-#: programs/notepad/notepad.rc:111
+#: programs/notepad/notepad.rc:112
 msgid "&Footer:"
 msgstr "页脚(&F):"
 
-#: programs/notepad/notepad.rc:114
+#: programs/notepad/notepad.rc:115
 msgid "Margins (millimeters)"
 msgstr "边距(毫米)"
 
-#: programs/notepad/notepad.rc:115
+#: programs/notepad/notepad.rc:116
 msgid "&Left:"
 msgstr "左(&L):"
 
-#: programs/notepad/notepad.rc:117
+#: programs/notepad/notepad.rc:118
 msgid "&Top:"
 msgstr "上(&T):"
 
-#: programs/notepad/notepad.rc:132
+#: programs/notepad/notepad.rc:133
 msgid "Go To Line"
 msgstr "跳转到行"
 
-#: programs/notepad/notepad.rc:134
+#: programs/notepad/notepad.rc:135
 msgid "&Line Number:"
 msgstr "行号(&L):"
 
-#: programs/notepad/notepad.rc:137
+#: programs/notepad/notepad.rc:138
 msgid "Go To"
 msgstr "跳转到"
 
-#: programs/notepad/notepad.rc:145
+#: programs/notepad/notepad.rc:146
 msgid "Encoding:"
 msgstr "编码:"
 
-#: programs/notepad/notepad.rc:151 programs/wordpad/wordpad.rc:289
+#: programs/notepad/notepad.rc:152 programs/wordpad/wordpad.rc:289
 msgctxt "accelerator Select All"
 msgid "A"
 msgstr "A"
 
-#: programs/notepad/notepad.rc:152 programs/wordpad/wordpad.rc:291
+#: programs/notepad/notepad.rc:153 programs/wordpad/wordpad.rc:291
 msgctxt "accelerator Copy"
 msgid "C"
 msgstr "C"
 
-#: programs/notepad/notepad.rc:153 programs/regedit/regedit.rc:377
+#: programs/notepad/notepad.rc:154 programs/regedit/regedit.rc:377
 #: programs/wordpad/wordpad.rc:287
 msgctxt "accelerator Find"
 msgid "F"
 msgstr "F"
 
-#: programs/notepad/notepad.rc:154 programs/wordpad/wordpad.rc:288
+#: programs/notepad/notepad.rc:155 programs/wordpad/wordpad.rc:288
 msgctxt "accelerator Replace"
 msgid "H"
 msgstr "H"
 
-#: programs/notepad/notepad.rc:155 programs/wordpad/wordpad.rc:297
+#: programs/notepad/notepad.rc:156 programs/wordpad/wordpad.rc:297
 msgctxt "accelerator New"
 msgid "N"
 msgstr "N"
 
-#: programs/notepad/notepad.rc:156 programs/wordpad/wordpad.rc:298
+#: programs/notepad/notepad.rc:157 programs/wordpad/wordpad.rc:298
 msgctxt "accelerator Open"
 msgid "O"
 msgstr "O"
 
-#: programs/notepad/notepad.rc:157 programs/regedit/regedit.rc:378
+#: programs/notepad/notepad.rc:158 programs/regedit/regedit.rc:378
 #: programs/wordpad/wordpad.rc:300
 msgctxt "accelerator Print"
 msgid "P"
 msgstr "P"
 
-#: programs/notepad/notepad.rc:158 programs/wordpad/wordpad.rc:299
+#: programs/notepad/notepad.rc:159 programs/wordpad/wordpad.rc:299
 msgctxt "accelerator Save"
 msgid "S"
 msgstr "S"
 
-#: programs/notepad/notepad.rc:159
+#: programs/notepad/notepad.rc:160
 msgctxt "accelerator Paste"
 msgid "V"
 msgstr "V"
 
-#: programs/notepad/notepad.rc:160 programs/wordpad/wordpad.rc:290
+#: programs/notepad/notepad.rc:161 programs/wordpad/wordpad.rc:290
 msgctxt "accelerator Cut"
 msgid "X"
 msgstr "X"
 
-#: programs/notepad/notepad.rc:161 programs/wordpad/wordpad.rc:292
+#: programs/notepad/notepad.rc:162 programs/wordpad/wordpad.rc:292
 msgctxt "accelerator Undo"
 msgid "Z"
 msgstr "Z"
 
-#: programs/notepad/notepad.rc:162
+#: programs/notepad/notepad.rc:163
 msgctxt "accelerator GoTo"
 msgid "G"
 msgstr "G"
 
-#: programs/notepad/notepad.rc:74
+#: programs/notepad/notepad.rc:75
 msgid "Page &p"
 msgstr "第 &p 页"
 
-#: programs/notepad/notepad.rc:76
+#: programs/notepad/notepad.rc:77
 msgid "Notepad"
 msgstr "记事本"
 
-#: programs/notepad/notepad.rc:77 programs/progman/progman.rc:64
+#: programs/notepad/notepad.rc:78 programs/progman/progman.rc:64
 #: programs/winhlp32/winhlp32.rc:82
 msgid "ERROR"
 msgstr "错误"
 
-#: programs/notepad/notepad.rc:79
+#: programs/notepad/notepad.rc:80
 msgid "Untitled"
 msgstr "(未命名)"
 
-#: programs/notepad/notepad.rc:82 programs/winedbg/winedbg.rc:42
+#: programs/notepad/notepad.rc:83 programs/winedbg/winedbg.rc:42
 msgid "Text files (*.txt)"
 msgstr "文本文件 (*.txt)"
 
-#: programs/notepad/notepad.rc:85
+#: programs/notepad/notepad.rc:86
 msgid ""
 "File '%s' does not exist.\n"
 "\n"
@@ -15254,7 +15361,7 @@ msgstr ""
 "\n"
 "您想新建一个文件吗?"
 
-#: programs/notepad/notepad.rc:87
+#: programs/notepad/notepad.rc:88
 msgid ""
 "File '%s' has been modified.\n"
 "\n"
@@ -15264,23 +15371,23 @@ msgstr ""
 "\n"
 "您要保存更改吗?"
 
-#: programs/notepad/notepad.rc:88
+#: programs/notepad/notepad.rc:89
 msgid "'%s' could not be found."
 msgstr "找不到“%s”。"
 
-#: programs/notepad/notepad.rc:92
+#: programs/notepad/notepad.rc:93
 msgid "Unicode (UTF-16)"
 msgstr "Unicode (UTF-16)"
 
-#: programs/notepad/notepad.rc:93
+#: programs/notepad/notepad.rc:94
 msgid "Unicode (UTF-16 big-endian)"
 msgstr "Unicode (UTF-16 大尾)"
 
-#: programs/notepad/notepad.rc:94
+#: programs/notepad/notepad.rc:95
 msgid "Unicode (UTF-8)"
 msgstr "Unicode (UTF-8)"
 
-#: programs/notepad/notepad.rc:101
+#: programs/notepad/notepad.rc:102
 msgid ""
 "%1\n"
 "This file contains Unicode characters which will be lost if\n"
@@ -15294,7 +15401,7 @@ msgstr ""
 "要保留这些字符，请点“取消”，然后选择一种 Unicode 编码。\n"
 "要继续吗?"
 
-#: programs/notepad/notepad.rc:90
+#: programs/notepad/notepad.rc:91
 msgid "Ln %ld, Col %ld"
 msgstr "%ld 行，%ld 列"
 
@@ -15646,6 +15753,12 @@ msgstr "移动(&M)...\tF7"
 msgid "&Copy...\tF8"
 msgstr "复制(&C)...\tF8"
 
+#: programs/progman/progman.rc:37 programs/regedit/regedit.rc:57
+#: programs/regedit/regedit.rc:111 programs/regedit/regedit.rc:139
+#: programs/winefile/winefile.rc:32
+msgid "&Delete\tDel"
+msgstr "删除(&D)\tDel"
+
 #: programs/progman/progman.rc:38
 msgid "&Properties\tAlt+Enter"
 msgstr "属性(&P)\tAlt+Enter"
@@ -15861,7 +15974,7 @@ msgid "reg: The operation completed successfully\n"
 msgstr "reg: 操作成功完成\n"
 
 #: programs/reg/reg.rc:131
-msgid "reg: The registry operation was cancelled\n"
+msgid "reg: The registry operation was canceled\n"
 msgstr "reg: 注册表操作已被取消\n"
 
 #: programs/reg/reg.rc:174
@@ -16439,11 +16552,6 @@ msgstr "改名(&R)\tF2"
 #: programs/regedit/regedit.rc:60 programs/regedit/regedit.rc:116
 msgid "&Copy Key Name"
 msgstr "复制项名(&C)"
-
-#: programs/regedit/regedit.rc:62 programs/regedit/regedit.rc:109
-#: programs/wordpad/wordpad.rc:53
-msgid "&Find...\tCtrl+F"
-msgstr "查找(&F)...\tCtrl+F"
 
 #: programs/regedit/regedit.rc:63
 msgid "Find Ne&xt\tF3"
@@ -17196,7 +17304,7 @@ msgid ""
 "Sent termination signal to process with PID %1!u!, child of PID %2!u!.\n"
 msgstr "已向 PID %2!u! 的子进程、PID 为 %1!u! 的进程发送结束信号。\n"
 
-#: include/wine/wine_common_ver.rc:138
+#: include/wine/wine_common_ver.rc:123
 msgid "Wine tasklist"
 msgstr "Wine 任务列表"
 
@@ -18018,6 +18126,40 @@ msgstr "正在运行"
 msgid "Task"
 msgstr "任务"
 
+#: programs/timeout/timeout.rc:28
+msgid "Usage: timeout /T <timeout> [</NOBREAK>]\n"
+msgstr ""
+
+#: programs/timeout/timeout.rc:29
+#, fuzzy
+#| msgid "FINDSTR: Bad command line\n"
+msgid "TIMEOUT: Bad command line\n"
+msgstr "FINDSTR: 命令行无效\n"
+
+#: programs/timeout/timeout.rc:30
+msgid "waiting since %d sec. "
+msgstr ""
+
+#: programs/timeout/timeout.rc:31
+msgid "press CTRL+C..."
+msgstr ""
+
+#: programs/timeout/timeout.rc:32
+#, fuzzy
+#| msgid "Press any key to continue... "
+msgid "press a key to continue..."
+msgstr "请按任意键继续..."
+
+#: programs/timeout/timeout.rc:33
+msgid "ERROR: not possible to redirect input\n"
+msgstr ""
+
+#: programs/timeout/timeout.rc:34
+msgid ""
+"ERROR: Timeout value out of range or invalid number. Valid range is -1 to "
+"99999.\n"
+msgstr ""
+
 #: programs/uninstaller/uninstaller.rc:29
 msgid "Wine Application Uninstaller"
 msgstr "Wine 应用程序卸载管理器"
@@ -18161,8 +18303,8 @@ msgid ""
 "linked to the Libraries and Graphics tabs to allow you to change system-wide "
 "or per-application settings in those tabs as well."
 msgstr ""
-"对不同的程序，可以让 Wine 假装成不同版本的 Windows，也可以在“函数库”与“显"
-"示”标签页中作不同的设置。"
+"对不同的程序，可以让 Wine 假装成不同版本的 Windows，也可以在“函数库”与“显示”"
+"标签页中作不同的设置。"
 
 #: programs/winecfg/winecfg.rc:164
 msgid "Add appli&cation..."
@@ -18728,17 +18870,17 @@ msgstr ""
 "wineconsole: 无法启动程序 %s。\n"
 "命令无效。\n"
 
-#: programs/winedbg/winedbg.rc:50 programs/winedbg/winedbg.rc:38
+#: programs/winedbg/winedbg.rc:51 programs/winedbg/winedbg.rc:38
 msgid "Program Error"
 msgstr "程序错误"
 
-#: programs/winedbg/winedbg.rc:55
+#: programs/winedbg/winedbg.rc:56
 msgid ""
 "The program %s has encountered a serious problem and needs to close. We are "
 "sorry for the inconvenience."
 msgstr "程序 %s 遇到严重的问题需要关闭。我们对此造成的不便表示抱歉。"
 
-#: programs/winedbg/winedbg.rc:59
+#: programs/winedbg/winedbg.rc:60
 msgid ""
 "This can be caused by a problem in the program or a deficiency in Wine. You "
 "may want to check the <a href=\"https://appdb.winehq.org\">Application "
@@ -18747,15 +18889,15 @@ msgstr ""
 "这可能是由程序的问题或者 Wine 的缺陷造成的。您可能需要查看 <a href=\"https://"
 "appdb.winehq.org\">Application Databa</a> 来获取运行该应用的相关技巧。"
 
-#: programs/winedbg/winedbg.rc:62
+#: programs/winedbg/winedbg.rc:63
 msgid "Show &Details"
 msgstr "详细信息 (&D)"
 
-#: programs/winedbg/winedbg.rc:67
+#: programs/winedbg/winedbg.rc:68
 msgid "Program Error Details"
 msgstr "程序错误详情"
 
-#: programs/winedbg/winedbg.rc:74
+#: programs/winedbg/winedbg.rc:75
 msgid ""
 "If this problem is not present under Windows and has not been reported yet, "
 "you can save the detailed information to a file using the \"Save As\" "
@@ -19158,10 +19300,8 @@ msgid "Help topics: "
 msgstr "帮助主题: "
 
 #: programs/wmic/wmic.rc:28
-#, fuzzy
-#| msgid "Error: Command line not supported\n"
 msgid "Error: Command not supported\n"
-msgstr "错误: 不支持此命令行\n"
+msgstr "错误: 不支持此命令\n"
 
 #: programs/wmic/wmic.rc:29
 msgid "Error: Alias not found\n"
@@ -19176,10 +19316,8 @@ msgid "Error: Invalid syntax for PATH\n"
 msgstr "错误: PATH 语法无效\n"
 
 #: programs/wmic/wmic.rc:32
-#, fuzzy
-#| msgid "Bad command.\n"
 msgid "Supply a command\n"
-msgstr "错误指令。\n"
+msgstr "请提供命令\n"
 
 #: programs/wordpad/wordpad.rc:31
 msgid "&New...\tCtrl+N"
@@ -19248,10 +19386,6 @@ msgstr "插入(&I)"
 #: programs/wordpad/wordpad.rc:80
 msgid "&Date and time..."
 msgstr "日期时间(&D)..."
-
-#: programs/wordpad/wordpad.rc:82
-msgid "F&ormat"
-msgstr "格式(&O)"
 
 #: programs/wordpad/wordpad.rc:85
 msgid "&Lists"

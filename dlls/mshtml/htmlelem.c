@@ -301,6 +301,7 @@ static VARIANT_BOOL element_has_attribute(HTMLElement *element, const WCHAR *nam
 
     nsAString_InitDepend(&name_str, name);
     nsres = nsIDOMElement_HasAttribute(element->dom_element, &name_str, &r);
+    nsAString_Finish(&name_str);
     return variant_bool(NS_SUCCEEDED(nsres) && r);
 }
 
@@ -522,6 +523,24 @@ HRESULT create_element(HTMLDocumentNode *doc, const WCHAR *tag, HTMLElement **re
     hres = HTMLElement_Create(doc, (nsIDOMNode*)nselem, TRUE, ret);
     nsIDOMElement_Release(nselem);
     return hres;
+}
+
+static HTMLDOMAttribute *find_attr_in_list(HTMLAttributeCollection *attrs, DISPID dispid, LONG *pos)
+{
+    HTMLDOMAttribute *iter, *ret = NULL;
+    struct list *list = &attrs->attrs;
+    unsigned i = 0;
+
+    LIST_FOR_EACH_ENTRY(iter, list, HTMLDOMAttribute, entry) {
+        if(iter->dispid == dispid) {
+            ret = iter;
+            break;
+        }
+        i++;
+    }
+    if(pos)
+        *pos = i;
+    return ret;
 }
 
 typedef struct {
@@ -762,7 +781,7 @@ static const tid_t ClientRect_iface_tids[] = {
     0
 };
 dispex_static_data_t ClientRect_dispex = {
-    .id         = PROT_ClientRect,
+    .id         = OBJID_ClientRect,
     .vtbl       = &ClientRect_dispex_vtbl,
     .disp_tid   = IHTMLRect_tid,
     .iface_tids = ClientRect_iface_tids,
@@ -1125,7 +1144,7 @@ static const tid_t ClientRectList_iface_tids[] = {
     0
 };
 dispex_static_data_t ClientRectList_dispex = {
-    .id         = PROT_ClientRectList,
+    .id         = OBJID_ClientRectList,
     .vtbl       = &HTMLRectCollection_dispex_vtbl,
     .disp_tid   = IHTMLRectCollection_tid,
     .iface_tids = ClientRectList_iface_tids,
@@ -1312,6 +1331,9 @@ static HRESULT WINAPI HTMLElement_removeAttribute(IHTMLElement *iface, BSTR strA
     TRACE("(%p)->(%s %lx %p)\n", This, debugstr_w(strAttributeName), lFlags, pfSuccess);
 
     if(compat_mode < COMPAT_MODE_IE9 || !This->dom_element) {
+        HTMLAttributeCollection *attrs;
+        HTMLDOMAttribute *attr;
+
         hres = dispex_get_id(&This->node.event_target.dispex, translate_attr_name(strAttributeName, compat_mode),
                              lFlags & ATTRFLAG_CASESENSITIVE ? fdexNameCaseSensitive : fdexNameCaseInsensitive, &id);
         if(hres == DISP_E_UNKNOWNNAME) {
@@ -1320,6 +1342,26 @@ static HRESULT WINAPI HTMLElement_removeAttribute(IHTMLElement *iface, BSTR strA
         }
         if(FAILED(hres))
             return hres;
+
+        hres = HTMLElement_get_attr_col(&This->node, &attrs);
+        if(FAILED(hres))
+            return hres;
+        attr = find_attr_in_list(attrs, id, NULL);
+        IHTMLAttributeCollection_Release(&attrs->IHTMLAttributeCollection_iface);
+
+        if(attr) {
+            hres = get_elem_attr_value_by_dispid(This, id, &attr->value);
+            if(FAILED(hres))
+                return hres;
+            if(!attr->name) {
+                hres = dispex_prop_name(&This->node.event_target.dispex, id, &attr->name);
+                if(FAILED(hres))
+                    return hres;
+            }
+            list_remove(&attr->entry);
+            IHTMLDOMNode_Release(&attr->elem->node.IHTMLDOMNode_iface);
+            attr->elem = NULL;
+        }
 
         if(id == DISPID_IHTMLELEMENT_STYLE) {
             IHTMLStyle *style;
@@ -4389,7 +4431,7 @@ static HRESULT WINAPI HTMLElement4_setAttributeNode(IHTMLElement4 *iface, IHTMLD
         IHTMLDOMAttribute **ppretAttribute)
 {
     HTMLElement *This = impl_from_IHTMLElement4(iface);
-    HTMLDOMAttribute *attr, *iter, *replace = NULL;
+    HTMLDOMAttribute *attr, *replace;
     HTMLAttributeCollection *attrs;
     DISPID dispid;
     HRESULT hres;
@@ -4413,13 +4455,7 @@ static HRESULT WINAPI HTMLElement4_setAttributeNode(IHTMLElement4 *iface, IHTMLD
     if(FAILED(hres))
         return hres;
 
-    LIST_FOR_EACH_ENTRY(iter, &attrs->attrs, HTMLDOMAttribute, entry) {
-        if(iter->dispid == dispid) {
-            replace = iter;
-            break;
-        }
-    }
-
+    replace = find_attr_in_list(attrs, dispid, NULL);
     if(replace) {
         hres = get_elem_attr_value_by_dispid(This, dispid, &replace->value);
         if(FAILED(hres)) {
@@ -6666,6 +6702,14 @@ static HRESULT IHTMLElement6_setAttribute_hook(DispatchEx *dispex, WORD flags, D
     return hres;
 }
 
+static const dispex_hook_t elem_traversal_noattr_hooks[] = {
+    {DISPID_IELEMENTTRAVERSAL_FIRSTELEMENTCHILD,      .noattr = TRUE},
+    {DISPID_IELEMENTTRAVERSAL_LASTELEMENTCHILD,       .noattr = TRUE},
+    {DISPID_IELEMENTTRAVERSAL_PREVIOUSELEMENTSIBLING, .noattr = TRUE},
+    {DISPID_IELEMENTTRAVERSAL_NEXTELEMENTSIBLING,     .noattr = TRUE},
+    {DISPID_IELEMENTTRAVERSAL_CHILDELEMENTCOUNT,      .noattr = TRUE}
+};
+
 void HTMLElement_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
 {
     static const dispex_hook_t elem6_ie9_hooks[] = {
@@ -6680,37 +6724,171 @@ void HTMLElement_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
         {DISPID_IHTMLELEMENT6_IE9_SETATTRIBUTE, IHTMLElement6_setAttribute_hook},
         {DISPID_UNKNOWN}
     };
-    static const dispex_hook_t elem2_ie11_hooks[] = {
-        {DISPID_IHTMLELEMENT2_ATTACHEVENT, NULL},
-        {DISPID_IHTMLELEMENT2_DETACHEVENT, NULL},
-        {DISPID_IHTMLELEMENT2_DOSCROLL,    NULL},
-        {DISPID_IHTMLELEMENT2_READYSTATE,  NULL},
+    static const dispex_hook_t elem_ie11_hooks[] = {
+        {DISPID_IHTMLELEMENT_ONBEFOREUPDATE},
+        {DISPID_IHTMLELEMENT_ONAFTERUPDATE},
+        {DISPID_IHTMLELEMENT_ONERRORUPDATE},
+        {DISPID_IHTMLELEMENT_ONROWEXIT},
+        {DISPID_IHTMLELEMENT_ONROWENTER},
+        {DISPID_IHTMLELEMENT_ONDATASETCHANGED},
+        {DISPID_IHTMLELEMENT_ONDATAAVAILABLE},
+        {DISPID_IHTMLELEMENT_ONDATASETCOMPLETE},
+        {DISPID_IHTMLELEMENT_ONFILTERCHANGE},
+        {DISPID_IHTMLELEMENT_ALL},
+
+        /* IE10+ */
+        {DISPID_IHTMLELEMENT_DOCUMENT,     NULL},
+        {DISPID_IHTMLELEMENT_FILTERS,      NULL},
+
+        /* IE9+ */
+        {DISPID_IHTMLELEMENT_TOSTRING,     NULL},
+
+        /* Common for all modes */
+        {DISPID_IHTMLELEMENT_PARENTELEMENT,  .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_CLASSNAME,      .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_TAGNAME,        .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_OFFSETLEFT,     .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_OFFSETTOP,      .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_OFFSETWIDTH,    .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_OFFSETHEIGHT,   .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_OFFSETPARENT,   .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_DOCUMENT,       .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_SOURCEINDEX,    .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_RECORDNUMBER,   .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_INNERHTML,      .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_INNERTEXT,      .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_OUTERHTML,      .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_OUTERTEXT,      .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_PARENTTEXTEDIT, .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_ISTEXTEDIT,     .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_FILTERS,        .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_CHILDREN,       .noattr = TRUE},
+        {DISPID_IHTMLELEMENT_ALL,            .noattr = TRUE},
         {DISPID_UNKNOWN}
+    };
+    const dispex_hook_t *const elem_ie10_hooks = elem_ie11_hooks + 10;
+    const dispex_hook_t *const elem_ie9_hooks  = elem_ie10_hooks + 2;
+    const dispex_hook_t *const elem_hooks      = elem_ie9_hooks  + 1;
+    static const dispex_hook_t elem2_ie11_hooks[] = {
+        {DISPID_IHTMLELEMENT2_ONLOSECAPTURE},
+        {DISPID_IHTMLELEMENT2_ONPROPERTYCHANGE},
+        {DISPID_IHTMLELEMENT2_ONRESIZE},
+        {DISPID_IHTMLELEMENT2_ATTACHEVENT},
+        {DISPID_IHTMLELEMENT2_DETACHEVENT},
+        {DISPID_IHTMLELEMENT2_DOSCROLL},
+        {DISPID_IHTMLELEMENT2_READYSTATE},
+        {DISPID_IHTMLELEMENT2_ONREADYSTATECHANGE},
+        {DISPID_IHTMLELEMENT2_ONROWSDELETE},
+        {DISPID_IHTMLELEMENT2_ONROWSINSERTED},
+        {DISPID_IHTMLELEMENT2_ONCELLCHANGE},
+        {DISPID_IHTMLELEMENT2_ADDBEHAVIOR},
+        {DISPID_IHTMLELEMENT2_REMOVEBEHAVIOR},
+        {DISPID_IHTMLELEMENT2_BEHAVIORURNS},
+        {DISPID_IHTMLELEMENT2_ONBEFOREEDITFOCUS},
+
+        /* IE10+ */
+        {DISPID_IHTMLELEMENT2_SCOPENAME,   NULL},
+        {DISPID_IHTMLELEMENT2_ADDFILTER,   NULL},
+        {DISPID_IHTMLELEMENT2_REMOVEFILTER,NULL},
+        {DISPID_IHTMLELEMENT2_TAGURN,      NULL},
+
+        /* IE9+ */
+        {DISPID_IHTMLELEMENT2_SETEXPRESSION,    NULL},
+        {DISPID_IHTMLELEMENT2_GETEXPRESSION,    NULL},
+        {DISPID_IHTMLELEMENT2_REMOVEEXPRESSION, NULL},
+
+        /* Common for all modes */
+        {DISPID_IHTMLELEMENT2_CURRENTSTYLE,    .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_SCOPENAME,       .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_SCROLLHEIGHT,    .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_SCROLLWIDTH,     .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_SCROLLTOP,       .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_SCROLLLEFT,      .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_RUNTIMESTYLE,    .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_CANHAVECHILDREN, .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_BEHAVIORURNS,    .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_TAGURN,          .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_CLIENTHEIGHT,    .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_CLIENTWIDTH,     .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_CLIENTTOP,       .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_CLIENTLEFT,      .noattr = TRUE},
+        {DISPID_IHTMLELEMENT2_READYSTATE,      .noattr = TRUE},
+        {DISPID_UNKNOWN}
+    };
+    const dispex_hook_t *const elem2_ie10_hooks = elem2_ie11_hooks + 15;
+    const dispex_hook_t *const elem2_ie9_hooks  = elem2_ie10_hooks + 4;
+    const dispex_hook_t *const elem2_hooks      = elem2_ie9_hooks  + 3;
+    static const dispex_hook_t elem3_ie11_hooks[] = {
+        {DISPID_IHTMLELEMENT3_ONLAYOUTCOMPLETE},
+        {DISPID_IHTMLELEMENT3_ONMOVE},
+        {DISPID_IHTMLELEMENT3_ONCONTROLSELECT},
+        {DISPID_IHTMLELEMENT3_FIREEVENT},
+        {DISPID_IHTMLELEMENT3_ONRESIZESTART},
+        {DISPID_IHTMLELEMENT3_ONRESIZEEND},
+        {DISPID_IHTMLELEMENT3_ONMOVESTART},
+        {DISPID_IHTMLELEMENT3_ONMOVEEND},
+
+        /* IE9+ */
+        {DISPID_IHTMLELEMENT3_ONPAGE},
+
+        /* Common for all modes */
+        {DISPID_IHTMLELEMENT3_ISMULTILINE,       .noattr = TRUE},
+        {DISPID_IHTMLELEMENT3_CANHAVEHTML,       .noattr = TRUE},
+        {DISPID_IHTMLELEMENT3_ISCONTENTEDITABLE, .noattr = TRUE},
+        {DISPID_IHTMLELEMENT3_ISDISABLED,        .noattr = TRUE},
+
+        {DISPID_UNKNOWN}
+    };
+    const dispex_hook_t *const elem3_ie9_hooks = elem3_ie11_hooks + 8;
+    const dispex_hook_t *const elem3_hooks     = elem3_ie9_hooks  + 1;
+    static const dispex_hook_t elem7_ie11_hooks[] = {
+        {DISPID_IHTMLELEMENT7_ONMSPOINTERHOVER},
+
+        /* IE10+ */
+        {DISPID_IHTMLELEMENT7_ONMSTRANSITIONSTART},
+        {DISPID_IHTMLELEMENT7_ONMSTRANSITIONEND},
+        {DISPID_IHTMLELEMENT7_ONMSANIMATIONSTART},
+        {DISPID_IHTMLELEMENT7_ONMSANIMATIONEND},
+        {DISPID_IHTMLELEMENT7_ONMSANIMATIONITERATION},
+        {DISPID_IHTMLELEMENT7_ONINVALID},
+        {DISPID_IHTMLELEMENT7_XMSACCELERATORKEY},
+        {DISPID_UNKNOWN}
+    };
+    const dispex_hook_t *const elem7_ie10_hooks = elem7_ie11_hooks + 1;
+    static const dispex_hook_t unique_name_noattr_hooks[] = {
+        {DISPID_IHTMLUNIQUENAME_UNIQUENUMBER, .noattr = TRUE},
+        {DISPID_IHTMLUNIQUENAME_UNIQUEID,     .noattr = TRUE}
     };
 
     HTMLDOMNode_init_dispex_info(info, mode);
 
-    dispex_info_add_interface(info, IHTMLElement2_tid, mode >= COMPAT_MODE_IE11 ? elem2_ie11_hooks : NULL);
-
+    dispex_info_add_interface(info, IHTMLElement2_tid, mode >= COMPAT_MODE_IE11 ? elem2_ie11_hooks :
+                                                       mode >= COMPAT_MODE_IE10 ? elem2_ie10_hooks :
+                                                       mode >= COMPAT_MODE_IE9  ? elem2_ie9_hooks  : elem2_hooks);
     if(mode >= COMPAT_MODE_IE8)
         dispex_info_add_interface(info, IElementSelector_tid, NULL);
 
     if(mode >= COMPAT_MODE_IE9) {
         dispex_info_add_interface(info, IHTMLElement6_tid, mode >= COMPAT_MODE_IE10 ? elem6_ie10_hooks : elem6_ie9_hooks);
-        dispex_info_add_interface(info, IElementTraversal_tid, NULL);
+        dispex_info_add_interface(info, IElementTraversal_tid, elem_traversal_noattr_hooks);
     }
 
     if(mode >= COMPAT_MODE_IE10)
     {
-        dispex_info_add_interface(info, IHTMLElement7_tid, NULL);
+        dispex_info_add_interface(info, IHTMLElement7_tid, mode >= COMPAT_MODE_IE11 ? elem7_ie11_hooks :
+                                                           mode >= COMPAT_MODE_IE10 ? elem7_ie10_hooks : NULL);
         dispex_info_add_interface(info, IWineHTMLElementPrivate_tid, NULL);
     }
-}
 
-const tid_t HTMLElement_iface_tids[] = {
-    HTMLELEMENT_TIDS,
-    0
-};
+    dispex_info_add_interface(info, IHTMLElement3_tid, mode >= COMPAT_MODE_IE11 ? elem3_ie11_hooks :
+                                                       mode >= COMPAT_MODE_IE9  ? elem3_ie9_hooks  : elem3_hooks);
+    dispex_info_add_interface(info, IHTMLElement_tid, mode >= COMPAT_MODE_IE11 ? elem_ie11_hooks :
+                                                      mode >= COMPAT_MODE_IE10 ? elem_ie10_hooks :
+                                                      mode >= COMPAT_MODE_IE9  ? elem_ie9_hooks  : elem_hooks);
+    dispex_info_add_interface(info, IHTMLElement4_tid, NULL);
+    dispex_info_add_interface(info, IHTMLDOMNode_tid, NULL);
+    dispex_info_add_interface(info, IHTMLUniqueName_tid, unique_name_noattr_hooks);
+}
 
 static const event_target_vtbl_t HTMLElement_event_target_vtbl = {
     {
@@ -7126,7 +7304,7 @@ static const tid_t DOMTokenList_tids[] = {
     0
 };
 dispex_static_data_t DOMTokenList_dispex = {
-    .id              = PROT_DOMTokenList,
+    .id              = OBJID_DOMTokenList,
     .vtbl            = &token_list_dispex_vtbl,
     .disp_tid        = IWineDOMTokenList_tid,
     .iface_tids      = DOMTokenList_tids,
@@ -7236,26 +7414,117 @@ static const IWineHTMLElementPrivateVtbl WineHTMLElementPrivateVtbl = {
     htmlelement_private_get_classList,
 };
 
+static void Element_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
+{
+    static const DISPID elem_dispids[] = {
+        DISPID_IHTMLELEMENT_SETATTRIBUTE,
+        DISPID_IHTMLELEMENT_GETATTRIBUTE,
+        DISPID_IHTMLELEMENT_REMOVEATTRIBUTE,
+        DISPID_IHTMLELEMENT_TAGNAME,
+        DISPID_UNKNOWN
+    };
+    static const DISPID elem2_dispids[] = {
+        DISPID_IHTMLELEMENT2_GETCLIENTRECTS,
+        DISPID_IHTMLELEMENT2_GETBOUNDINGCLIENTRECT,
+        DISPID_IHTMLELEMENT2_CLIENTHEIGHT,
+        DISPID_IHTMLELEMENT2_CLIENTWIDTH,
+        DISPID_IHTMLELEMENT2_CLIENTTOP,
+        DISPID_IHTMLELEMENT2_CLIENTLEFT,
+        DISPID_IHTMLELEMENT2_SCROLLHEIGHT,
+        DISPID_IHTMLELEMENT2_SCROLLWIDTH,
+        DISPID_IHTMLELEMENT2_SCROLLTOP,
+        DISPID_IHTMLELEMENT2_SCROLLLEFT,
+        DISPID_IHTMLELEMENT2_GETELEMENTSBYTAGNAME,
+        DISPID_UNKNOWN
+    };
+    static const DISPID elem3_pre_ie11_dispids[] = {
+        DISPID_IHTMLELEMENT3_FIREEVENT,
+        DISPID_UNKNOWN
+    };
+    static const DISPID elem4_dispids[] = {
+        DISPID_IHTMLELEMENT4_GETATTRIBUTENODE,
+        DISPID_IHTMLELEMENT4_SETATTRIBUTENODE,
+        DISPID_IHTMLELEMENT4_REMOVEATTRIBUTENODE,
+        DISPID_UNKNOWN
+    };
+    static const DISPID elem6_dispids[] = {
+        DISPID_IHTMLELEMENT6_GETATTRIBUTENS,
+        DISPID_IHTMLELEMENT6_SETATTRIBUTENS,
+        DISPID_IHTMLELEMENT6_REMOVEATTRIBUTENS,
+        DISPID_IHTMLELEMENT6_GETATTRIBUTENODENS,
+        DISPID_IHTMLELEMENT6_SETATTRIBUTENODENS,
+        DISPID_IHTMLELEMENT6_HASATTRIBUTENS,
+        DISPID_IHTMLELEMENT6_IE9_GETATTRIBUTE,
+        DISPID_IHTMLELEMENT6_IE9_SETATTRIBUTE,
+        DISPID_IHTMLELEMENT6_IE9_REMOVEATTRIBUTE,
+        DISPID_IHTMLELEMENT6_IE9_GETATTRIBUTENODE,
+        DISPID_IHTMLELEMENT6_IE9_SETATTRIBUTENODE,
+        DISPID_IHTMLELEMENT6_IE9_REMOVEATTRIBUTENODE,
+        DISPID_IHTMLELEMENT6_IE9_HASATTRIBUTE,
+        DISPID_IHTMLELEMENT6_GETELEMENTSBYTAGNAMENS,
+        DISPID_IHTMLELEMENT6_IE9_TAGNAME,
+        DISPID_IHTMLELEMENT6_MSMATCHESSELECTOR,
+        DISPID_UNKNOWN
+    };
+    static const DISPID elem7_dispids[] = {
+        DISPID_IHTMLELEMENT7_ONMSPOINTERDOWN,
+        DISPID_IHTMLELEMENT7_ONMSPOINTERMOVE,
+        DISPID_IHTMLELEMENT7_ONMSPOINTERUP,
+        DISPID_IHTMLELEMENT7_ONMSPOINTEROVER,
+        DISPID_IHTMLELEMENT7_ONMSPOINTEROUT,
+        DISPID_IHTMLELEMENT7_ONMSPOINTERCANCEL,
+        DISPID_IHTMLELEMENT7_ONMSLOSTPOINTERCAPTURE,
+        DISPID_IHTMLELEMENT7_ONMSGOTPOINTERCAPTURE,
+        DISPID_IHTMLELEMENT7_ONMSGESTURESTART,
+        DISPID_IHTMLELEMENT7_ONMSGESTURECHANGE,
+        DISPID_IHTMLELEMENT7_ONMSGESTUREEND,
+        DISPID_IHTMLELEMENT7_ONMSGESTUREHOLD,
+        DISPID_IHTMLELEMENT7_ONMSGESTURETAP,
+        DISPID_IHTMLELEMENT7_ONMSGESTUREDOUBLETAP,
+        DISPID_IHTMLELEMENT7_ONMSINERTIASTART,
+        DISPID_IHTMLELEMENT7_MSSETPOINTERCAPTURE,
+        DISPID_IHTMLELEMENT7_MSRELEASEPOINTERCAPTURE,
+        DISPID_UNKNOWN
+    };
+    static const DISPID elem7_ie10_dispids[] = {
+        DISPID_IHTMLELEMENT7_ONMSPOINTERHOVER,
+        DISPID_UNKNOWN
+    };
+
+    dispex_info_add_dispids(info, IHTMLElement2_tid, elem2_dispids);
+    dispex_info_add_dispids(info, IHTMLElement6_tid, elem6_dispids);
+    if(mode >= COMPAT_MODE_IE10) {
+        dispex_info_add_dispids(info, IHTMLElement7_tid, elem7_dispids);
+        if(mode == COMPAT_MODE_IE10)
+            dispex_info_add_dispids(info, IHTMLElement7_tid, elem7_ie10_dispids);
+    }
+    if(mode <= COMPAT_MODE_IE10)
+        dispex_info_add_dispids(info, IHTMLElement3_tid, elem3_pre_ie11_dispids);
+    dispex_info_add_dispids(info, IHTMLElement_tid, elem_dispids);
+    dispex_info_add_dispids(info, IHTMLElement4_tid, elem4_dispids);
+    dispex_info_add_interface(info, IElementSelector_tid, NULL);
+    dispex_info_add_interface(info, IElementTraversal_tid, elem_traversal_noattr_hooks);
+}
+
 dispex_static_data_t Element_dispex = {
-    .id           = PROT_Element,
-    .prototype_id = PROT_Node,
+    .id           = OBJID_Element,
+    .prototype_id = OBJID_Node,
+    .init_info    = Element_init_dispex_info,
 };
 
 dispex_static_data_t HTMLElement_dispex = {
-    .id           = PROT_HTMLElement,
-    .prototype_id = PROT_Element,
+    .id           = OBJID_HTMLElement,
+    .prototype_id = OBJID_Element,
     .vtbl         = &HTMLElement_event_target_vtbl.dispex_vtbl,
     .disp_tid     = DispHTMLUnknownElement_tid,
-    .iface_tids   = HTMLElement_iface_tids,
     .init_info    = HTMLElement_init_dispex_info,
 };
 
 static dispex_static_data_t LegacyUnknownElement_dispex = {
-    "HTMLUnknownElement",
-    &HTMLElement_event_target_vtbl.dispex_vtbl,
-    DispHTMLUnknownElement_tid,
-    HTMLElement_iface_tids,
-    HTMLElement_init_dispex_info
+    .name         = "HTMLUnknownElement",
+    .vtbl         = &HTMLElement_event_target_vtbl.dispex_vtbl,
+    .disp_tid     = DispHTMLUnknownElement_tid,
+    .init_info    = HTMLElement_init_dispex_info
 };
 
 void HTMLElement_Init(HTMLElement *This, HTMLDocumentNode *doc, nsIDOMElement *nselem, dispex_static_data_t *dispex_data)
@@ -7504,6 +7773,17 @@ static HRESULT create_filters_collection(compat_mode_t compat_mode, IHTMLFilters
     return S_OK;
 }
 
+static inline BOOL is_valid_attr_dispid(HTMLAttributeCollection *col, DISPID id)
+{
+    if(get_dispid_type(id) != DISPEXPROP_BUILTIN)
+        return TRUE;
+
+    if(dispex_builtin_is_noattr(&col->elem->node.event_target.dispex, id))
+        return FALSE;
+
+    return TRUE;
+}
+
 static HRESULT get_attr_dispid_by_relative_idx(HTMLAttributeCollection *This, LONG *idx, DISPID start, DISPID *dispid)
 {
     DISPID id = start;
@@ -7513,11 +7793,13 @@ static HRESULT get_attr_dispid_by_relative_idx(HTMLAttributeCollection *This, LO
     FIXME("filter non-enumerable attributes out\n");
 
     while(1) {
-        hres = dispex_next_id(&This->elem->node.event_target.dispex, id, &id);
+        hres = dispex_next_id(&This->elem->node.event_target.dispex, id, FALSE, &id);
         if(FAILED(hres))
             return hres;
         else if(hres == S_FALSE)
             break;
+        else if(!is_valid_attr_dispid(This, id))
+            continue;
 
         len++;
         if(len == *idx)
@@ -7554,33 +7836,21 @@ static inline HRESULT get_attr_dispid_by_name(HTMLAttributeCollection *This, con
         }
     }
 
-    return dispex_get_id(&This->elem->node.event_target.dispex, name, fdexNameCaseInsensitive, id);
+    hres = dispex_get_id(&This->elem->node.event_target.dispex, name, fdexNameCaseInsensitive, id);
+    return (FAILED(hres) || is_valid_attr_dispid(This, *id)) ? hres : DISP_E_UNKNOWNNAME;
 }
 
 static inline HRESULT get_domattr(HTMLAttributeCollection *This, DISPID id, LONG *list_pos, HTMLDOMAttribute **attr)
 {
-    HTMLDOMAttribute *iter;
-    LONG pos = 0;
     HRESULT hres;
 
-    *attr = NULL;
-    LIST_FOR_EACH_ENTRY(iter, &This->attrs, HTMLDOMAttribute, entry) {
-        if(iter->dispid == id) {
-            *attr = iter;
-            break;
-        }
-        pos++;
-    }
-
-    if(!*attr) {
+    if(!(*attr = find_attr_in_list(This, id, list_pos))) {
         hres = HTMLDOMAttribute_Create(NULL, This->elem, id, This->elem->node.doc, attr);
         if(FAILED(hres))
             return hres;
     }
 
     IHTMLDOMAttribute_AddRef(&(*attr)->IHTMLDOMAttribute_iface);
-    if(list_pos)
-        *list_pos = pos;
     return S_OK;
 }
 
@@ -7589,7 +7859,6 @@ typedef struct {
 
     LONG ref;
 
-    ULONG iter;
     DISPID iter_dispid;
     HTMLAttributeCollection *col;
 } HTMLAttributeCollectionEnum;
@@ -7674,7 +7943,6 @@ static HRESULT WINAPI HTMLAttributeCollectionEnum_Next(IEnumVARIANT *iface, ULON
         V_DISPATCH(&rgVar[i]) = (IDispatch*)&attr->IHTMLDOMAttribute_iface;
     }
 
-    This->iter += i;
     This->iter_dispid = dispid;
     if(pCeltFetched)
         *pCeltFetched = i;
@@ -7704,7 +7972,6 @@ static HRESULT WINAPI HTMLAttributeCollectionEnum_Skip(IEnumVARIANT *iface, ULON
         hres = get_attr_dispid_by_relative_idx(This->col, &rel_index, This->iter_dispid, &dispid);
         if(FAILED(hres))
             return hres;
-        This->iter += remaining;
         This->iter_dispid = dispid;
     }
     return celt > remaining ? S_FALSE : S_OK;
@@ -7716,7 +7983,6 @@ static HRESULT WINAPI HTMLAttributeCollectionEnum_Reset(IEnumVARIANT *iface)
 
     TRACE("(%p)->()\n", This);
 
-    This->iter = 0;
     This->iter_dispid = DISPID_STARTENUM;
     return S_OK;
 }
@@ -7772,7 +8038,6 @@ static HRESULT WINAPI HTMLAttributeCollection__newEnum(IHTMLAttributeCollection 
 
     ret->IEnumVARIANT_iface.lpVtbl = &HTMLAttributeCollectionEnumVtbl;
     ret->ref = 1;
-    ret->iter = 0;
     ret->iter_dispid = DISPID_STARTENUM;
 
     HTMLAttributeCollection_AddRef(&This->IHTMLAttributeCollection_iface);
@@ -8036,6 +8301,8 @@ static HRESULT HTMLAttributeCollection_get_dispid(DispatchEx *dispex, const WCHA
         return hres;
     IHTMLDOMAttribute_Release(&attr->IHTMLDOMAttribute_iface);
 
+    /* Even though this breaks DISPID rules where the same name must return the same DISPID, because the pos can change
+     * as attributes are removed (and re-added), it's how native works (see test_attr_collection_disp in tests). */
     *dispid = MSHTML_DISPID_CUSTOM_MIN+pos;
     return S_OK;
 }
@@ -8092,7 +8359,7 @@ const tid_t NamedNodeMap_iface_tids[] = {
 };
 
 dispex_static_data_t NamedNodeMap_dispex = {
-    .id         = PROT_NamedNodeMap,
+    .id         = OBJID_NamedNodeMap,
     .vtbl       = &HTMLAttributeCollection_dispex_vtbl,
     .disp_tid   = DispHTMLAttributeCollection_tid,
     .iface_tids = NamedNodeMap_iface_tids,

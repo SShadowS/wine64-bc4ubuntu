@@ -49,6 +49,11 @@ F:	dlls/x3daudio*/
 F:	dlls/xapofx*/
 F:	dlls/xaudio*/
 
+Bluetooth support
+M:      Vibhav Pant <vibhavp@gmail.com>
+F:      dlls/winebth.sys/
+F:      dlls/bluetoothapis/
+
 Common Controls Library
 P:	Nikolay Sivov <nsivov@codeweavers.com>
 P:	Zhiyi Zhang <zzhang@codeweavers.com>
@@ -290,6 +295,10 @@ P:	Huw Davies <huw@codeweavers.com>
 P:	Elizabeth Figura <zfigura@codeweavers.com>
 F:	dlls/rpcrt4/
 
+Scripting runtime components
+P:	Nikolay Sivov <nsivov@codeweavers.com>
+F:	dlls/scrrun/
+
 Theming
 M:	Zhiyi Zhang <zzhang@codeweavers.com>
 F:	dlls/light.msstyles/
@@ -402,7 +411,6 @@ F:	*
 F:	*/
 
 Stable Branch
-M:	Michael Stefaniuc <mstefani@winehq.org>
 W:	https://gitlab.winehq.org/wine/wine/-/wikis/Stable-Rules
 
 Staging Branch

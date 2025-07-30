@@ -129,6 +129,7 @@ struct fd
 {
     struct object        obj;         /* object header */
     const struct fd_ops *fd_ops;      /* file descriptor operations */
+    struct event_sync   *sync;        /* sync object for wait/signal */
     struct inode        *inode;       /* inode that this fd belongs to */
     struct list          inode_entry; /* entry in inode fd list */
     struct closed_fd    *closed;      /* structure to store the unix fd at destroy time */
@@ -145,7 +146,6 @@ struct fd
     int                  unix_fd;     /* unix file descriptor */
     unsigned int         no_fd_status;/* status to return when unix_fd is -1 */
     unsigned int         cacheable :1;/* can the fd be cached on the client side? */
-    unsigned int         signaled :1; /* is the fd signaled? */
     unsigned int         fs_locks :1; /* can we use filesystem locks for this fd? */
     int                  poll_index;  /* index of fd in poll array */
     struct async_queue   read_q;      /* async readers of this fd */
@@ -157,6 +157,7 @@ struct fd
 };
 
 static void fd_dump( struct object *obj, int verbose );
+static struct object *fd_get_sync( struct object *obj );
 static void fd_destroy( struct object *obj );
 
 static const struct object_ops fd_ops =
@@ -164,12 +165,13 @@ static const struct object_ops fd_ops =
     sizeof(struct fd),        /* size */
     &no_type,                 /* type */
     fd_dump,                  /* dump */
-    no_add_queue,             /* add_queue */
+    NULL,                     /* add_queue */
     NULL,                     /* remove_queue */
     NULL,                     /* signaled */
     NULL,                     /* satisfied */
     no_signal,                /* signal */
     no_get_fd,                /* get_fd */
+    fd_get_sync,              /* get_sync */
     default_map_access,       /* map_access */
     default_get_sd,           /* get_sd */
     default_set_sd,           /* set_sd */
@@ -211,6 +213,7 @@ static const struct object_ops device_ops =
     NULL,                     /* satisfied */
     no_signal,                /* signal */
     no_get_fd,                /* get_fd */
+    default_get_sync,         /* get_sync */
     default_map_access,       /* map_access */
     default_get_sd,           /* get_sd */
     default_set_sd,           /* set_sd */
@@ -251,6 +254,7 @@ static const struct object_ops inode_ops =
     NULL,                     /* satisfied */
     no_signal,                /* signal */
     no_get_fd,                /* get_fd */
+    default_get_sync,         /* get_sync */
     default_map_access,       /* map_access */
     default_get_sd,           /* get_sd */
     default_set_sd,           /* set_sd */
@@ -269,6 +273,7 @@ static const struct object_ops inode_ops =
 struct file_lock
 {
     struct object       obj;         /* object header */
+    struct event_sync  *sync;        /* sync object for wait/signal */
     struct fd          *fd;          /* fd owning this lock */
     struct list         fd_entry;    /* entry in list of locks on a given fd */
     struct list         inode_entry; /* entry in inode list of locks */
@@ -280,19 +285,21 @@ struct file_lock
 };
 
 static void file_lock_dump( struct object *obj, int verbose );
-static int file_lock_signaled( struct object *obj, struct wait_queue_entry *entry );
+static struct object *file_lock_get_sync( struct object *obj );
+static void file_lock_destroy( struct object *obj );
 
 static const struct object_ops file_lock_ops =
 {
     sizeof(struct file_lock),   /* size */
     &no_type,                   /* type */
     file_lock_dump,             /* dump */
-    add_queue,                  /* add_queue */
-    remove_queue,               /* remove_queue */
-    file_lock_signaled,         /* signaled */
-    no_satisfied,               /* satisfied */
+    NULL,                       /* add_queue */
+    NULL,                       /* remove_queue */
+    NULL,                       /* signaled */
+    NULL,                       /* satisfied */
     no_signal,                  /* signal */
     no_get_fd,                  /* get_fd */
+    file_lock_get_sync,         /* get_sync */
     default_map_access,         /* map_access */
     default_get_sd,             /* get_sd */
     default_set_sd,             /* set_sd */
@@ -303,7 +310,7 @@ static const struct object_ops file_lock_ops =
     no_open_file,               /* open_file */
     no_kernel_obj_list,         /* get_kernel_obj_list */
     no_close_handle,            /* close_handle */
-    no_destroy                  /* destroy */
+    file_lock_destroy,          /* destroy */
 };
 
 
@@ -338,7 +345,7 @@ timeout_t current_time;
 timeout_t monotonic_time;
 
 struct _KUSER_SHARED_DATA *user_shared_data = NULL;
-static const int user_shared_data_timeout = 16;
+static const timeout_t user_shared_data_timeout = 16 * 10000;
 
 static void atomic_store_ulong(volatile ULONG *ptr, ULONG value)
 {
@@ -496,7 +503,7 @@ static int active_users;                    /* current number of active users */
 static int allocated_users;                 /* count of allocated entries in the array */
 static struct fd **freelist;                /* list of free entries in the array */
 
-static int get_next_timeout(void);
+static int get_next_timeout( struct timespec *ts );
 
 static inline void fd_poll_event( struct fd *fd, int event )
 {
@@ -564,7 +571,11 @@ static inline void remove_epoll_user( struct fd *fd, int user )
 static inline void main_loop_epoll(void)
 {
     int i, ret, timeout;
+    struct timespec ts;
     struct epoll_event events[128];
+#ifdef HAVE_EPOLL_PWAIT2
+    static int failed_epoll_pwait2 = 0;
+#endif
 
     assert( POLLIN == EPOLLIN );
     assert( POLLOUT == EPOLLOUT );
@@ -575,12 +586,22 @@ static inline void main_loop_epoll(void)
 
     while (active_users)
     {
-        timeout = get_next_timeout();
+        timeout = get_next_timeout( &ts );
 
         if (!active_users) break;  /* last user removed by a timeout */
         if (epoll_fd == -1) break;  /* an error occurred with epoll */
 
-        ret = epoll_wait( epoll_fd, events, ARRAY_SIZE( events ), timeout );
+#ifdef HAVE_EPOLL_PWAIT2
+        if (!failed_epoll_pwait2)
+        {
+            ret = epoll_pwait2( epoll_fd, events, ARRAY_SIZE( events ), timeout == -1 ? NULL : &ts, NULL );
+            if (ret == -1 && errno == ENOSYS)
+                failed_epoll_pwait2 = 1;
+        }
+        if (failed_epoll_pwait2)
+#endif
+            ret = epoll_wait( epoll_fd, events, ARRAY_SIZE( events ), timeout );
+
         set_current_time();
 
         /* put the events into the pollfd array first, like poll does */
@@ -663,26 +684,19 @@ static inline void remove_epoll_user( struct fd *fd, int user )
 static inline void main_loop_epoll(void)
 {
     int i, ret, timeout;
+    struct timespec ts;
     struct kevent events[128];
 
     if (kqueue_fd == -1) return;
 
     while (active_users)
     {
-        timeout = get_next_timeout();
+        timeout = get_next_timeout( &ts );
 
         if (!active_users) break;  /* last user removed by a timeout */
         if (kqueue_fd == -1) break;  /* an error occurred with kqueue */
 
-        if (timeout != -1)
-        {
-            struct timespec ts;
-
-            ts.tv_sec = timeout / 1000;
-            ts.tv_nsec = (timeout % 1000) * 1000000;
-            ret = kevent( kqueue_fd, NULL, 0, events, ARRAY_SIZE( events ), &ts );
-        }
-        else ret = kevent( kqueue_fd, NULL, 0, events, ARRAY_SIZE( events ), NULL );
+        ret = kevent( kqueue_fd, NULL, 0, events, ARRAY_SIZE( events ), timeout == -1 ? NULL : &ts );
 
         set_current_time();
 
@@ -765,27 +779,20 @@ static inline void remove_epoll_user( struct fd *fd, int user )
 static inline void main_loop_epoll(void)
 {
     int i, nget, ret, timeout;
+    struct timespec ts;
     port_event_t events[128];
 
     if (port_fd == -1) return;
 
     while (active_users)
     {
-        timeout = get_next_timeout();
+        timeout = get_next_timeout( &ts );
         nget = 1;
 
         if (!active_users) break;  /* last user removed by a timeout */
         if (port_fd == -1) break;  /* an error occurred with event completion */
 
-        if (timeout != -1)
-        {
-            struct timespec ts;
-
-            ts.tv_sec = timeout / 1000;
-            ts.tv_nsec = (timeout % 1000) * 1000000;
-            ret = port_getn( port_fd, events, ARRAY_SIZE( events ), &nget, &ts );
-        }
-        else ret = port_getn( port_fd, events, ARRAY_SIZE( events ), &nget, NULL );
+        ret = port_getn( port_fd, events, ARRAY_SIZE( events ), &nget, timeout == -1 ? NULL : &ts );
 
 	if (ret == -1) break;  /* an error occurred with event completion */
 
@@ -876,10 +883,11 @@ static void remove_poll_user( struct fd *fd, int user )
     active_users--;
 }
 
-/* process pending timeouts and return the time until the next timeout, in milliseconds */
-static int get_next_timeout(void)
+/* process pending timeouts and return the time until the next timeout in milliseconds,
+ * and full nanosecond precision in the timespec parameter if given */
+static int get_next_timeout( struct timespec *ts )
 {
-    int ret = user_shared_data ? user_shared_data_timeout : -1;
+    timeout_t ret = user_shared_data ? user_shared_data_timeout : -1;
 
     if (!list_empty( &abs_timeout_list ) || !list_empty( &rel_timeout_list ))
     {
@@ -924,21 +932,32 @@ static int get_next_timeout(void)
         if ((ptr = list_head( &abs_timeout_list )) != NULL)
         {
             struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
-            timeout_t diff = (timeout->when - current_time + 9999) / 10000;
-            if (diff > INT_MAX) diff = INT_MAX;
-            else if (diff < 0) diff = 0;
+            timeout_t diff = timeout->when - current_time;
+            if (diff < 0) diff = 0;
             if (ret == -1 || diff < ret) ret = diff;
         }
 
         if ((ptr = list_head( &rel_timeout_list )) != NULL)
         {
             struct timeout_user *timeout = LIST_ENTRY( ptr, struct timeout_user, entry );
-            timeout_t diff = (-timeout->when - monotonic_time + 9999) / 10000;
-            if (diff > INT_MAX) diff = INT_MAX;
-            else if (diff < 0) diff = 0;
+            timeout_t diff = -timeout->when - monotonic_time;
+            if (diff < 0) diff = 0;
             if (ret == -1 || diff < ret) ret = diff;
         }
     }
+
+    /* infinite */
+    if (ret == -1) return -1;
+
+    if (ts)
+    {
+        ts->tv_sec = ret / TICKS_PER_SEC;
+        ts->tv_nsec = (ret % TICKS_PER_SEC) * 100;
+    }
+
+    /* convert to milliseconds, ceil to avoid spinning with 0 timeout */
+    ret = (ret + 9999) / 10000;
+    if (ret > INT_MAX) ret = INT_MAX;
     return ret;
 }
 
@@ -955,7 +974,7 @@ void main_loop(void)
 
     while (active_users)
     {
-        timeout = get_next_timeout();
+        timeout = get_next_timeout( NULL );
 
         if (!active_users) break;  /* last user removed by a timeout */
 
@@ -1169,6 +1188,15 @@ static struct inode *get_inode( dev_t dev, ino_t ino, int unix_fd )
     return inode;
 }
 
+static int inode_has_pending_close( struct inode *inode, const char *path )
+{
+    struct closed_fd *fd;
+
+    LIST_FOR_EACH_ENTRY( fd, &inode->closed, struct closed_fd, entry )
+        if (!strcmp( fd->unix_name, path )) return 1;
+    return 0;
+}
+
 /* add fd to the inode list of file descriptors to close */
 static void inode_add_closed_fd( struct inode *inode, struct closed_fd *fd )
 {
@@ -1185,7 +1213,7 @@ static void inode_add_closed_fd( struct inode *inode, struct closed_fd *fd )
         free( fd->unix_name );
         free( fd );
     }
-    else if (fd->disp_flags & FILE_DISPOSITION_DELETE)
+    else if ((fd->disp_flags & FILE_DISPOSITION_DELETE) && !inode_has_pending_close( inode, fd->unix_name ))
     {
         /* close the fd but keep the structure around for unlink */
         if (fd->unix_fd != -1) close( fd->unix_fd );
@@ -1215,11 +1243,18 @@ static void file_lock_dump( struct object *obj, int verbose )
     fprintf( stderr, "\n" );
 }
 
-static int file_lock_signaled( struct object *obj, struct wait_queue_entry *entry )
+static struct object *file_lock_get_sync( struct object *obj )
 {
     struct file_lock *lock = (struct file_lock *)obj;
-    /* lock is signaled if it has lost its owner */
-    return !lock->process;
+    assert( obj->ops == &file_lock_ops );
+    return grab_object( lock->sync );
+}
+
+static void file_lock_destroy( struct object *obj )
+{
+    struct file_lock *lock = (struct file_lock *)obj;
+    assert( obj->ops == &file_lock_ops );
+    if (lock->sync) release_object( lock->sync );
 }
 
 /* set (or remove) a Unix lock if possible for the given range */
@@ -1401,22 +1436,24 @@ static struct file_lock *add_lock( struct fd *fd, int shared, file_pos_t start, 
     struct file_lock *lock;
 
     if (!(lock = alloc_object( &file_lock_ops ))) return NULL;
+    lock->sync    = NULL;
     lock->shared  = shared;
     lock->start   = start;
     lock->end     = end;
     lock->fd      = fd;
     lock->process = current->process;
 
+    if (!(lock->sync = create_event_sync( 1, 0 ))) goto error;
     /* now try to set a Unix lock */
-    if (!set_unix_lock( lock->fd, lock->start, lock->end, lock->shared ? F_RDLCK : F_WRLCK ))
-    {
-        release_object( lock );
-        return NULL;
-    }
+    if (!set_unix_lock( lock->fd, lock->start, lock->end, lock->shared ? F_RDLCK : F_WRLCK )) goto error;
     list_add_tail( &fd->locks, &lock->fd_entry );
     list_add_tail( &fd->inode->locks, &lock->inode_entry );
     list_add_tail( &lock->process->locks, &lock->proc_entry );
     return lock;
+
+error:
+    release_object( lock );
+    return NULL;
 }
 
 /* remove an existing lock */
@@ -1430,7 +1467,7 @@ static void remove_lock( struct file_lock *lock, int remove_unix )
     if (remove_unix) remove_unix_locks( lock->fd, lock->start, lock->end );
     if (list_empty( &inode->locks )) inode_close_pending( inode, 1 );
     lock->process = NULL;
-    wake_up( &lock->obj, 0 );
+    signal_sync( lock->sync );
     release_object( lock );
 }
 
@@ -1539,6 +1576,12 @@ static void fd_dump( struct object *obj, int verbose )
     fprintf( stderr, "\n" );
 }
 
+static struct object *fd_get_sync( struct object *obj )
+{
+    struct fd *fd = (struct fd *)obj;
+    return grab_object( fd->sync );
+}
+
 static void fd_destroy( struct object *obj )
 {
     struct fd *fd = (struct fd *)obj;
@@ -1563,6 +1606,7 @@ static void fd_destroy( struct object *obj )
         if (fd->unix_fd != -1) close( fd->unix_fd );
         free( fd->unix_name );
     }
+    if (fd->sync) release_object( fd->sync );
 }
 
 /* check if the desired access is possible without violating */
@@ -1663,6 +1707,7 @@ static struct fd *alloc_fd_object(void)
     if (!fd) return NULL;
 
     fd->fd_ops     = NULL;
+    fd->sync       = NULL;
     fd->user       = NULL;
     fd->inode      = NULL;
     fd->closed     = NULL;
@@ -1676,7 +1721,6 @@ static struct fd *alloc_fd_object(void)
     fd->nt_name    = NULL;
     fd->nt_namelen = 0;
     fd->cacheable  = 0;
-    fd->signaled   = 1;
     fd->fs_locks   = 1;
     fd->poll_index = -1;
     fd->completion = NULL;
@@ -1687,12 +1731,14 @@ static struct fd *alloc_fd_object(void)
     list_init( &fd->inode_entry );
     list_init( &fd->locks );
 
-    if ((fd->poll_index = add_poll_user( fd )) == -1)
-    {
-        release_object( fd );
-        return NULL;
-    }
+    if (!(fd->sync = create_event_sync( 1, 1 ))) goto error;
+    if ((fd->poll_index = add_poll_user( fd )) == -1) goto error;
+
     return fd;
+
+error:
+    release_object( fd );
+    return NULL;
 }
 
 /* allocate a pseudo fd object, for objects that need to behave like files but don't have a unix fd */
@@ -1703,6 +1749,7 @@ struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *use
     if (!fd) return NULL;
 
     fd->fd_ops     = fd_user_ops;
+    fd->sync       = NULL;
     fd->user       = user;
     fd->inode      = NULL;
     fd->closed     = NULL;
@@ -1716,7 +1763,6 @@ struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *use
     fd->nt_namelen = 0;
     fd->unix_fd    = -1;
     fd->cacheable  = 0;
-    fd->signaled   = 1;
     fd->fs_locks   = 0;
     fd->poll_index = -1;
     fd->completion = NULL;
@@ -1727,6 +1773,12 @@ struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *use
     init_async_queue( &fd->wait_q );
     list_init( &fd->inode_entry );
     list_init( &fd->locks );
+
+    if (!(fd->sync = create_event_sync( 1, 1 )))
+    {
+        release_object( fd );
+        return NULL;
+    }
     return fd;
 }
 
@@ -1943,15 +1995,6 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
 
     fd->nt_name = dup_nt_name( root, nt_name, &fd->nt_namelen );
     fd->unix_name = NULL;
-    if ((path = dup_fd_name( root, name )))
-    {
-        fd->unix_name = realpath( path, NULL );
-        free( path );
-    }
-
-    closed_fd->unix_fd = fd->unix_fd;
-    closed_fd->disp_flags = 0;
-    closed_fd->unix_name = fd->unix_name;
     fstat( fd->unix_fd, &st );
     *mode = st.st_mode;
 
@@ -1968,6 +2011,16 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
              */
             goto error;
         }
+
+        if ((path = dup_fd_name( root, name )))
+        {
+            fd->unix_name = realpath( path, NULL );
+            free( path );
+        }
+
+        closed_fd->unix_fd = fd->unix_fd;
+        closed_fd->unix_name = fd->unix_name;
+        closed_fd->disp_flags = 0;
         fd->inode = inode;
         fd->closed = closed_fd;
         fd->cacheable = !inode->device->removable;
@@ -2129,8 +2182,8 @@ int is_fd_removable( struct fd *fd )
 void set_fd_signaled( struct fd *fd, int signaled )
 {
     if (fd->comp_flags & FILE_SKIP_SET_EVENT_ON_HANDLE) return;
-    fd->signaled = signaled;
-    if (signaled) wake_up( fd->user, 0 );
+    if (signaled) signal_sync( fd->sync );
+    else reset_sync( fd->sync );
 }
 
 /* check if events are pending and if yes return which one(s) */
@@ -2147,12 +2200,28 @@ int check_fd_events( struct fd *fd, int events )
     return pfd.revents;
 }
 
-/* default signaled() routine for objects that poll() on an fd */
-int default_fd_signaled( struct object *obj, struct wait_queue_entry *entry )
+/* default get_sync() routine for objects that poll() on an fd */
+struct object *default_fd_get_sync( struct object *obj )
 {
     struct fd *fd = get_obj_fd( obj );
-    int ret = fd->signaled;
+    struct object *sync = get_obj_sync( &fd->obj );
     release_object( fd );
+    return sync;
+}
+
+/* default get_full_name() routine for objects with an fd */
+WCHAR *default_fd_get_full_name( struct object *obj, data_size_t max, data_size_t *ret_len )
+{
+    struct fd *fd = get_obj_fd( obj );
+    WCHAR *ret = NULL;
+
+    if (fd->nt_name)
+    {
+        *ret_len = fd->nt_namelen;
+        ret = memdup( fd->nt_name, fd->nt_namelen );
+    }
+    release_object( fd );
+    if (*ret_len > max) set_error( STATUS_BUFFER_OVERFLOW );
     return ret;
 }
 
@@ -2379,6 +2448,29 @@ void default_fd_get_file_info( struct fd *fd, obj_handle_t handle, unsigned int 
             set_reply_data( &info, sizeof(info) );
             break;
         }
+    case WineFileUnixNameInformation:
+        if (fd->unix_name)
+        {
+            data_size_t len = strlen( fd->unix_name );
+            data_size_t data_len = offsetof( WINE_FILE_UNIX_NAME_INFORMATION, Name[len] );
+            WINE_FILE_UNIX_NAME_INFORMATION *info;
+
+            if (get_reply_max_size() < sizeof(*info))
+            {
+                set_error( STATUS_INFO_LENGTH_MISMATCH );
+                return;
+            }
+            if (get_reply_max_size() < data_len)
+            {
+                set_error( STATUS_BUFFER_OVERFLOW );
+                data_len = sizeof(*info);
+            }
+            if (!(info = set_reply_data_size( data_len ))) break;
+            info->Length = len;
+            memcpy( info->Name, fd->unix_name, data_len - sizeof(*info) );
+        }
+        else set_error( STATUS_OBJECT_TYPE_MISMATCH );
+        break;
     default:
         set_error( STATUS_NOT_IMPLEMENTED );
     }
@@ -2911,6 +3003,7 @@ DECL_HANDLER(set_completion_info)
         {
             fd->completion = get_completion_obj( current->process, req->chandle, IO_COMPLETION_MODIFY_STATE );
             fd->comp_key = req->ckey;
+            set_fd_signaled( fd, 1 );
         }
         else set_error( STATUS_INVALID_PARAMETER );
         release_object( fd );

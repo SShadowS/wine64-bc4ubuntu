@@ -1356,7 +1356,6 @@ sync_test("getOwnPropertyNames", function() {
     ok(names === "defined,test", "names = " + names);
 
     names = Object.getOwnPropertyNames([]).sort().join();
-    todo_wine.
     ok(names === "length", "names = " + names);
 
     ok(Object.getOwnPropertyNames.length === 1, "Object.getOwnPropertyNames.length = " + Object.getOwnPropertyNames.length);
@@ -2845,9 +2844,9 @@ async_test("script_global", function() {
     // Created documents share script global, so their objects are instances of Object from
     // the current script context.
     var doc = document.implementation.createHTMLDocument("test");
-    todo_wine.
     ok(doc instanceof Object, "created doc is not an instance of Object");
     ok(doc.implementation instanceof Object, "created doc.implementation is not an instance of Object");
+    ok(doc.implementation instanceof DOMImplementation, "created doc.implementation is not an instance of DOMImplementation");
 
     document.body.innerHTML = "";
     var iframe = document.createElement("iframe");
@@ -2858,10 +2857,32 @@ async_test("script_global", function() {
         var doc = iframe.contentWindow.document;
         ok(!(doc instanceof Object), "doc is an instance of Object");
         ok(!(doc.implementation instanceof Object), "doc.implementation is an instance of Object");
+        ok(!(doc.implementation instanceof DOMImplementation), "doc.implementation is an instance of DOMImplementation");
+        ok(doc.implementation instanceof iframe.contentWindow.DOMImplementation, "doc.implementation is not an instance of iframe's DOMImplementation");
+        ok(Object.getPrototypeOf(doc) !== Object.getPrototypeOf(document), "doc's prototype same as doc prototype");
+        ok(Object.getPrototypeOf(doc) === iframe.contentWindow.HTMLDocument.prototype, "doc's prototype not iframe's HTMLDocument.prototype");
 
         doc = doc.implementation.createHTMLDocument("test");
         ok(!(doc instanceof Object), "created iframe doc is an instance of Object");
         ok(!(doc.implementation instanceof Object), "created iframe doc.implementation is an instance of Object");
+        ok(!(doc.implementation instanceof DOMImplementation), "created iframe doc.implementation is an instance of DOMImplementation");
+        ok(doc.implementation instanceof iframe.contentWindow.DOMImplementation, "created iframe doc.implementation is not an instance of iframe's DOMImplementation");
+        ok(Object.getPrototypeOf(doc) !== Object.getPrototypeOf(document), "created iframe doc's prototype same as doc prototype");
+        ok(Object.getPrototypeOf(doc) === iframe.contentWindow.HTMLDocument.prototype, "created iframe doc's prototype not iframe's HTMLDocument.prototype");
+
+        Object.defineProperty(doc, "winetest", { writable: true, enumerable: true, configurable: true, value: 42 });
+        test_own_data_prop_desc(doc, "winetest", true, true, true);
+
+        ok(Object.isFrozen(doc) === false, "created iframe doc isFrozen is not false");
+        ok(Object.isSealed(doc) === false, "created iframe doc isSealed is not false");
+        Object.freeze(doc);
+        ok(Object.isFrozen(doc) === true, "created iframe doc isFrozen is not true after freezing it");
+        ok(Object.isSealed(doc) === true, "created iframe doc isSealed is not true after freezing it");
+
+        var r = Object.prototype.toString.call(iframe.contentWindow);
+        ok(r === "[object Window]", "iframe's Window toString = " + r);
+        r = Object.prototype.toString.call(iframe.contentWindow.DOMImplementation);
+        ok(r === "[object DOMImplementation]", "iframe's DOMImplementation toString = " + r);
 
         next_test();
     });
@@ -2907,7 +2928,6 @@ sync_test("prototypes", function() {
     test_own_data_prop_desc(window, "DOMImplementation", true, false, true);
     ok(Object.getPrototypeOf(DOMImplementation) === Object.prototype,
        "Object.getPrototypeOf(DOMImplementation) = " + Object.getPrototypeOf(DOMImplementation));
-    todo_wine.
     ok(DOMImplementation == "[object DOMImplementation]", "DOMImplementation = " + DOMImplementation);
 
     var proto = constr.prototype;
@@ -2971,4 +2991,59 @@ sync_test("prototypes", function() {
     ok(document.body instanceof HTMLElement, "body is not an instance of HTMLElement");
     ok(document.body instanceof Element, "body is not an instance of Element");
     ok(document.body instanceof Node, "body is not an instance of Node");
+});
+
+sync_test("prototypes_delete", function() {
+    function check_prop(name) {
+        var orig = Object.getOwnPropertyDescriptor(Element.prototype, name);
+        ok(orig != undefined, "Could not get " + name + " descriptor");
+        var is_func = "value" in orig;
+
+        function check(obj, has_own, has_prop, has_enum, todo_enum) {
+            var r = obj.hasOwnProperty(name);
+            ok(r === has_own, obj + ".hasOwnProperty(" + name + ") returned " + r);
+            r = name in obj;
+            ok(r === has_prop, name + " in " + obj + " returned " + r);
+            r = check_enum(obj, name);
+            todo_wine_if(todo_enum).
+            ok(r === has_enum, "enumerating " + name + " in " + obj + "returned " + r);
+        }
+
+        check(document.body, false, true, true, is_func);
+        check(Element.prototype, true, true, true, is_func);
+        check(Node.prototype, false, false, false);
+
+        delete Element.prototype[name];
+        check(document.body, false, false, false);
+        check(Element.prototype, false, false, false);
+        check(Node.prototype, false, false, false);
+
+        Element.prototype[name] = -2;
+        Node.prototype[name] = -3;
+        ok(document.body[name] === -2, "document.body[" + name + "] = " + Element.prototype[name]);
+
+        check(document.body, false, true, true);
+        check(Element.prototype, true, true, true);
+        check(Node.prototype, true, true, true);
+
+        delete Element.prototype[name];
+        ok(document.body[name] === -3, "document.body[" + name + "] = " + Element.prototype[name]);
+        check(document.body, false, true, true);
+        check(Element.prototype, false, true, true);
+        check(Node.prototype, true, true, true);
+
+        delete Node.prototype[name];
+        check(document.body, false, false, false);
+        check(Element.prototype, false, false, false);
+        check(Node.prototype, false, false, false);
+
+        /* Restore the prop */
+        Object.defineProperty(Element.prototype, name, orig);
+        check(document.body, false, true, true, is_func);
+        check(Element.prototype, true, true, true, is_func);
+        check(Node.prototype, false, false, false);
+    }
+
+    check_prop("scrollLeft"); /* accessor prop */
+    check_prop("getBoundingClientRect"); /* function prop */
 });

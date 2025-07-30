@@ -51,6 +51,7 @@
     + (NSView*) dummyView
     {
         static NSWindow* dummyWindow;
+        static NSView* dummyWindowContentView;
         static dispatch_once_t once;
 
         dispatch_once(&once, ^{
@@ -59,10 +60,11 @@
                                                           styleMask:NSWindowStyleMaskBorderless
                                                             backing:NSBackingStoreBuffered
                                                               defer:NO];
+                dummyWindowContentView = dummyWindow.contentView;
             });
         });
 
-        return dummyWindow.contentView;
+        return dummyWindowContentView;
     }
 
     // Normally, we take care that disconnecting a context from a view doesn't
@@ -71,9 +73,6 @@
     // need to destroy and recreate the surface or we get weird behavior.
     - (void) resetSurfaceIfBackingSizeChanged
     {
-        if (!retina_enabled)
-            return;
-
         int view_backing[2];
         if (macdrv_get_view_backing_size((macdrv_view)self.view, view_backing) &&
             (view_backing[0] != backing_size[0] || view_backing[1] != backing_size[1]))
@@ -98,9 +97,6 @@
     - (void) wine_updateBackingSize:(const CGSize*)size
     {
         GLint enabled;
-
-        if (!retina_enabled)
-            return;
 
         if (size)
         {

@@ -4138,7 +4138,6 @@ static void test_window_refs(IHTMLDocument2 *doc)
 
     hres = IOmHistory_get_length(history, &length);
     ok(hres == S_OK, "get_length failed: %08lx\n", hres);
-    todo_wine
     ok(length == 42, "length = %d\n", length);
     IOmHistory_Release(history);
 }
@@ -4209,7 +4208,6 @@ static void test_doc_obj(IHTMLDocument2 *doc)
     bstr = NULL;
     hres = IHTMLDocument2_toString(doc, &bstr);
     ok(hres == S_OK, "toString failed: %08lx\n", hres);
-    todo_wine_if(document_mode >= 9)
     ok(!wcscmp(bstr, (document_mode < 9 ? L"[object]" : L"[object Document]")), "toString returned %s\n", wine_dbgstr_w(bstr));
     SysFreeString(bstr);
 
@@ -4404,9 +4402,7 @@ static void test_doc_obj(IHTMLDocument2 *doc)
     ok(doc_node != doc_node2, "doc_node == doc_node2\n");
 
     hres = IHTMLDocument2_get_parentWindow(doc_node, &window2);
-    todo_wine
     ok(hres == S_OK, "get_parentWindow failed: %08lx\n", hres);
-    todo_wine
     ok(window == window2, "window != window2\n");
     if(hres == S_OK) IHTMLWindow2_Release(window2);
 

@@ -231,9 +231,9 @@ static LONG apply_display_settings( DEVMODEW *displays, x11drv_settings_id *ids,
         TRACE("handler:%s changing %s to position:(%d,%d) resolution:%ux%u frequency:%uHz "
               "depth:%ubits orientation:%#x.\n", settings_handler.name,
               wine_dbgstr_w(mode->dmDeviceName),
-              (int)full_mode->dmPosition.x, (int)full_mode->dmPosition.y, (int)full_mode->dmPelsWidth,
-              (int)full_mode->dmPelsHeight, (int)full_mode->dmDisplayFrequency,
-              (int)full_mode->dmBitsPerPel, (int)full_mode->dmDisplayOrientation);
+              full_mode->dmPosition.x, full_mode->dmPosition.y, full_mode->dmPelsWidth,
+              full_mode->dmPelsHeight, full_mode->dmDisplayFrequency,
+              full_mode->dmBitsPerPel, full_mode->dmDisplayOrientation);
 
         ret = settings_handler.set_current_mode(*id, full_mode);
         free_full_mode(full_mode);
@@ -404,10 +404,10 @@ BOOL X11DRV_DisplayDevices_SupportEventHandlers(void)
 
 UINT X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_manager, void *param )
 {
+    INT gpu_count, adapter_count, monitor_count, current_adapter_count = 0;
     struct x11drv_adapter *adapters;
     struct gdi_monitor *monitors;
     struct x11drv_gpu *gpus;
-    INT gpu_count, adapter_count, monitor_count;
     INT gpu, adapter, monitor;
     DEVMODEW *modes;
     UINT mode_count;
@@ -448,7 +448,7 @@ UINT X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_manage
             host_handler.free_monitors( monitors, monitor_count );
 
             /* Get the settings handler id for the adapter */
-            snprintf( buffer, sizeof(buffer), "\\\\.\\DISPLAY%d", adapter + 1 );
+            snprintf( buffer, sizeof(buffer), "\\\\.\\DISPLAY%d", current_adapter_count + adapter + 1 );
             asciiz_to_unicode( devname, buffer );
             if (!settings_handler.get_id( devname, is_primary, &settings_id )) break;
 
@@ -460,6 +460,7 @@ UINT X11DRV_UpdateDisplayDevices( const struct gdi_device_manager *device_manage
             }
         }
 
+        current_adapter_count += adapter_count;
         host_handler.free_adapters( adapters );
     }
 

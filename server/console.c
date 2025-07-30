@@ -53,7 +53,7 @@ struct history_line
 struct console
 {
     struct object                obj;           /* object header */
-    int                          signaled;      /* is console signaled */
+    struct event_sync           *sync;          /* sync object for wait/signal */
     struct thread               *renderer;      /* console renderer thread */
     struct screen_buffer        *active;        /* active screen buffer */
     struct console_server       *server;        /* console server object */
@@ -61,29 +61,32 @@ struct console
     struct fd                   *fd;            /* for bare console, attached input fd */
     struct async_queue           ioctl_q;       /* ioctl queue */
     struct async_queue           read_q;        /* read queue */
+    struct list                  screen_buffers;/* attached screen buffers */
+    struct list                  inputs;        /* attached console inputs */
+    struct list                  outputs;       /* attached console outputs */
 };
 
 static void console_dump( struct object *obj, int verbose );
 static void console_destroy( struct object *obj );
-static int console_signaled( struct object *obj, struct wait_queue_entry *entry );
 static struct fd *console_get_fd( struct object *obj );
+static struct object *console_get_sync( struct object *obj );
 static struct object *console_lookup_name( struct object *obj, struct unicode_str *name,
                                            unsigned int attr, struct object *root );
 static struct object *console_open_file( struct object *obj, unsigned int access,
                                          unsigned int sharing, unsigned int options );
-static int console_add_queue( struct object *obj, struct wait_queue_entry *entry );
 
 static const struct object_ops console_ops =
 {
     sizeof(struct console),           /* size */
     &file_type,                       /* type */
     console_dump,                     /* dump */
-    console_add_queue,                /* add_queue */
-    remove_queue,                     /* remove_queue */
-    console_signaled,                 /* signaled */
-    no_satisfied,                     /* satisfied */
+    NULL,                             /* add_queue */
+    NULL,                             /* remove_queue */
+    NULL,                             /* signaled */
+    NULL,                             /* satisfied */
     no_signal,                        /* signal */
     console_get_fd,                   /* get_fd */
+    console_get_sync,                 /* get_sync */
     default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
@@ -131,6 +134,7 @@ struct console_host_ioctl
 struct console_server
 {
     struct object         obj;            /* object header */
+    struct event_sync    *sync;           /* sync object for wait/signal */
     struct fd            *fd;             /* pseudo-fd for ioctls */
     struct console       *console;        /* attached console */
     struct list           queue;          /* ioctl queue */
@@ -143,8 +147,8 @@ struct console_server
 
 static void console_server_dump( struct object *obj, int verbose );
 static void console_server_destroy( struct object *obj );
-static int console_server_signaled( struct object *obj, struct wait_queue_entry *entry );
 static struct fd *console_server_get_fd( struct object *obj );
+static struct object *console_server_get_sync( struct object *obj );
 static struct object *console_server_lookup_name( struct object *obj, struct unicode_str *name,
                                                 unsigned int attr, struct object *root );
 static struct object *console_server_open_file( struct object *obj, unsigned int access,
@@ -155,12 +159,13 @@ static const struct object_ops console_server_ops =
     sizeof(struct console_server),    /* size */
     &file_type,                       /* type */
     console_server_dump,              /* dump */
-    add_queue,                        /* add_queue */
-    remove_queue,                     /* remove_queue */
-    console_server_signaled,          /* signaled */
-    no_satisfied,                     /* satisfied */
+    NULL,                             /* add_queue */
+    NULL,                             /* remove_queue */
+    NULL,                             /* signaled */
+    NULL,                             /* satisfied */
     no_signal,                        /* signal */
     console_server_get_fd,            /* get_fd */
+    console_server_get_sync,          /* get_sync */
     default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
@@ -205,6 +210,7 @@ struct font_info
 struct screen_buffer
 {
     struct object         obj;           /* object header */
+    struct event_sync    *sync;          /* sync object for wait/signal */
     struct list           entry;         /* entry in list of all screen buffers */
     struct console       *input;         /* associated console input */
     unsigned int          id;            /* buffer id */
@@ -214,8 +220,8 @@ struct screen_buffer
 
 static void screen_buffer_dump( struct object *obj, int verbose );
 static void screen_buffer_destroy( struct object *obj );
-static int screen_buffer_add_queue( struct object *obj, struct wait_queue_entry *entry );
 static struct fd *screen_buffer_get_fd( struct object *obj );
+static struct object *screen_buffer_get_sync( struct object *obj );
 static struct object *screen_buffer_open_file( struct object *obj, unsigned int access,
                                                unsigned int sharing, unsigned int options );
 
@@ -224,12 +230,13 @@ static const struct object_ops screen_buffer_ops =
     sizeof(struct screen_buffer),     /* size */
     &file_type,                       /* type */
     screen_buffer_dump,               /* dump */
-    screen_buffer_add_queue,          /* add_queue */
+    NULL,                             /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
     NULL,                             /* satisfied */
     no_signal,                        /* signal */
     screen_buffer_get_fd,             /* get_fd */
+    screen_buffer_get_sync,           /* get_sync */
     default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
@@ -279,6 +286,7 @@ static const struct object_ops console_device_ops =
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     no_get_fd,                        /* get_fd */
+    default_get_sync,                 /* get_sync */
     default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
@@ -295,14 +303,17 @@ static const struct object_ops console_device_ops =
 struct console_input
 {
     struct object         obj;         /* object header */
+    struct event_sync    *sync;        /* sync object for wait/signal */
     struct fd            *fd;          /* pseudo-fd */
+    struct list           entry;       /* entry in console->inputs */
+    struct console       *console;     /* associated console at creation time */
 };
 
 static void console_input_dump( struct object *obj, int verbose );
 static struct object *console_input_open_file( struct object *obj, unsigned int access,
                                                unsigned int sharing, unsigned int options );
-static int console_input_add_queue( struct object *obj, struct wait_queue_entry *entry );
 static struct fd *console_input_get_fd( struct object *obj );
+static struct object *console_input_get_sync( struct object *obj );
 static void console_input_destroy( struct object *obj );
 
 static const struct object_ops console_input_ops =
@@ -310,12 +321,13 @@ static const struct object_ops console_input_ops =
     sizeof(struct console_input),     /* size */
     &device_type,                     /* type */
     console_input_dump,               /* dump */
-    console_input_add_queue,          /* add_queue */
+    NULL,                             /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
-    no_satisfied,                     /* satisfied */
+    NULL,                             /* satisfied */
     no_signal,                        /* signal */
     console_input_get_fd,             /* get_fd */
+    console_input_get_sync,           /* get_sync */
     default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
@@ -352,12 +364,15 @@ static const struct fd_ops console_input_fd_ops =
 struct console_output
 {
     struct object         obj;         /* object header */
+    struct event_sync    *sync;        /* sync object for wait/signal */
     struct fd            *fd;          /* pseudo-fd */
+    struct list           entry;       /* entry in console->outputs */
+    struct console       *console;     /* associated console at creation time */
 };
 
 static void console_output_dump( struct object *obj, int verbose );
-static int console_output_add_queue( struct object *obj, struct wait_queue_entry *entry );
 static struct fd *console_output_get_fd( struct object *obj );
+static struct object *console_output_get_sync( struct object *obj );
 static struct object *console_output_open_file( struct object *obj, unsigned int access,
                                                 unsigned int sharing, unsigned int options );
 static void console_output_destroy( struct object *obj );
@@ -367,12 +382,13 @@ static const struct object_ops console_output_ops =
     sizeof(struct console_output),    /* size */
     &device_type,                     /* type */
     console_output_dump,              /* dump */
-    console_output_add_queue,         /* add_queue */
+    NULL,                             /* add_queue */
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
-    no_satisfied,                     /* satisfied */
+    NULL,                             /* satisfied */
     no_signal,                        /* signal */
     console_output_get_fd,            /* get_fd */
+    console_output_get_sync,          /* get_sync */
     default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
@@ -431,6 +447,7 @@ static const struct object_ops console_connection_ops =
     no_satisfied,                     /* satisfied */
     no_signal,                        /* signal */
     console_connection_get_fd,        /* get_fd */
+    default_get_sync,                 /* get_sync */
     default_map_access,               /* map_access */
     default_get_sd,                   /* get_sd */
     default_set_sd,                   /* set_sd */
@@ -462,15 +479,21 @@ static const struct fd_ops console_connection_fd_ops =
     default_fd_reselect_async     /* reselect_async */
 };
 
-static struct list screen_buffer_list = LIST_INIT(screen_buffer_list);
-
 static int queue_host_ioctl( struct console_server *server, unsigned int code, unsigned int output,
                              struct async *async, struct async_queue *queue );
 
-static int console_add_queue( struct object *obj, struct wait_queue_entry *entry )
+static struct fd *console_get_fd( struct object *obj )
 {
-    struct console *console = (struct console*)obj;
+    struct console *console = (struct console *)obj;
     assert( obj->ops == &console_ops );
+    return (struct fd *)grab_object( console->fd );
+}
+
+static struct object *console_get_sync( struct object *obj )
+{
+    struct console *console = (struct console *)obj;
+    assert( obj->ops == &console_ops );
+
     /* before waiting, ensure conhost's input thread has been started */
     if (console->server && !console->server->once_input)
     {
@@ -478,20 +501,8 @@ static int console_add_queue( struct object *obj, struct wait_queue_entry *entry
         if (console->server->term_fd == -1)
             queue_host_ioctl( console->server, IOCTL_CONDRV_PEEK, 0, NULL, NULL );
     }
-    return add_queue( &console->obj, entry );
-}
 
-static int console_signaled( struct object *obj, struct wait_queue_entry *entry )
-{
-    struct console *console = (struct console*)obj;
-    return console->signaled;
-}
-
-static struct fd *console_get_fd( struct object *obj )
-{
-    struct console *console = (struct console *)obj;
-    assert( obj->ops == &console_ops );
-    return (struct fd *)grab_object( console->fd );
+    return grab_object( console->sync );
 }
 
 static enum server_fd_type console_get_fd_type( struct fd *fd )
@@ -530,26 +541,27 @@ static struct object *create_console(void)
 {
     struct console *console;
 
-    if (!(console = alloc_object( &console_ops )))
-        return NULL;
-
+    if (!(console = alloc_object( &console_ops ))) return NULL;
+    console->sync          = NULL;
     console->renderer      = NULL;
-    console->signaled      = 0;
     console->active        = NULL;
     console->server        = NULL;
     console->fd            = NULL;
     console->last_id       = 0;
+    list_init( &console->screen_buffers );
+    list_init( &console->inputs );
+    list_init( &console->outputs );
     init_async_queue( &console->ioctl_q );
     init_async_queue( &console->read_q );
 
-    console->fd = alloc_pseudo_fd( &console_fd_ops, &console->obj, FILE_SYNCHRONOUS_IO_NONALERT );
-    if (!console->fd)
-    {
-        release_object( console );
-        return NULL;
-    }
+    if (!(console->sync = create_event_sync( 1, 0 ))) goto error;
+    if (!(console->fd = alloc_pseudo_fd( &console_fd_ops, &console->obj, FILE_SYNCHRONOUS_IO_NONALERT ))) goto error;
     allow_fd_caching( console->fd );
     return &console->obj;
+
+error:
+    release_object( console );
+    return NULL;
 }
 
 static void console_host_ioctl_terminate( struct console_host_ioctl *call, unsigned int status )
@@ -577,7 +589,7 @@ static int queue_host_ioctl( struct console_server *server, unsigned int code, u
         queue_async( queue, async );
     }
     list_add_tail( &server->queue, &ioctl->entry );
-    wake_up( &server->obj, 0 );
+    signal_sync( server->sync );
     if (async) set_error( STATUS_PENDING );
     return 1;
 }
@@ -609,7 +621,7 @@ static void disconnect_console_server( struct console_server *server )
         assert( server->console->server == server );
         server->console->server = NULL;
         server->console = NULL;
-        wake_up( &server->obj, 0 );
+        signal_sync( server->sync );
     }
 }
 
@@ -633,13 +645,12 @@ static struct object *create_screen_buffer( struct console *console )
         return NULL;
     }
 
-    if (!(screen_buffer = alloc_object( &screen_buffer_ops )))
-        return NULL;
-
+    if (!(screen_buffer = alloc_object( &screen_buffer_ops ))) return NULL;
+    screen_buffer->sync  = (struct event_sync *)grab_object( console->sync );
     screen_buffer->id    = ++console->last_id;
     screen_buffer->input = console;
     init_async_queue( &screen_buffer->ioctl_q );
-    list_add_head( &screen_buffer_list, &screen_buffer->entry );
+    list_add_head( &console->screen_buffers, &screen_buffer->entry );
 
     screen_buffer->fd = alloc_pseudo_fd( &screen_buffer_fd_ops, &screen_buffer->obj,
                                          FILE_SYNCHRONOUS_IO_NONALERT );
@@ -742,6 +753,8 @@ static void console_dump( struct object *obj, int verbose )
 static void console_destroy( struct object *obj )
 {
     struct console *console = (struct console *)obj;
+    struct console_output *output;
+    struct console_input *input;
     struct screen_buffer *curr;
 
     assert( obj->ops == &console_ops );
@@ -755,9 +768,19 @@ static void console_destroy( struct object *obj )
     if (console->active) release_object( console->active );
     console->active = NULL;
 
-    LIST_FOR_EACH_ENTRY( curr, &screen_buffer_list, struct screen_buffer, entry )
+    LIST_FOR_EACH_ENTRY( curr, &console->screen_buffers, struct screen_buffer, entry )
+        curr->input = NULL;
+
+    LIST_FOR_EACH_ENTRY( input, &console->inputs, struct console_input, entry )
+        input->console = NULL;
+
+    LIST_FOR_EACH_ENTRY( output, &console->outputs, struct console_output, entry )
+        output->console = NULL;
+
+    if (console->sync)
     {
-        if (curr->input == console) curr->input = NULL;
+        reset_sync( console->sync );
+        release_object( console->sync );
     }
 
     free_async_queue( &console->ioctl_q );
@@ -796,6 +819,12 @@ static struct object *console_lookup_name( struct object *obj, struct unicode_st
     static const WCHAR connectionW[]    = {'C','o','n','n','e','c','t','i','o','n'};
     assert( obj->ops == &console_ops );
 
+    if (!name)
+    {
+        set_error( STATUS_NOT_FOUND );
+        return NULL;
+    }
+
     if (name->len == sizeof(connectionW) && !memcmp( name->str, connectionW, name->len ))
     {
         name->len = 0;
@@ -825,29 +854,22 @@ static void screen_buffer_destroy( struct object *obj )
 
     assert( obj->ops == &screen_buffer_ops );
 
-    list_remove( &screen_buffer->entry );
-    if (screen_buffer->input && screen_buffer->input->server)
-        queue_host_ioctl( screen_buffer->input->server, IOCTL_CONDRV_CLOSE_OUTPUT,
-                          screen_buffer->id, NULL, NULL );
-    if (screen_buffer->fd) release_object( screen_buffer->fd );
+    if (screen_buffer->input)
+    {
+        list_remove( &screen_buffer->entry );
+        if (screen_buffer->input->server)
+            queue_host_ioctl( screen_buffer->input->server, IOCTL_CONDRV_CLOSE_OUTPUT,
+                              screen_buffer->id, NULL, NULL );
+    }
     free_async_queue( &screen_buffer->ioctl_q );
+    if (screen_buffer->sync) release_object( screen_buffer->sync );
+    if (screen_buffer->fd) release_object( screen_buffer->fd );
 }
 
 static struct object *screen_buffer_open_file( struct object *obj, unsigned int access,
                                                unsigned int sharing, unsigned int options )
 {
     return grab_object( obj );
-}
-
-static int screen_buffer_add_queue( struct object *obj, struct wait_queue_entry *entry )
-{
-    struct screen_buffer *screen_buffer = (struct screen_buffer*)obj;
-    if (!screen_buffer->input)
-    {
-        set_error( STATUS_ACCESS_DENIED );
-        return 0;
-    }
-    return console_add_queue( &screen_buffer->input->obj, entry );
 }
 
 static struct fd *screen_buffer_get_fd( struct object *obj )
@@ -858,6 +880,13 @@ static struct fd *screen_buffer_get_fd( struct object *obj )
         return (struct fd*)grab_object( screen_buffer->fd );
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
     return NULL;
+}
+
+static struct object *screen_buffer_get_sync( struct object *obj )
+{
+    struct screen_buffer *screen_buffer = (struct screen_buffer *)obj;
+    assert( obj->ops == &screen_buffer_ops );
+    return grab_object( screen_buffer->sync );
 }
 
 static void console_server_dump( struct object *obj, int verbose )
@@ -871,6 +900,7 @@ static void console_server_destroy( struct object *obj )
     struct console_server *server = (struct console_server *)obj;
     assert( obj->ops == &console_server_ops );
     disconnect_console_server( server );
+    if (server->sync) release_object( server->sync );
     if (server->fd) release_object( server->fd );
 }
 
@@ -880,6 +910,12 @@ static struct object *console_server_lookup_name( struct object *obj, struct uni
     struct console_server *server = (struct console_server*)obj;
     static const WCHAR referenceW[] = {'R','e','f','e','r','e','n','c','e'};
     assert( obj->ops == &console_server_ops );
+
+    if (!name)
+    {
+        set_error( STATUS_NOT_FOUND );
+        return NULL;
+    }
 
     if (name->len == sizeof(referenceW) && !memcmp( name->str, referenceW, name->len ))
     {
@@ -900,17 +936,11 @@ static struct object *console_server_lookup_name( struct object *obj, struct uni
         release_object( screen_buffer );
         server->console->server = server;
 
+        if (list_empty( &server->queue )) reset_sync( server->sync );
         return &server->console->obj;
     }
 
     return NULL;
-}
-
-static int console_server_signaled( struct object *obj, struct wait_queue_entry *entry )
-{
-    struct console_server *server = (struct console_server*)obj;
-    assert( obj->ops == &console_server_ops );
-    return !server->console || !list_empty( &server->queue );
 }
 
 static struct fd *console_server_get_fd( struct object* obj )
@@ -918,6 +948,13 @@ static struct fd *console_server_get_fd( struct object* obj )
     struct console_server *server = (struct console_server*)obj;
     assert( obj->ops == &console_server_ops );
     return (struct fd *)grab_object( server->fd );
+}
+
+static struct object *console_server_get_sync( struct object *obj )
+{
+    struct console_server *server = (struct console_server *)obj;
+    assert( obj->ops == &console_server_ops );
+    return grab_object( server->sync );
 }
 
 static struct object *console_server_open_file( struct object *obj, unsigned int access,
@@ -931,21 +968,23 @@ static struct object *create_console_server( void )
     struct console_server *server;
 
     if (!(server = alloc_object( &console_server_ops ))) return NULL;
+    server->sync       = NULL;
+    server->fd         = NULL;
     server->console    = NULL;
     server->busy       = 0;
     server->once_input = 0;
     server->term_fd    = -1;
     list_init( &server->queue );
     list_init( &server->read_queue );
-    server->fd = alloc_pseudo_fd( &console_server_fd_ops, &server->obj, FILE_SYNCHRONOUS_IO_NONALERT );
-    if (!server->fd)
-    {
-        release_object( server );
-        return NULL;
-    }
-    allow_fd_caching(server->fd);
 
+    if (!(server->sync = create_event_sync( 1, 1 ))) goto error;
+    if (!(server->fd = alloc_pseudo_fd( &console_server_fd_ops, &server->obj, FILE_SYNCHRONOUS_IO_NONALERT ))) goto error;
+    allow_fd_caching(server->fd);
     return &server->obj;
+
+error:
+    release_object( server );
+    return NULL;
 }
 
 static int is_blocking_read_ioctl( unsigned int code )
@@ -1302,8 +1341,16 @@ static struct object *console_device_lookup_name( struct object *obj, struct uni
     if (name->len == sizeof(inputW) && !memcmp( name->str, inputW, name->len ))
     {
         struct console_input *console_input;
+
+        if (!current->process->console)
+        {
+            set_error( STATUS_INVALID_HANDLE );
+            return NULL;
+        }
+
         name->len = 0;
         if (!(console_input = alloc_object( &console_input_ops ))) return NULL;
+        console_input->sync = (struct event_sync *)grab_object( current->process->console->sync );
         console_input->fd = alloc_pseudo_fd( &console_input_fd_ops, &console_input->obj,
                                              FILE_SYNCHRONOUS_IO_NONALERT );
         if (!console_input->fd)
@@ -1311,14 +1358,24 @@ static struct object *console_device_lookup_name( struct object *obj, struct uni
             release_object( console_input );
             return NULL;
         }
+        console_input->console = current->process->console;
+        list_add_head( &current->process->console->inputs, &console_input->entry );
         return &console_input->obj;
     }
 
     if (name->len == sizeof(outputW) && !memcmp( name->str, outputW, name->len ))
     {
         struct console_output *console_output;
+
+        if (!current->process->console)
+        {
+            set_error( STATUS_INVALID_HANDLE );
+            return NULL;
+        }
+
         name->len = 0;
         if (!(console_output = alloc_object( &console_output_ops ))) return NULL;
+        console_output->sync = (struct event_sync *)grab_object( current->process->console->sync );
         console_output->fd = alloc_pseudo_fd( &console_output_fd_ops, &console_output->obj,
                                              FILE_SYNCHRONOUS_IO_NONALERT );
         if (!console_output->fd)
@@ -1326,6 +1383,8 @@ static struct object *console_device_lookup_name( struct object *obj, struct uni
             release_object( console_output );
             return NULL;
         }
+        console_output->console = current->process->console;
+        list_add_head( &current->process->console->outputs, &console_output->entry );
         return &console_output->obj;
     }
 
@@ -1379,21 +1438,18 @@ static void console_input_dump( struct object *obj, int verbose )
     fputs( "console Input device\n", stderr );
 }
 
-static int console_input_add_queue( struct object *obj, struct wait_queue_entry *entry )
-{
-    if (!current->process->console)
-    {
-        set_error( STATUS_ACCESS_DENIED );
-        return 0;
-    }
-    return console_add_queue( &current->process->console->obj, entry );
-}
-
 static struct fd *console_input_get_fd( struct object *obj )
 {
     struct console_input *console_input = (struct console_input *)obj;
     assert( obj->ops == &console_input_ops );
     return (struct fd *)grab_object( console_input->fd );
+}
+
+static struct object *console_input_get_sync( struct object *obj )
+{
+    struct console_input *console_input = (struct console_input *)obj;
+    assert( obj->ops == &console_input_ops );
+    return grab_object( console_input->sync );
 }
 
 static struct object *console_input_open_file( struct object *obj, unsigned int access,
@@ -1408,6 +1464,8 @@ static void console_input_destroy( struct object *obj )
 
     assert( obj->ops == &console_input_ops );
     if (console_input->fd) release_object( console_input->fd );
+    if (console_input->console) list_remove( &console_input->entry );
+    if (console_input->sync) release_object( console_input->sync );
 }
 
 static void console_input_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
@@ -1451,21 +1509,18 @@ static void console_output_dump( struct object *obj, int verbose )
     fputs( "console Output device\n", stderr );
 }
 
-static int console_output_add_queue( struct object *obj, struct wait_queue_entry *entry )
-{
-    if (!current->process->console || !current->process->console->active)
-    {
-        set_error( STATUS_ACCESS_DENIED );
-        return 0;
-    }
-    return console_add_queue( &current->process->console->obj, entry );
-}
-
 static struct fd *console_output_get_fd( struct object *obj )
 {
     struct console_output *console_output = (struct console_output *)obj;
     assert( obj->ops == &console_output_ops );
     return (struct fd *)grab_object( console_output->fd );
+}
+
+static struct object *console_output_get_sync( struct object *obj )
+{
+    struct console_output *console_output = (struct console_output *)obj;
+    assert( obj->ops == &console_output_ops );
+    return grab_object( console_output->sync );
 }
 
 static struct object *console_output_open_file( struct object *obj, unsigned int access,
@@ -1480,6 +1535,8 @@ static void console_output_destroy( struct object *obj )
 
     assert( obj->ops == &console_output_ops );
     if (console_output->fd) release_object( console_output->fd );
+    if (console_output->console) list_remove( &console_output->entry );
+    if (console_output->sync) release_object( console_output->sync );
 }
 
 static void console_output_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
@@ -1531,12 +1588,8 @@ DECL_HANDLER(get_next_console_request)
 
     if (!server->console->renderer) server->console->renderer = current;
 
-    if (!req->signal) server->console->signaled = 0;
-    else if (!server->console->signaled)
-    {
-        server->console->signaled = 1;
-        wake_up( &server->console->obj, 0 );
-    }
+    if (!req->signal) reset_sync( server->console->sync );
+    else signal_sync( server->console->sync );
 
     if (req->read)
     {
@@ -1580,11 +1633,7 @@ DECL_HANDLER(get_next_console_request)
         free( ioctl );
         if (iosb) release_object( iosb );
 
-        if (req->read)
-        {
-            release_object( server );
-            return;
-        }
+        if (req->read) goto done;
         server->busy = 0;
     }
 
@@ -1643,5 +1692,7 @@ DECL_HANDLER(get_next_console_request)
         set_error( STATUS_PENDING );
     }
 
+done:
+    if (list_empty( &server->queue )) reset_sync( server->sync );
     release_object( server );
 }

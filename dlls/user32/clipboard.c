@@ -29,11 +29,11 @@
 #include "winnls.h"
 #include "objidl.h"
 #include "shlobj.h"
-#include "wine/server.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(clipboard);
 
+#define MAX_ATOM_LEN 255
 
 static CRITICAL_SECTION clipboard_cs;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -164,7 +164,7 @@ static HANDLE marshal_data( UINT format, HANDLE handle, size_t *ret_size )
         {
             char *ptr;
             if (!(size = GlobalSize( handle ))) return 0;
-            if ((data_size_t)size != size) return 0;
+            if ((UINT)size != size) return 0;
             if (size < sizeof(WCHAR)) return 0;
             if (!(ptr = GlobalLock( handle ))) return 0;
             /* enforce nul-termination the Windows way: ignoring alignment */
@@ -178,7 +178,7 @@ static HANDLE marshal_data( UINT format, HANDLE handle, size_t *ret_size )
         {
             char *ptr;
             if (!(size = GlobalSize( handle ))) return 0;
-            if ((data_size_t)size != size) return 0;
+            if ((UINT)size != size) return 0;
             if (!(ptr = GlobalLock( handle ))) return 0;
             ptr[size - 1] = 0;  /* enforce null-termination */
             GlobalUnlock( handle );
@@ -187,14 +187,14 @@ static HANDLE marshal_data( UINT format, HANDLE handle, size_t *ret_size )
         }
     default:
         if (!(size = GlobalSize( handle ))) return 0;
-        if ((data_size_t)size != size) return 0;
+        if ((UINT)size != size) return 0;
         *ret_size = size;
         return handle;
     }
 }
 
 /* rebuild the target handle from the data received in GetClipboardData */
-static HANDLE unmarshal_data( UINT format, void *data, data_size_t size )
+static HANDLE unmarshal_data( UINT format, void *data, UINT size )
 {
     HANDLE handle = GlobalReAlloc( data, size, GMEM_MOVEABLE );  /* release unused space */
 
@@ -527,7 +527,12 @@ HANDLE render_synthesized_format( UINT format, UINT from )
  */
 UINT WINAPI RegisterClipboardFormatW( LPCWSTR name )
 {
-    return GlobalAddAtomW( name );
+    UNICODE_STRING str;
+
+    TRACE( "%s\n", debugstr_w(name) );
+
+    RtlInitUnicodeString( &str, name );
+    return NtUserRegisterWindowMessage( &str );
 }
 
 
@@ -536,7 +541,15 @@ UINT WINAPI RegisterClipboardFormatW( LPCWSTR name )
  */
 UINT WINAPI RegisterClipboardFormatA( LPCSTR name )
 {
-    return GlobalAddAtomA( name );
+    WCHAR buf[MAX_ATOM_LEN + 1];
+    UNICODE_STRING str = {.Buffer = buf, .MaximumLength = sizeof(buf)};
+    STRING ansi;
+
+    TRACE( "%s\n", debugstr_a(name) );
+
+    RtlInitAnsiString( &ansi, name );
+    RtlAnsiStringToUnicodeString( &str, &ansi, FALSE );
+    return NtUserRegisterWindowMessage( &str );
 }
 
 
@@ -545,8 +558,29 @@ UINT WINAPI RegisterClipboardFormatA( LPCSTR name )
  */
 INT WINAPI GetClipboardFormatNameA( UINT format, LPSTR buffer, INT maxlen )
 {
+    WCHAR tmpW[MAX_ATOM_LEN + 1];
+    UINT lenW, lenA = 0, len;
+
     if (format < MAXINTATOM || format > 0xffff) return 0;
-    return GlobalGetAtomNameA( format, buffer, maxlen );
+
+    if (maxlen <= 0) SetLastError( ERROR_MORE_DATA );
+    else if ((lenW = NtUserGetClipboardFormatName( format, tmpW, MAX_ATOM_LEN + 1 )))
+    {
+        char tmp[MAX_ATOM_LEN + 1];
+
+        lenA = WideCharToMultiByte( CP_ACP, 0, tmpW, lenW, tmp, MAX_ATOM_LEN + 1, NULL, NULL );
+        len = min( lenA, maxlen - 1 );
+        memcpy( buffer, tmp, len );
+        buffer[len] = '\0';
+
+        if (lenA >= maxlen)
+        {
+            lenA = 0;
+            SetLastError( ERROR_MORE_DATA );
+        }
+    }
+
+    return lenA;
 }
 
 
@@ -586,15 +620,6 @@ HANDLE WINAPI SetClipboardData( UINT format, HANDLE data )
         return 0;
     }
     return data;
-}
-
-
-/**************************************************************************
- *		EnumClipboardFormats (USER32.@)
- */
-UINT WINAPI EnumClipboardFormats( UINT format )
-{
-    return NtUserEnumClipboardFormats( format );
 }
 
 
@@ -767,9 +792,13 @@ static HRESULT format_iterator_create( IDataObject *object, IEnumFORMATETC **out
 
 static HRESULT WINAPI format_iterator_Clone( IEnumFORMATETC *iface, IEnumFORMATETC **out )
 {
+    HRESULT hr;
     struct format_iterator *iterator = format_iterator_from_IEnumFORMATETC( iface );
     TRACE( "iterator %p, out %p\n", iterator, out );
-    return format_iterator_create( iterator->object, out );
+    hr = format_iterator_create( iterator->object, out );
+    if (SUCCEEDED(hr))
+        format_iterator_from_IEnumFORMATETC( *out )->entry = iterator->entry;
+    return hr;
 }
 
 static const IEnumFORMATETCVtbl format_iterator_vtbl =

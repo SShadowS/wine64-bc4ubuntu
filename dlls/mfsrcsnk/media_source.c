@@ -80,7 +80,7 @@ struct object_entry
 
 static void object_entry_destroy(struct object_entry *entry)
 {
-    if (entry->object) IUnknown_AddRef( entry->object );
+    if (entry->object) IUnknown_Release( entry->object );
     free(entry);
 }
 
@@ -812,7 +812,10 @@ static HRESULT media_stream_async_request(struct media_stream *stream, IMFAsyncR
     if (source->state == SOURCE_SHUTDOWN)
         hr = MF_E_SHUTDOWN;
     else if (source->state == SOURCE_RUNNING && SUCCEEDED(hr = object_queue_pop(&stream->samples, (IUnknown **)&sample)))
+    {
         media_stream_send_sample(stream, sample, token);
+        IMFSample_Release(sample);
+    }
     else if (SUCCEEDED(hr = object_queue_push(&stream->tokens, token)) && source->state == SOURCE_RUNNING)
         queue_media_source_read(source);
 
@@ -1259,6 +1262,9 @@ static HRESULT WINAPI media_source_Start(IMFMediaSource *iface, IMFPresentationD
     TRACE("source %p, descriptor %p, format %s, position %s\n", source, descriptor,
             debugstr_guid(format), debugstr_propvar(position));
 
+    if (!format)
+        format = &GUID_NULL;
+
     EnterCriticalSection(&source->cs);
 
     if (source->state == SOURCE_SHUTDOWN)
@@ -1331,12 +1337,14 @@ static HRESULT WINAPI media_source_Shutdown(IMFMediaSource *iface)
     }
     source->state = SOURCE_SHUTDOWN;
 
+    IMFMediaEventQueue_QueueEventParamVar(source->queue, MEError, &GUID_NULL, MF_E_SHUTDOWN, NULL);
     IMFMediaEventQueue_Shutdown(source->queue);
     IMFByteStream_Close(source->stream);
 
     while (source->stream_count--)
     {
         struct media_stream *stream = source->streams[source->stream_count];
+        IMFMediaEventQueue_QueueEventParamVar(stream->queue, MEError, &GUID_NULL, MF_E_SHUTDOWN, NULL);
         IMFMediaEventQueue_Shutdown(stream->queue);
         IMFMediaStream_Release(&stream->IMFMediaStream_iface);
     }
@@ -2005,3 +2013,29 @@ static const IClassFactoryVtbl wav_byte_stream_plugin_factory_vtbl =
 };
 
 IClassFactory wav_byte_stream_plugin_factory = {&wav_byte_stream_plugin_factory_vtbl};
+
+static HRESULT WINAPI mp3_byte_stream_plugin_factory_CreateInstance(IClassFactory *iface,
+        IUnknown *outer, REFIID riid, void **out)
+{
+    NTSTATUS status;
+
+    if ((status = winedmo_demuxer_check("audio/mp3")) || use_gst_byte_stream_handler())
+    {
+        static const GUID CLSID_GStreamerByteStreamHandler = {0x317df618,0x5e5a,0x468a,{0x9f,0x15,0xd8,0x27,0xa9,0xa0,0x81,0x62}};
+        if (status) WARN("Unsupported demuxer, status %#lx.\n", status);
+        return CoCreateInstance(&CLSID_GStreamerByteStreamHandler, outer, CLSCTX_INPROC_SERVER, riid, out);
+    }
+
+    return byte_stream_plugin_create(outer, riid, out);
+}
+
+static const IClassFactoryVtbl mp3_byte_stream_plugin_factory_vtbl =
+{
+    class_factory_QueryInterface,
+    class_factory_AddRef,
+    class_factory_Release,
+    mp3_byte_stream_plugin_factory_CreateInstance,
+    class_factory_LockServer,
+};
+
+IClassFactory mp3_byte_stream_plugin_factory = {&mp3_byte_stream_plugin_factory_vtbl};

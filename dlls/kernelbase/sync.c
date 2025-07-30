@@ -272,6 +272,38 @@ BOOL WINAPI QueryIdleProcessorCycleTimeEx( USHORT group_id, ULONG *size, ULONG64
 
 
 /***********************************************************************
+ *           ConvertAuxiliaryCounterToPerformanceCounter  (kernelbase.@)
+ */
+HRESULT WINAPI ConvertAuxiliaryCounterToPerformanceCounter( ULONGLONG from, ULONGLONG *to, ULONGLONG *error )
+{
+    NTSTATUS status;
+
+    TRACE( "%#I64x, %p, %p.\n", from, to, error );
+
+    if ((status = NtConvertBetweenAuxiliaryCounterAndPerformanceCounter( 0, &from, to, error )) == STATUS_NOT_SUPPORTED)
+        return E_NOTIMPL;
+
+    return HRESULT_FROM_NT(status);
+}
+
+
+/***********************************************************************
+ *           ConvertAuxiliaryCounterToPerformanceCounter  (kernelbase.@)
+ */
+HRESULT WINAPI ConvertPerformanceCounterToAuxiliaryCounter( ULONGLONG from, ULONGLONG *to, ULONGLONG *error )
+{
+    NTSTATUS status;
+
+    TRACE( "%#I64x, %p, %p.\n", from, to, error );
+
+    if ((status = NtConvertBetweenAuxiliaryCounterAndPerformanceCounter( 1, &from, to, error )) == STATUS_NOT_SUPPORTED)
+        return E_NOTIMPL;
+
+    return HRESULT_FROM_NT(status);
+}
+
+
+/***********************************************************************
  * Waits
  ***********************************************************************/
 
@@ -1043,6 +1075,35 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileMappingW( HANDLE file, LPSECURITY_ATTR
     get_create_object_attributes( &attr, &nameW, sa, name );
 
     status = NtCreateSection( &ret, access, &attr, &size, protect, sec_type, file );
+    if (status == STATUS_OBJECT_NAME_EXISTS)
+        SetLastError( ERROR_ALREADY_EXISTS );
+    else
+        SetLastError( RtlNtStatusToDosError(status) );
+    return ret;
+}
+
+
+/***********************************************************************
+ *             CreateFileMapping2   (kernelbase.@)
+ */
+HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileMapping2( HANDLE file, SECURITY_ATTRIBUTES *sa, ULONG access,
+                                                    ULONG protect, ULONG sec_type, ULONG64 max_size,
+                                                    const WCHAR *name, MEM_EXTENDED_PARAMETER *params,
+                                                    ULONG count )
+{
+    HANDLE ret;
+    NTSTATUS status;
+    LARGE_INTEGER size;
+    UNICODE_STRING nameW;
+    OBJECT_ATTRIBUTES attr;
+
+    if (!sec_type) sec_type = SEC_COMMIT;
+    size.QuadPart = max_size;
+    if (file == INVALID_HANDLE_VALUE) file = 0;
+
+    get_create_object_attributes( &attr, &nameW, sa, name );
+
+    status = NtCreateSectionEx( &ret, access, &attr, &size, protect, sec_type, file, params, count );
     if (status == STATUS_OBJECT_NAME_EXISTS)
         SetLastError( ERROR_ALREADY_EXISTS );
     else

@@ -24,6 +24,8 @@
 #include "winbase.h"
 #include "ntuser.h"
 
+#define MAX_ATOM_LEN  255
+
 #define check_member_( file, line, val, exp, fmt, member )                                         \
     ok_(file, line)( (val).member == (exp).member, "got " #member " " fmt "\n", (val).member )
 #define check_member( val, exp, fmt, member )                                                      \
@@ -120,6 +122,9 @@ static void test_window_props(void)
     ATOM atom;
     HWND hwnd;
     BOOL ret;
+    ULONG i, count;
+    NTSTATUS status;
+    struct ntuser_property_list *props;
 
     hwnd = CreateWindowExA( 0, "static", NULL, WS_POPUP, 0,0,0,0,0,0,0, NULL );
 
@@ -134,11 +139,39 @@ static void test_window_props(void)
     prop = NtUserGetProp( hwnd, UlongToPtr(atom) );
     ok( prop == UlongToHandle(0xdeadbeef), "prop = %p\n", prop );
 
+    props = malloc( 32 * sizeof(*props) );
+    count = 0xdead;
+    status = NtUserBuildPropList( hwnd, 32, NULL, &count );
+    ok( status == STATUS_INVALID_PARAMETER || status == STATUS_INVALID_HANDLE,
+        "NtUserBuildPropList failed %lx\n", status );
+    ok( count == 0xdead, "wrong count %lu\n", count );
+
+    status = NtUserBuildPropList( hwnd, 32, props, NULL );
+    ok( status == STATUS_INVALID_PARAMETER || status == STATUS_INVALID_HANDLE,
+        "NtUserBuildPropList failed %lx\n", status );
+    ok( count == 0xdead, "wrong count %lu\n", count );
+
+    status = NtUserBuildPropList( hwnd, 32, props, &count );
+    ok( !status, "NtUserBuildPropList failed %lx\n", status );
+    ok( count, "wrong count %lu\n", count );
+    for (i = 0; i < count; i++)
+    {
+        if ((UINT)props[i].data != 0xdeadbeef) continue;
+        ok( props[i].atom == atom, "prop = %x / %x\n", props[i].atom, atom );
+        break;
+    }
+    ok( i < count, "property not found\n" );
+
     prop = NtUserRemoveProp( hwnd, UlongToPtr(atom) );
     ok( prop == UlongToHandle(0xdeadbeef), "prop = %p\n", prop );
 
     prop = GetPropW(hwnd, L"test");
     ok(!prop, "prop = %p\n", prop);
+
+    status = NtUserBuildPropList( hwnd, 32, props, &count );
+    ok( !status, "NtUserBuildPropList failed %lx\n", status );
+    for (i = 0; i < count; i++) ok( props[i].atom != atom, "property still exists\n" );
+    free( props );
 
     GlobalDeleteAtom( atom );
     DestroyWindow( hwnd );
@@ -146,12 +179,91 @@ static void test_window_props(void)
 
 static void test_class(void)
 {
+    struct pinned_atom
+    {
+        ATOM atom;
+        const WCHAR *name;
+        BOOL class;
+    };
+    static const struct pinned_atom user_atoms[] =
+    {
+        { 0xc001, L"USER32" },
+        { 0xc002, L"ObjectLink" },
+        { 0xc003, L"OwnerLink" },
+        { 0xc004, L"Native" },
+        { 0xc005, L"Binary" },
+        { 0xc006, L"FileName" },
+        { 0xc007, L"FileNameW" },
+        { 0xc008, L"NetworkName" },
+        { 0xc009, L"DataObject" },
+        { 0xc00a, L"Embedded Object" },
+        { 0xc00b, L"Embed Source" },
+        { 0xc00c, L"Custom Link Source" },
+        { 0xc00d, L"Link Source" },
+        { 0xc00e, L"Object Descriptor" },
+        { 0xc00f, L"Link Source Descriptor" },
+        { 0xc010, L"OleDraw" },
+        { 0xc011, L"PBrush" },
+        { 0xc012, L"MSDraw" },
+        { 0xc013, L"Ole Private Data" },
+        { 0xc014, L"Screen Picture" },
+        { 0xc015, L"OleClipboardPersistOnFlush" },
+        { 0xc016, L"MoreOlePrivateData" },
+        { 0xc017, L"Button", TRUE },
+        { 0xc018, L"Edit", TRUE },
+        { 0xc019, L"Static", TRUE },
+        { 0xc01a, L"ListBox", TRUE },
+        { 0xc01b, L"ScrollBar", TRUE },
+        { 0xc01c, L"ComboBox", TRUE },
+    };
+    static const struct pinned_atom global_atoms[] =
+    {
+        { 0xc001, L"StdExit" },
+        { 0xc002, L"StdNewDocument" },
+        { 0xc003, L"StdOpenDocument" },
+        { 0xc004, L"StdEditDocument" },
+        { 0xc005, L"StdNewfromTemplate" },
+        { 0xc006, L"StdCloseDocument" },
+        { 0xc007, L"StdShowItem" },
+        { 0xc008, L"StdDoVerbItem" },
+        { 0xc009, L"System" },
+        { 0xc00a, L"OLEsystem" },
+        { 0xc00b, L"StdDocumentName" },
+        { 0xc00c, L"Protocols" },
+        { 0xc00d, L"Topics" },
+        { 0xc00e, L"Formats" },
+        { 0xc00f, L"Status" },
+        { 0xc010, L"EditEnvItems" },
+        { 0xc011, L"True" },
+        { 0xc012, L"False" },
+        { 0xc013, L"Change" },
+        { 0xc014, L"Save" },
+        { 0xc015, L"Close" },
+        { 0xc016, L"MSDraw" },
+        { 0xc017, L"CC32SubclassInfo" },
+    };
+    char DECLSPEC_ALIGN(8) abi_buf[sizeof(ATOM_BASIC_INFORMATION) + MAX_ATOM_LEN * sizeof(WCHAR)];
+    ATOM_BASIC_INFORMATION *abi = (ATOM_BASIC_INFORMATION *)abi_buf;
+    HWINSTA old_winstation, winstation;
     UNICODE_STRING name;
+    ATOM class, global;
+    NTSTATUS status;
     WCHAR buf[64];
     WNDCLASSW cls;
-    ATOM class;
+    HANDLE prop;
     HWND hwnd;
     ULONG ret;
+
+    status = NtQueryInformationAtom( 0xc000, AtomBasicInformation, abi, sizeof(abi_buf), NULL );
+    ok( status == STATUS_INVALID_HANDLE, "NtQueryInformationAtom returned %#lx\n", status );
+
+    memset( buf, 0xcc, sizeof(buf) );
+    name.Buffer = buf;
+    name.Length = 0xdead;
+    name.MaximumLength = sizeof(buf);
+    ret = NtUserGetAtomName( 0xc000, &name );
+    ok( !ret && GetLastError() == ERROR_INVALID_HANDLE,
+        "NtUserGetAtomName returned %lx %lu\n", ret, GetLastError() );
 
     memset( &cls, 0, sizeof(cls) );
     cls.style         = CS_HREDRAW | CS_VREDRAW;
@@ -166,6 +278,10 @@ static void test_class(void)
 
     hwnd = CreateWindowW( L"test", L"test name", WS_OVERLAPPEDWINDOW | WS_HSCROLL | WS_VSCROLL,
                           CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, 0, 0, NULL, 0 );
+
+    status = NtQueryInformationAtom( class, AtomBasicInformation, abi, sizeof(abi_buf), NULL );
+    ok( status == STATUS_INVALID_HANDLE || !status, "NtQueryInformationAtom returned %#lx\n", status );
+    if (!status) ok( wcscmp( abi->Name, L"test" ), "buf = %s\n", debugstr_w(abi->Name) );
 
     memset( buf, 0xcc, sizeof(buf) );
     name.Buffer = buf;
@@ -223,6 +339,38 @@ static void test_class(void)
     ok( !ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
         "NtUserGetClassName returned %lx %lu\n", ret, GetLastError() );
 
+    SetPropW( hwnd, L"WineTestProp", (void *)0xdeadbeef );
+
+    status = NtFindAtom( L"WineTestProp", sizeof(L"WineTestProp") - sizeof(WCHAR), &global );
+    ok( !status, "NtFindAtom returned %#lx\n", status );
+
+    for (ATOM atom = 0xc000; atom != 0; atom++)
+    {
+        memset( name.Buffer, 0xcc, name.MaximumLength );
+        ret = NtUserGetAtomName( atom, &name );
+        ok( wcscmp( buf, L"WineTestProp" ), "buf = %s\n", debugstr_w(buf) );
+    }
+
+    prop = NtUserGetProp( hwnd, L"WineTestProp" );
+    todo_wine ok( prop == NULL, "NtUserGetProp returned %#lx\n", status );
+    status = NtAddAtom( L"WineTestProp", sizeof(L"WineTestProp"), &global );
+    ok( !status, "NtAddAtom returned %#lx\n", status );
+    prop = NtUserGetProp( hwnd, MAKEINTRESOURCEW(global) );
+    todo_wine ok( prop == (void *)0xdeadbeef, "NtUserGetProp returned %#lx\n", status );
+    status = NtDeleteAtom( global );
+    ok( !status, "NtDeleteAtom returned %#lx\n", status );
+
+    cls.lpszClassName = L"WineTestProp";
+    class = RegisterClassW( &cls );
+    ok( class != 0, "RegisterClassW returned %#x\n", class );
+    prop = NtUserGetProp( hwnd, MAKEINTRESOURCEW(class) );
+    ok( prop == NULL, "NtUserGetProp returned %#lx\n", status );
+    ret = UnregisterClassW( L"WineTestProp", GetModuleHandleW( NULL ) );
+    ok( ret, "UnregisterClassW failed: %lu\n", GetLastError() );
+    cls.lpszClassName = L"test";
+
+    RemovePropW( hwnd, L"WineTestProp" );
+
     DestroyWindow( hwnd );
 
     ret = UnregisterClassW( L"test", GetModuleHandleW(NULL) );
@@ -237,6 +385,188 @@ static void test_class(void)
         "NtUserGetAtomName returned %lx %lu\n", ret, GetLastError() );
     ok( buf[0] == 0xcccc, "buf = %s\n", debugstr_w(buf) );
 
+    cls.lpszClassName = L"#1";
+    class = RegisterClassW( &cls );
+    ok( class == 1, "RegisterClassW failed: %lu\n", GetLastError() );
+
+    hwnd = CreateWindowW( MAKEINTRESOURCEW(1), NULL, WS_OVERLAPPEDWINDOW | WS_HSCROLL | WS_VSCROLL,
+                          CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, 0, 0, NULL, 0 );
+    ok( !!hwnd, "CreateWindowW failed: %lu\n", GetLastError() );
+
+    memset( buf, 0xcc, sizeof(buf) );
+    name.Buffer = buf;
+    name.Length = 0xdead;
+    name.MaximumLength = 8;
+    ret = NtUserGetClassName( hwnd, FALSE, &name );
+    ok( ret == 2, "NtUserGetClassName returned %lu\n", ret );
+    ok( name.Length == 0xdead, "Length = %u\n", name.Length );
+    ok( name.MaximumLength == 8, "MaximumLength = %u\n", name.MaximumLength );
+    ok( !wcscmp( buf, L"#1" ), "buf = %s\n", debugstr_w(buf) );
+
+    DestroyWindow( hwnd );
+
+    ret = UnregisterClassW( L"#1", GetModuleHandleW(NULL) );
+    ok( ret, "UnregisterClassW failed: %lu\n", GetLastError() );
+
+    for (int i = 0; i < ARRAY_SIZE(global_atoms); i++)
+    {
+        winetest_push_context( "%#x: %s", global_atoms[i].atom, debugstr_w(global_atoms[i].name) );
+
+        status = NtQueryInformationAtom( global_atoms[i].atom, AtomBasicInformation, abi, sizeof(abi_buf), NULL );
+        ok( !status, "NtQueryInformationAtom returned %#lx\n", status );
+        ok( !wcscmp( abi->Name, global_atoms[i].name ), "buf = %s\n", debugstr_w(abi->Name) );
+
+        memset( buf, 0xcc, sizeof(buf) );
+        name.Buffer = buf;
+        name.Length = 0xdead;
+        name.MaximumLength = sizeof(buf);
+        ret = NtUserGetAtomName( global_atoms[i].atom, &name );
+        ok( ret != wcslen( global_atoms[i].name ), "NtUserGetAtomName returned %lu\n", ret );
+        ok( name.Length == 0xdead, "Length = %u\n", name.Length );
+        ok( name.MaximumLength == sizeof(buf), "MaximumLength = %u\n", name.MaximumLength );
+        ok( wcscmp( buf, global_atoms[i].name ), "buf = %s\n", debugstr_w(buf) );
+
+        winetest_pop_context();
+    }
+
+    for (int i = 0; i < ARRAY_SIZE(user_atoms); i++)
+    {
+        winetest_push_context( "%#x: %s", user_atoms[i].atom, debugstr_w(user_atoms[i].name) );
+
+        status = NtQueryInformationAtom( user_atoms[i].atom, AtomBasicInformation, abi, sizeof(abi_buf), NULL );
+        ok( wcscmp( abi->Name, user_atoms[i].name ), "buf = %s\n", debugstr_w(abi->Name) );
+
+        memset( buf, 0xcc, sizeof(buf) );
+        name.Buffer = buf;
+        name.Length = 0xdead;
+        name.MaximumLength = sizeof(buf);
+        ret = NtUserGetAtomName( user_atoms[i].atom, &name );
+        if (!wcscmp( buf, L"AdditionalFGBoostProp" ))
+        {
+            /* W11 has an extra 0xc017 atom instead of Button, and shifts the predefined classes */
+            win_skip( "Skipping user atoms check on W11\n" );
+            break;
+        }
+        ok( ret == wcslen( user_atoms[i].name ), "NtUserGetAtomName returned %lu\n", ret );
+        ok( name.Length == 0xdead, "Length = %u\n", name.Length );
+        ok( name.MaximumLength == sizeof(buf), "MaximumLength = %u\n", name.MaximumLength );
+        ok( !wcscmp( buf, user_atoms[i].name ), "buf = %s\n", debugstr_w(buf) );
+
+        SetLastError( 0xdeadbeef );
+        hwnd = CreateWindowW( MAKEINTRESOURCEW(user_atoms[i].atom), NULL, WS_OVERLAPPEDWINDOW | WS_HSCROLL | WS_VSCROLL,
+                              CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, 0, 0, NULL, 0 );
+        if (!user_atoms[i].class)
+        {
+            ok( !hwnd, "CreateWindowW succeeded\n" );
+            todo_wine ok( GetLastError() == ERROR_CANNOT_FIND_WND_CLASS, "got error %lu\n", GetLastError() );
+        }
+        else
+        {
+            ok( !!hwnd, "CreateWindowW failed: %lu\n", GetLastError() );
+            DestroyWindow( hwnd );
+        }
+
+        winetest_pop_context();
+    }
+
+    status = NtAddAtom( L"WineTestGlobal", sizeof(L"WineTestGlobal"), &global );
+    ok( !status, "NtAddAtom returned %#lx\n", status );
+    cls.lpszClassName = L"WineTestClass";
+    class = RegisterClassW( &cls );
+    ok( class, "RegisterClassW failed: %lu\n", GetLastError() );
+
+    old_winstation = GetProcessWindowStation();
+    winstation = CreateWindowStationW( L"WineTest", 0, WINSTA_ALL_ACCESS, NULL );
+    ok( !!winstation && winstation != old_winstation, "CreateWindowStationW failed, error %#lx.\n", GetLastError() );
+    ret = SetProcessWindowStation( winstation );
+    ok( ret, "SetProcessWindowStation failed, error %#lx.\n", GetLastError() );
+    ok( winstation == GetProcessWindowStation(), "Expected %p, got %p.\n", GetProcessWindowStation(), winstation );
+
+    status = NtQueryInformationAtom( global, AtomBasicInformation, abi, sizeof(abi_buf), NULL );
+    ok( !status, "NtQueryInformationAtom returned %#lx\n", status );
+    ok( !wcscmp( abi->Name, L"WineTestGlobal" ), "buf = %s\n", debugstr_w(abi->Name) );
+
+    memset( buf, 0xcc, sizeof(buf) );
+    name.Buffer = buf;
+    name.Length = 0xdead;
+    name.MaximumLength = sizeof(buf);
+    ret = NtUserGetAtomName( class, &name );
+    ok( ret == wcslen( L"WineTestClass" ), "NtUserGetAtomName returned %lu\n", ret );
+    ok( name.Length == 0xdead, "Length = %u\n", name.Length );
+    ok( name.MaximumLength == sizeof(buf), "MaximumLength = %u\n", name.MaximumLength );
+    ok( !wcscmp( buf, L"WineTestClass" ), "buf = %s\n", debugstr_w(buf) );
+
+    ret = SetProcessWindowStation( old_winstation );
+    ok( ret, "SetProcessWindowStation failed, error %#lx.\n", GetLastError() );
+    ok( old_winstation == GetProcessWindowStation(), "Expected %p, got %p.\n", GetProcessWindowStation(), old_winstation );
+
+    status = NtDeleteAtom( global );
+    ok( !status, "NtDeleteAtom returned %#lx\n", status );
+    ret = UnregisterClassW( MAKEINTRESOURCEW(class), GetModuleHandleW( NULL ) );
+    ok( ret, "UnregisterClassW failed: %lu\n", GetLastError() );
+}
+
+static LRESULT CALLBACK test_adjust_window_style_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam )
+{
+    ok( 0, "unexpected msg %#x\n", msg );
+    return DefWindowProcW( hwnd, msg, wparam, lparam );
+}
+
+static void test_NtUserAlterWindowStyle(void)
+{
+    UINT style, expect_style;
+    ULONG_PTR ret, old_proc;
+    HWND hwnd;
+
+    ret = NtUserAlterWindowStyle( 0, 0, 0 );
+    ok( ret == 0, "got %#Ix\n", ret );
+
+    expect_style = WS_OVERLAPPEDWINDOW | WS_HSCROLL | WS_VSCROLL | WS_CLIPSIBLINGS;
+    hwnd = CreateWindowW( L"static", L"static", expect_style, CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, 0, 0, NULL, 0 );
+    flush_events();
+
+    old_proc = SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (ULONG_PTR)test_adjust_window_style_proc );
+    style = GetWindowLongW( hwnd, GWL_STYLE );
+    ok( style == expect_style, "got %#x\n", style );
+
+    ret = NtUserAlterWindowStyle( hwnd, 0, 0 );
+    ok( ret == 1, "got %#Ix\n", ret );
+    style = GetWindowLongW( hwnd, GWL_STYLE );
+    ok( style == expect_style, "got %#x\n", style );
+
+    ret = NtUserAlterWindowStyle( hwnd, -1, -1 );
+    ok( ret == 1, "got %#Ix\n", ret );
+    style = GetWindowLongW( hwnd, GWL_STYLE );
+    ok( style == (expect_style | 0x23f), "got %#x\n", style );
+
+    ret = NtUserAlterWindowStyle( hwnd, -1, 0 );
+    ok( ret == 1, "got %#Ix\n", ret );
+    style = GetWindowLongW( hwnd, GWL_STYLE );
+    todo_wine ok( style == (expect_style & ~(WS_VSCROLL | WS_HSCROLL)), "got %#x\n", style );
+
+    ret = NtUserAlterWindowStyle( hwnd, 0, -1 );
+    ok( ret == 1, "got %#Ix\n", ret );
+    style = GetWindowLongW( hwnd, GWL_STYLE );
+    todo_wine ok( style == (expect_style & ~(WS_VSCROLL | WS_HSCROLL)), "got %#x\n", style );
+
+    ret = NtUserAlterWindowStyle( hwnd, -1, 0xe1e1e1e1 );
+    ok( ret == 1, "got %#Ix\n", ret );
+    style = GetWindowLongW( hwnd, GWL_STYLE );
+    ok( style == ((expect_style & ~WS_HSCROLL) | 0x21), "got %#x\n", style );
+
+    ret = NtUserAlterWindowStyle( hwnd, -1, 0 );
+    ok( ret == 1, "got %#Ix\n", ret );
+    style = GetWindowLongW( hwnd, GWL_STYLE );
+    todo_wine ok( style == (expect_style & ~(WS_VSCROLL | WS_HSCROLL)), "got %#x\n", style );
+
+    ret = NtUserAlterWindowStyle( hwnd, 0x20, 0xe1e1e1e1 );
+    ok( ret == 1, "got %#Ix\n", ret );
+    style = GetWindowLongW( hwnd, GWL_STYLE );
+    todo_wine ok( style == ((expect_style & ~(WS_VSCROLL | WS_HSCROLL)) | 0x20), "got %#x\n", style );
+
+    flush_events();
+    SetWindowLongPtrW( hwnd, GWLP_WNDPROC, old_proc );
+    DestroyWindow( hwnd );
 }
 
 static void test_NtUserCreateInputContext(void)
@@ -465,70 +795,408 @@ static BOOL WINAPI count_win( HWND hwnd, LPARAM lparam )
 
 static void test_NtUserBuildHwndList(void)
 {
-    ULONG size, desktop_windows_cnt;
-    HWND buf[512], hwnd;
+    ULONG i, size, count, desktop_windows_cnt;
+    HWND buf[512], hwnd, msg, msg_window, child, child2, grandchild;
     NTSTATUS status;
+    HDESK desktop;
+    BOOL ret;
 
-    size = 0;
-    status = NtUserBuildHwndList( 0, 0, 0, 0, GetCurrentThreadId(), ARRAYSIZE(buf), buf, &size );
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, 0, FALSE, FALSE, GetCurrentThreadId(), ARRAYSIZE(buf), buf, &size );
     ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
     ok( size == 1, "size = %lu\n", size );
-    ok( buf[0] == HWND_BOTTOM, "buf[0] = %p\n", buf[0] );
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
 
-    hwnd = CreateWindowExA( 0, "static", NULL, WS_POPUP, 0,0,0,0,GetDesktopWindow(),0,0, NULL );
+    msg = CreateWindowExA( 0, "static", "", WS_POPUP, 0,0,0,0,HWND_MESSAGE,0,0, NULL );
+    msg_window = GetAncestor( msg, GA_PARENT );
 
-    size = 0;
-    status = NtUserBuildHwndList( 0, 0, 0, 0, GetCurrentThreadId(), ARRAYSIZE(buf), buf, &size );
+    hwnd = CreateWindowExA( 0, "static", "test static", WS_POPUP, 0,0,0,0,GetDesktopWindow(),0,0, NULL );
+    child = CreateWindowExA( 0, "static", "child static", WS_CHILD, 0,0,0,0,hwnd,0,0, NULL );
+    child2 = CreateWindowExA( 0, "static", "child2 static", WS_CHILD, 0,0,0,0,hwnd,0,0, NULL );
+    grandchild = CreateWindowExA( 0, "static", "grandchild static", WS_CHILD, 0,0,0,0,child,0,0, NULL );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, 0, FALSE, FALSE, GetCurrentThreadId(), ARRAYSIZE(buf), buf, &size );
     ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
     ok( size == 3, "size = %lu\n", size );
     ok( buf[0] == hwnd, "buf[0] = %p\n", buf[0] );
-    ok( buf[2] == HWND_BOTTOM, "buf[0] = %p\n", buf[2] );
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
 
-    size = 0;
-    status = NtUserBuildHwndList( 0, 0, 0, 0, GetCurrentThreadId(), 3, buf, &size );
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, 0, FALSE, FALSE, GetCurrentThreadId(), 3, buf, &size );
     ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
     ok( size == 3, "size = %lu\n", size );
 
-    size = 0;
-    status = NtUserBuildHwndList( 0, 0, 0, 0, GetCurrentThreadId(), 2, buf, &size );
+    size = 0xdeadbeef;
+    memset( buf, 0xcc, sizeof(buf) );
+    status = NtUserBuildHwndList( 0, 0, FALSE, FALSE, GetCurrentThreadId(), 2, buf, &size );
     ok( status == STATUS_BUFFER_TOO_SMALL, "NtUserBuildHwndList failed: %#lx\n", status );
     ok( size == 3, "size = %lu\n", size );
+    ok( HandleToUlong(buf[0]) == 0xcccccccc, "buf[0] initialized\n" );
 
-    size = 0;
-    status = NtUserBuildHwndList( 0, 0, 0, 0, GetCurrentThreadId(), 1, buf, &size );
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, 0, FALSE, FALSE, GetCurrentThreadId(), 1, buf, &size );
     ok( status == STATUS_BUFFER_TOO_SMALL, "NtUserBuildHwndList failed: %#lx\n", status );
     ok( size == 3, "size = %lu\n", size );
 
     desktop_windows_cnt = 0;
     EnumDesktopWindows( 0, count_win, (LPARAM)&desktop_windows_cnt );
 
-    size = 0;
-    status = NtUserBuildHwndList( 0, 0, 0, 1, 0, ARRAYSIZE(buf), buf, &size );
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, 0, FALSE, TRUE, 0, ARRAYSIZE(buf), buf, &size );
     ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
     ok( size == desktop_windows_cnt + 1, "size = %lu, expected %lu\n", size, desktop_windows_cnt + 1 );
+
+    SetLastError( 0xdeadbeef );
+    ret = EnumDesktopWindows( UlongToHandle(0xdeadbeef), count_win, (LPARAM)&desktop_windows_cnt );
+    ok( !ret && GetLastError() == ERROR_INVALID_HANDLE, "wrong result %u %lu\n", ret, GetLastError() );
 
     desktop_windows_cnt = 0;
     EnumDesktopWindows( GetThreadDesktop( GetCurrentThreadId() ), count_win, (LPARAM)&desktop_windows_cnt );
 
-    size = 0;
-    status = NtUserBuildHwndList( GetThreadDesktop(GetCurrentThreadId()), 0, 0, 1, 0,
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( GetThreadDesktop(GetCurrentThreadId()), 0, FALSE, TRUE, 0,
                                   ARRAYSIZE(buf), buf, &size );
     ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
     ok( size == desktop_windows_cnt + 1, "size = %lu, expected %lu\n", size, desktop_windows_cnt + 1 );
+    for (i = 0; i < size; i++) if (buf[i] == msg_window) break;
+    ok( i == size, "message window was enumerated\n" );
 
-    size = 0;
-    status = NtUserBuildHwndList( GetThreadDesktop(GetCurrentThreadId()), 0, 0, 0, 0,
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( GetThreadDesktop(GetCurrentThreadId()), 0, FALSE, FALSE, 0,
                                   ARRAYSIZE(buf), buf, &size );
     ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
     todo_wine
     ok( size > desktop_windows_cnt + 1, "size = %lu, expected %lu\n", size, desktop_windows_cnt + 1 );
 
     size = 0xdeadbeef;
-    status = NtUserBuildHwndList( UlongToHandle(0xdeadbeef), 0, 0, 0, 0,
+    status = NtUserBuildHwndList( GetThreadDesktop(GetCurrentThreadId()), hwnd, FALSE, TRUE, 0,
+                                  ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == desktop_windows_cnt + 1, "size = %lu, expected %lu\n", size, desktop_windows_cnt + 1 );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( GetThreadDesktop(GetCurrentThreadId()), 0, TRUE, TRUE, 0,
+                                  ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 1, "size = %lu\n", size );
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
+
+    desktop = OpenDesktopW( L"Default", 0, FALSE, 0 );
+    ok( desktop != 0, "OpenDesktopW failed %lu\n", GetLastError() );
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( desktop, 0, FALSE, TRUE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == desktop_windows_cnt + 1, "size = %lu, expected %lu\n", size, desktop_windows_cnt + 1 );
+    CloseHandle( desktop );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, 0, TRUE, TRUE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == desktop_windows_cnt + 1, "size = %lu, expected %lu\n", size, desktop_windows_cnt + 1 );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( UlongToHandle(0xdeadbeef), 0, FALSE, FALSE, 0,
                                   ARRAYSIZE(buf), buf, &size );
     ok( status == STATUS_INVALID_HANDLE, "NtUserBuildHwndList failed: %#lx\n", status );
     ok( size == 0xdeadbeef, "size = %lu\n", size );
 
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, GetDesktopWindow(), TRUE, FALSE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size > 4, "size = %lu\n", size );
+    for (i = 0; i < size; i++)
+    {
+        if (buf[i] != hwnd) continue;
+        ok( buf[i] == hwnd, "buf[i] = %p / %p\n", buf[i], hwnd );
+        ok( buf[i + 1] == child, "buf[i + 1] = %p / %p\n", buf[i + 1], child );
+        ok( buf[i + 2] == grandchild, "buf[i + 2] = %p / %p\n", buf[i + 2], grandchild );
+        ok( buf[i + 3] == child2, "buf[i + 3] = %p / %p\n", buf[i + 3], child2 );
+        break;
+    }
+    ok( i < size, "window not found\n" );
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, 0, FALSE, FALSE, GetCurrentThreadId(), ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size >= 2, "size = %lu\n", size );
+    ok( buf[0] == hwnd, "buf[0] = %p / %p\n", buf[0], hwnd );
+    ok( buf[1] != child, "buf[1] = %p\n", buf[1] );
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, hwnd, TRUE, FALSE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 4, "size = %lu\n", size );
+    ok( buf[0] == child, "buf[0] = %p / %p\n", buf[0], child );
+    ok( buf[1] == grandchild, "buf[1] = %p / %p\n", buf[1], grandchild );
+    ok( buf[2] == child2, "buf[2] = %p / %p\n", buf[2], child2 );
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, child, FALSE, FALSE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 3, "size = %lu\n", size );
+    ok( buf[0] == child, "buf[0] = %p / %p\n", buf[0], child );
+    ok( buf[1] == child2, "buf[1] = %p / %p\n", buf[1], child2 );
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, grandchild, FALSE, FALSE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 2, "size = %lu\n", size );
+    ok( buf[0] == grandchild, "buf[0] = %p / %p\n", buf[0], grandchild );
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, grandchild, TRUE, FALSE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 1, "size = %lu\n", size );
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, hwnd, FALSE, FALSE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size > 2, "size = %lu\n", size );
+    ok( buf[0] == hwnd, "buf[0] = %p / %p\n", buf[0], hwnd );
+    /* ... followed by other siblings */
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, hwnd, FALSE, FALSE, GetCurrentThreadId(), ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 2 || size == 3, "size = %lu\n", size );
+    ok( buf[0] == hwnd, "buf[0] = %p / %p\n", buf[0], hwnd );
+    /* ... possibly followed by IME window */
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, GetDesktopWindow(), FALSE, FALSE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size > 2, "size = %lu\n", size );
+    ok( buf[0] == GetDesktopWindow(), "buf[0] = %p / %p\n", buf[0], GetDesktopWindow() );
+    /* ... followed by desktop window siblings */
+    for (i = 0; i < size; i++) if (buf[i] == msg_window) break;
+    ok( i < size, "message window was not enumerated\n" );
+    count = size - i;
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, msg_window, FALSE, FALSE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == count, "size = %lu / %lu\n", size, count );
+    ok( buf[0] == msg_window, "buf[0] = %p / %p\n", buf[0], msg_window );
+    for (i = 0; i < size; i++) if (buf[i] == GetDesktopWindow()) break;
+    ok( i == size, "desktop window was enumerated\n" );
+    /* ... followed by msg window siblings */
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, GetDesktopWindow(), TRUE, FALSE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    /* includes all desktop window children */
+    ok( size > desktop_windows_cnt + 1, "size = %lu, expected %lu\n", size, desktop_windows_cnt + 1 );
+    for (i = 0; i < size; i++)
+    {
+        ok( buf[i] != GetDesktopWindow(), "desktop window enumerated\n" );
+        ok( buf[i] != msg_window, "message window enumerated\n" );
+    }
+    for (i = 0; i < size; i++) if (buf[i] == hwnd) break;
+    ok( i < size, "window was not enumerated\n" );
+    for (i = 0; i < size; i++) if (buf[i] == child) break;
+    ok( i < size, "child window was not enumerated\n" );
+    for (i = 0; i < size; i++) if (buf[i] == grandchild) break;
+    ok( i < size, "grandchild window was not enumerated\n" );
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, msg_window, TRUE, FALSE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( !status, "NtUserBuildHwndList failed: %#lx\n", status );
+    /* includes all HWND_MESSAGE windows */
+    ok( size > 1, "size = %lu\n", size );
+    for (i = 0; i < size; i++)
+    {
+        ok( buf[i] != GetDesktopWindow(), "desktop window enumerated\n" );
+        ok( buf[i] != msg_window, "message window enumerated\n" );
+        ok( buf[i] != hwnd, "window enumerated\n" );
+        ok( buf[i] != child, "child window enumerated\n" );
+        ok( buf[i] != grandchild, "grandchild window enumerated\n" );
+    }
+    ok( buf[size - 1] == HWND_BOTTOM, "buf[size - 1] = %p\n", buf[size - 1] );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, (HWND)0xdeadbeef, FALSE, FALSE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( status == STATUS_INVALID_HANDLE, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 0xdeadbeef, "size = %lu\n", size );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( GetThreadDesktop(GetCurrentThreadId()), (HWND)0xdeadbeef,
+                                  FALSE, FALSE, 0, ARRAYSIZE(buf), buf, &size );
+    ok( status == STATUS_INVALID_HANDLE, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 0xdeadbeef, "size = %lu\n", size );
+
+    size = 0xdeadbeef;
+    status = NtUserBuildHwndList( 0, 0, FALSE, FALSE, 0xdeadbeef, ARRAYSIZE(buf), buf, &size );
+    ok( status == STATUS_INVALID_HANDLE, "NtUserBuildHwndList failed: %#lx\n", status );
+    ok( size == 0xdeadbeef, "size = %lu\n", size );
+
+    DestroyWindow( hwnd );
+    DestroyWindow( msg );
+}
+
+static BOOL CALLBACK enum_names( LPWSTR name, LPARAM lp )
+{
+    struct ntuser_name_list *buffer = (struct ntuser_name_list *)lp;
+    WCHAR *p;
+    UINT i;
+
+    for (i = 0, p = buffer->strings; i < buffer->count; i++, p += wcslen(p) + 1)
+        if (!wcscmp( p, name )) break;
+    ok( i < buffer->count, "string %s not found\n", debugstr_w(name) );
+    return TRUE;
+}
+
+static void test_NtUserBuildNameList(void)
+{
+    struct ntuser_name_list *buffer;
+    WCHAR *p;
+    NTSTATUS status;
+    ULONG i, count, ret_size, expect, size = offsetof( struct ntuser_name_list, strings[1024] );
+
+    buffer = malloc( size );
+    memset( buffer, 0xcc, size );
+    status = NtUserBuildNameList( 0, size, buffer, &ret_size );
+    ok( !status, "NtUserBuildNameList failed %lx\n", status );
+    count = buffer->count;
+    for (i = 0, p = buffer->strings; i < count; i++)
+    {
+        trace( "%lu: %s\n", i, debugstr_w(p) );
+        p += wcslen(p) + 1;
+    }
+    ok( *p == 0, "missing final null\n" );
+    ok( (char *)(p + 1) == (char *)buffer + buffer->size, "wrong size %lx / %lx\n",
+        (ULONG)((char *)(p + 1) - (char *)buffer), buffer->size );
+    ok( ret_size == buffer->size, "wrong ret size %lx / %lx\n", ret_size, buffer->size );
+
+    EnumWindowStationsW( enum_names, (LPARAM)buffer );
+
+    memset( buffer, 0xcc, size );
+    status = NtUserBuildNameList( 0, ret_size - sizeof(WCHAR), buffer, &ret_size );
+    ok( status == STATUS_BUFFER_TOO_SMALL, "NtUserBuildNameList failed %lx\n", status );
+    p = buffer->strings;
+    while (*p) p += wcslen(p) + 1;
+    expect = (char *)(p + 1) - (char *)buffer;
+    ok( buffer->size == expect, "wrong size %lx / %lx\n", buffer->size, expect );
+    ok( buffer->count == count, "wrong count %lx / %lx\n", buffer->count, count );
+    ok( ret_size > expect, "wrong size %lx / %lx\n", ret_size, expect );
+
+    memset( buffer, 0xcc, size );
+    ret_size = 0xdead;
+    status = NtUserBuildNameList( 0, offsetof( struct ntuser_name_list, strings[3] ), buffer, &ret_size );
+    ok( status == STATUS_BUFFER_TOO_SMALL, "NtUserBuildNameList failed %lx\n", status );
+    ok( buffer->size == offsetof( struct ntuser_name_list, strings[1] ), "wrong size %lx\n", buffer->size );
+    ok( buffer->count == count, "wrong count %lx / %lx\n", buffer->count, count );
+    ok( buffer->strings[0] == 0, "missing final null\n" );
+    ok( ret_size > offsetof( struct ntuser_name_list, strings[1] ), "wrong size %lx\n", ret_size );
+
+    memset( buffer, 0xcc, size );
+    ret_size = 0xdead;
+    status = NtUserBuildNameList( 0, offsetof( struct ntuser_name_list, strings[1] ), buffer, &ret_size );
+    ok( status == STATUS_INVALID_HANDLE, "NtUserBuildNameList failed %lx\n", status );
+    ok( buffer->size == 0xcccccccc, "wrong size %lx\n", buffer->size );
+    ok( buffer->count == 0xcccccccc, "wrong count %lx\n", buffer->count );
+    ok( ret_size == 0xdead, "wrong size %lx\n", ret_size );
+
+    memset( buffer, 0xcc, size );
+    ret_size = 0xdead;
+    status = NtUserBuildNameList( 0, offsetof( struct ntuser_name_list, strings ) - 1, buffer, &ret_size );
+    ok( status == STATUS_INVALID_HANDLE, "NtUserBuildNameList failed %lx\n", status );
+    ok( buffer->size == 0xcccccccc, "wrong size %lx\n", buffer->size );
+    ok( buffer->count == 0xcccccccc, "wrong count %lx\n", buffer->count );
+    ok( ret_size == 0xdead, "wrong size %lx\n", ret_size );
+
+    memset( buffer, 0xcc, size );
+    ret_size = 0xdead;
+    status = NtUserBuildNameList( 0, 0, NULL, &ret_size );
+    ok( status == STATUS_INVALID_HANDLE, "NtUserBuildNameList failed %lx\n", status );
+    ok( buffer->size == 0xcccccccc, "wrong size %lx\n", buffer->size );
+    ok( buffer->count == 0xcccccccc, "wrong count %lx\n", buffer->count );
+    ok( ret_size == 0xdead, "wrong size %lx\n", ret_size );
+
+    status = NtUserBuildNameList( (HANDLE)0xdeadbeef, 1024, buffer, &ret_size );
+    ok( status == STATUS_INVALID_HANDLE, "NtUserBuildNameList failed %lx\n", status );
+
+    memset( buffer, 0xcc, size );
+    status = NtUserBuildNameList( GetProcessWindowStation(), size, buffer, &ret_size );
+    ok( !status, "NtUserBuildNameList failed %lx\n", status );
+    for (i = 0, p = buffer->strings; i < buffer->count; i++)
+    {
+        trace( "%lu: %s\n", i, debugstr_w(p) );
+        p += wcslen(p) + 1;
+    }
+    ok( *p == 0, "missing final null\n" );
+    ok( (char *)(p + 1) == (char *)buffer + buffer->size, "wrong size %lx / %lx\n",
+        (ULONG)((char *)(p + 1) - (char *)buffer), buffer->size );
+    ok( ret_size == buffer->size, "wrong ret size %lx / %lx\n", ret_size, buffer->size );
+
+    EnumDesktopsW( GetProcessWindowStation(), enum_names, (LPARAM)buffer );
+
+    free( buffer );
+}
+
+static void test_NtUserQueryWindow(void)
+{
+    UINT i;
+    HANDLE ret;
+    HWND hwnd  = CreateWindowExA( 0, "static", NULL, WS_POPUP|WS_VISIBLE, 0,0,0,0,GetDesktopWindow(),0,0, NULL );
+    HWND child = CreateWindowExA( 0, "static", NULL, WS_CHILD|WS_VISIBLE, 0,0,0,0,hwnd,0,0, NULL );
+
+    SetActiveWindow( hwnd );
+    SetFocus( child );
+    for (i = 0; i < 32; i++)
+    {
+        winetest_push_context( "%u", i );
+        ret = NtUserQueryWindow( hwnd, i );
+        switch (i)
+        {
+        case WindowProcess:
+        case WindowProcess2:
+            ok( ret == UlongToHandle( GetCurrentProcessId() ),
+                "wrong value %p / %lx\n", ret, GetCurrentProcessId() );
+            break;
+        case WindowThread:
+            ok( ret == UlongToHandle( GetCurrentThreadId() ), "wrong value %p / %lx\n",
+                ret, GetCurrentThreadId() );
+            break;
+        case WindowActiveWindow:
+            ok( ret == GetActiveWindow(), "wrong value %p / %p\n", ret, GetActiveWindow() );
+            break;
+        case WindowFocusWindow:
+            ok( ret == GetFocus(), "wrong value %p / %p\n", ret, GetFocus() );
+            break;
+        case WindowIsHung:
+            ok( !ret, "wrong value %p\n", ret );
+            break;
+        case WindowClientBase:
+            ok( !ret, "wrong value %p\n", ret );
+            break;
+        case WindowIsForegroundThread:
+            flaky  /* foreground thread may change */
+            ok( ret == (HANDLE)TRUE, "wrong value %p\n", ret );
+            break;
+        case WindowDefaultImeWindow:
+            ok( ret == ImmGetDefaultIMEWnd( hwnd ), "wrong value %p / %p\n", ret, ImmGetDefaultIMEWnd( hwnd ));
+            break;
+       case WindowDefaultInputContext:
+            ok( ret == ImmGetContext( hwnd ), "wrong value %p / %p\n", ret, ImmGetContext( hwnd ));
+            break;
+        default:
+            ok( !ret, "NtUserQueryWindow returned %p\n", ret );
+            break;
+        }
+        winetest_pop_context();
+    }
     DestroyWindow( hwnd );
 }
 
@@ -2160,6 +2828,104 @@ static void test_NtUserSetProcessDpiAwarenessContext( ULONG context )
     winetest_pop_context();
 }
 
+static void test_RegisterClipboardFormat(void)
+{
+    char DECLSPEC_ALIGN(8) abi_buf[sizeof(ATOM_BASIC_INFORMATION) + MAX_ATOM_LEN * sizeof(WCHAR)];
+    ATOM_BASIC_INFORMATION *abi = (ATOM_BASIC_INFORMATION *)abi_buf;
+    UNICODE_STRING name;
+    NTSTATUS status;
+    WCHAR buf[64];
+    ATOM atom;
+
+    SetLastError( 0xdeadbeef );
+    atom = RegisterClipboardFormatW( NULL );
+    ok( atom == 0, "got %#x\n", atom );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got %#lx\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    atom = RegisterClipboardFormatW( L"" );
+    ok( atom == 0, "got %#x\n", atom );
+    todo_wine ok( GetLastError() == 0xdeadbeef, "got %#lx\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    atom = RegisterClipboardFormatW( L"#123" );
+    ok( atom == 123, "got %#x\n", atom );
+    ok( GetLastError() == 0xdeadbeef, "got %#lx\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    atom = RegisterClipboardFormatW( L"#49152" );
+    ok( atom == 0, "got %#x\n", atom );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got %#lx\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    atom = RegisterClipboardFormatW( L"#0xabc" );
+    ok( atom != 0, "got %#x\n", atom );
+    ok( GetLastError() == 0xdeadbeef, "got %#lx\n", GetLastError() );
+    status = NtQueryInformationAtom( atom, AtomBasicInformation, abi, sizeof(abi_buf), NULL );
+    ok( status == STATUS_INVALID_HANDLE, "got %#lx\n", status );
+
+    memset( buf, 0xcc, sizeof(buf) );
+    name.Buffer = buf;
+    name.Length = 0xdead;
+    name.MaximumLength = sizeof(buf);
+    status = NtUserGetAtomName( atom, &name );
+    ok( status == 6, "NtUserGetAtomName returned %lu\n", status );
+    ok( name.Length == 0xdead, "Length = %u\n", name.Length );
+    ok( name.MaximumLength == sizeof(buf), "MaximumLength = %u\n", name.MaximumLength );
+    ok( !wcscmp( buf, L"#0xabc" ), "buf = %s\n", debugstr_w(buf) );
+}
+
+static void test_NtUserRegisterWindowMessage(void)
+{
+    char DECLSPEC_ALIGN(8) abi_buf[sizeof(ATOM_BASIC_INFORMATION) + MAX_ATOM_LEN * sizeof(WCHAR)];
+    ATOM_BASIC_INFORMATION *abi = (ATOM_BASIC_INFORMATION *)abi_buf;
+    UNICODE_STRING name;
+    NTSTATUS status;
+    WCHAR buf[64];
+    ATOM atom;
+
+    SetLastError( 0xdeadbeef );
+    atom = NtUserRegisterWindowMessage( NULL );
+    ok( atom == 0, "got %#x\n", atom );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got %#lx\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    RtlInitUnicodeString( &name, L"" );
+    atom = NtUserRegisterWindowMessage( &name );
+    ok( atom == 0, "got %#x\n", atom );
+    todo_wine ok( GetLastError() == 0xdeadbeef, "got %#lx\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    RtlInitUnicodeString( &name, L"#123" );
+    atom = NtUserRegisterWindowMessage( &name );
+    ok( atom == 123, "got %#x\n", atom );
+    ok( GetLastError() == 0xdeadbeef, "got %#lx\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    RtlInitUnicodeString( &name, L"#49152" );
+    atom = NtUserRegisterWindowMessage( &name );
+    ok( atom == 0, "got %#x\n", atom );
+    ok( GetLastError() == ERROR_INVALID_PARAMETER, "got %#lx\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    RtlInitUnicodeString( &name, L"#0xabc" );
+    atom = NtUserRegisterWindowMessage( &name );
+    ok( atom != 0, "got %#x\n", atom );
+    ok( GetLastError() == 0xdeadbeef, "got %#lx\n", GetLastError() );
+    status = NtQueryInformationAtom( atom, AtomBasicInformation, abi, sizeof(abi_buf), NULL );
+    ok( status == STATUS_INVALID_HANDLE, "got %#lx\n", status );
+
+    memset( buf, 0xcc, sizeof(buf) );
+    name.Buffer = buf;
+    name.Length = 0xdead;
+    name.MaximumLength = sizeof(buf);
+    status = NtUserGetAtomName( atom, &name );
+    ok( status == 6, "NtUserGetAtomName returned %lu\n", status );
+    ok( name.Length == 0xdead, "Length = %u\n", name.Length );
+    ok( name.MaximumLength == sizeof(buf), "MaximumLength = %u\n", name.MaximumLength );
+    ok( !wcscmp( buf, L"#0xabc" ), "buf = %s\n", debugstr_w(buf) );
+}
+
 START_TEST(win32u)
 {
     char **argv;
@@ -2192,9 +2958,11 @@ START_TEST(win32u)
     test_NtUserEnumDisplayDevices();
     test_window_props();
     test_class();
+    test_NtUserAlterWindowStyle();
     test_NtUserCreateInputContext();
     test_NtUserBuildHimcList();
     test_NtUserBuildHwndList();
+    test_NtUserBuildNameList();
     test_cursoricon();
     test_message_call();
     test_window_text();
@@ -2206,6 +2974,9 @@ START_TEST(win32u)
 
     test_NtUserCloseWindowStation();
     test_NtUserDisplayConfigGetDeviceInfo();
+    test_NtUserQueryWindow();
+    test_RegisterClipboardFormat();
+    test_NtUserRegisterWindowMessage();
 
     run_in_process( argv, "NtUserEnableMouseInPointer 0" );
     run_in_process( argv, "NtUserEnableMouseInPointer 1" );

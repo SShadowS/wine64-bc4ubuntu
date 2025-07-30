@@ -912,7 +912,7 @@ BOOL WINAPI NtGdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
  */
 BOOL WINAPI NtGdiDrawStream( HDC hdc, ULONG in, void *pvin )
 {
-    FIXME("stub: %p, %d, %p\n", hdc, (int)in, pvin);
+    FIXME("stub: %p, %d, %p\n", hdc, in, pvin);
     return FALSE;
 }
 
@@ -1017,7 +1017,7 @@ BOOL WINAPI NtUserScrollDC( HDC hdc, INT dx, INT dy, const RECT *scroll, const R
     if (ret && update_rect)
     {
         NtGdiGetRgnBox( update_rgn, update_rect );
-        NtGdiTransformPoints( hdc, (POINT *)&update_rect, (POINT *)&update_rect, 2, NtGdiDPtoLP );
+        NtGdiTransformPoints( hdc, (POINT *)update_rect, (POINT *)update_rect, 2, NtGdiDPtoLP );
         TRACE( "returning update_rect %s\n", wine_dbgstr_rect(update_rect) );
     }
     if (!ret_update_rgn) NtGdiDeleteObjectApp( update_rgn );

@@ -95,18 +95,23 @@ typedef unsigned int     ULONG32, *PULONG32;
 typedef unsigned int     DWORD32, *PDWORD32;
 
 #ifdef _MSC_VER
-typedef signed __int64   INT64, *PINT64;
-typedef unsigned __int64 UINT64, *PUINT64;
-typedef signed __int64   LONG64, *PLONG64;
-typedef unsigned __int64 ULONG64, *PULONG64;
-typedef unsigned __int64 DWORD64, *PDWORD64;
+typedef signed __int64   INT64;
+typedef unsigned __int64 UINT64;
+typedef signed __int64   LONG64;
+typedef unsigned __int64 ULONG64;
+typedef unsigned __int64 DWORD64;
 #else
-typedef signed __int64   DECLSPEC_ALIGN(8) INT64, *PINT64;
-typedef unsigned __int64 DECLSPEC_ALIGN(8) UINT64, *PUINT64;
-typedef signed __int64   DECLSPEC_ALIGN(8) LONG64, *PLONG64;
-typedef unsigned __int64 DECLSPEC_ALIGN(8) ULONG64, *PULONG64;
-typedef unsigned __int64 DECLSPEC_ALIGN(8) DWORD64, *PDWORD64;
+typedef signed __int64   DECLSPEC_ALIGN(8) INT64;
+typedef unsigned __int64 DECLSPEC_ALIGN(8) UINT64;
+typedef signed __int64   DECLSPEC_ALIGN(8) LONG64;
+typedef unsigned __int64 DECLSPEC_ALIGN(8) ULONG64;
+typedef unsigned __int64 DECLSPEC_ALIGN(8) DWORD64;
 #endif
+typedef INT64 *PINT64;
+typedef UINT64 *PUINT64;
+typedef LONG64 *PLONG64;
+typedef ULONG64 *PULONG64;
+typedef DWORD64 *PDWORD64;
 
 /* Basic pointer-sized integer types */
 
@@ -132,7 +137,8 @@ typedef unsigned __int64 ULONG_PTR, *PULONG_PTR;
 
 typedef int           INT_PTR, *PINT_PTR;
 typedef unsigned int  UINT_PTR, *PUINT_PTR;
-#if defined(__clang__) && defined(__MINGW32__)  /* llvm-mingw warns about long type in %I formats */
+/* clang warns about long type in %I formats */
+#if defined(__WINESRC__) && defined(__clang__) && (defined(__MINGW32__) || defined(_MSC_VER))
 typedef int           LONG_PTR, *PLONG_PTR;
 typedef unsigned int  ULONG_PTR, *PULONG_PTR;
 #else
@@ -159,7 +165,7 @@ typedef unsigned int UHALF_PTR, *PUHALF_PTR;
 
 #if !defined(__midl) && !defined(__WIDL__)
 
-#if !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES)
+#if !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES) && !defined(WINE_UNIX_LIB)
 
 static inline unsigned long HandleToULong(const void *h)
 {
@@ -205,7 +211,7 @@ static inline int PtrToLong(const void *p)
 }
 
 
-#endif /* !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES) */
+#endif /* !defined(__LP64__) && !defined(WINE_NO_LONG_TYPES) && !defined(WINE_UNIX_LIB) */
 
 static inline void *ULongToHandle(ULONG32 ul)
 {

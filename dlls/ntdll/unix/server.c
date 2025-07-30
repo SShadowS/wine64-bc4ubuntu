@@ -82,6 +82,7 @@
 #include "ddk/wdm.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(server);
+WINE_DECLARE_DEBUG_CHANNEL(syscall);
 
 #ifndef MSG_CMSG_CLOEXEC
 #define MSG_CMSG_CLOEXEC 0
@@ -156,7 +157,7 @@ static DECLSPEC_NORETURN void server_protocol_error( const char *err, ... )
     va_list args;
 
     va_start( args, err );
-    fprintf( stderr, "wine client error:%x: ", (int)GetCurrentThreadId() );
+    fprintf( stderr, "wine client error:%x: ", GetCurrentThreadId() );
     vfprintf( stderr, err, args );
     va_end( args );
     abort_thread(1);
@@ -168,7 +169,7 @@ static DECLSPEC_NORETURN void server_protocol_error( const char *err, ... )
  */
 static DECLSPEC_NORETURN void server_protocol_perror( const char *err )
 {
-    fprintf( stderr, "wine client error:%x: ", (int)GetCurrentThreadId() );
+    fprintf( stderr, "wine client error:%x: ", GetCurrentThreadId() );
     perror( err );
     abort_thread(1);
 }
@@ -181,18 +182,27 @@ static DECLSPEC_NORETURN void server_protocol_perror( const char *err )
  */
 static unsigned int send_request( const struct __server_request_info *req )
 {
-    unsigned int i;
-    int ret;
+    int request_fd = ntdll_get_thread_data()->request_fd;
 
     if (!req->u.req.request_header.request_size)
     {
-        if ((ret = write( ntdll_get_thread_data()->request_fd, &req->u.req,
-                          sizeof(req->u.req) )) == sizeof(req->u.req)) return STATUS_SUCCESS;
+        data_size_t to_write = sizeof(req->u.req);
+        const char *write_ptr = (const char *)&req->u.req;
 
+        for (;;)
+        {
+            ssize_t ret = write( request_fd, write_ptr, to_write );
+            if (ret == to_write) return STATUS_SUCCESS;
+            if (ret < 0) break;
+            to_write -= ret;
+            write_ptr += ret;
+        }
     }
     else
     {
+        data_size_t to_write = sizeof(req->u.req) + req->u.req.request_header.request_size;
         struct iovec vec[__SERVER_MAX_DATA+1];
+        unsigned int i, j;
 
         vec[0].iov_base = (void *)&req->u.req;
         vec[0].iov_len = sizeof(req->u.req);
@@ -201,11 +211,30 @@ static unsigned int send_request( const struct __server_request_info *req )
             vec[i+1].iov_base = (void *)req->data[i].ptr;
             vec[i+1].iov_len = req->data[i].size;
         }
-        if ((ret = writev( ntdll_get_thread_data()->request_fd, vec, i+1 )) ==
-            req->u.req.request_header.request_size + sizeof(req->u.req)) return STATUS_SUCCESS;
+
+        for (;;)
+        {
+            ssize_t ret = writev( request_fd, vec, i + 1 );
+            if (ret == to_write) return STATUS_SUCCESS;
+            if (ret < 0) break;
+            to_write -= ret;
+            for (j = 0; j < i + 1; j++)
+            {
+                if (ret >= vec[j].iov_len)
+                {
+                    ret -= vec[j].iov_len;
+                    vec[j].iov_len = 0;
+                }
+                else
+                {
+                    vec[j].iov_base = (char *)vec[j].iov_base + ret;
+                    vec[j].iov_len -= ret;
+                    break;
+                }
+            }
+        }
     }
 
-    if (ret >= 0) server_protocol_error( "partial write %d\n", ret );
     if (errno == EPIPE) abort_thread(0);
     if (errno == EFAULT) return STATUS_ACCESS_VIOLATION;
     server_protocol_perror( "write" );
@@ -688,7 +717,7 @@ static void invoke_system_apc( const union apc_call *call, union apc_result *res
  *              server_select
  */
 unsigned int server_select( const union select_op *select_op, data_size_t size, UINT flags,
-                            timeout_t abs_timeout, context_t *context, struct user_apc *user_apc )
+                            timeout_t abs_timeout, struct context_data *context, struct user_apc *user_apc )
 {
     unsigned int ret;
     int cookie;
@@ -701,7 +730,7 @@ unsigned int server_select( const union select_op *select_op, data_size_t size, 
     struct
     {
         union apc_call call;
-        context_t  context[2];
+        struct context_data context[2];
     } reply_data;
 
     memset( &result, 0, sizeof(result) );
@@ -794,8 +823,23 @@ unsigned int server_wait( const union select_op *select_op, data_size_t size, UI
  */
 NTSTATUS WINAPI NtContinue( CONTEXT *context, BOOLEAN alertable )
 {
+    return NtContinueEx( context, ULongToPtr(alertable) );
+}
+
+
+/***********************************************************************
+ *              NtContinueEx  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtContinueEx( CONTEXT *context, KCONTINUE_ARGUMENT *args )
+{
     struct user_apc apc;
     NTSTATUS status;
+    BOOL alertable;
+
+    if ((UINT_PTR)args > 0xff)
+        alertable = args->ContinueFlags & KCONTINUE_FLAG_TEST_ALERT;
+    else
+        alertable = !!args;
 
     if (alertable)
     {
@@ -1547,8 +1591,8 @@ size_t server_init_process(void)
 
         if (is_win64 && arch && !strcmp( arch, "win32" ))
             fatal_error( "WINEARCH is set to 'win32' but this is not supported in wow64 mode.\n" );
-        if (arch && strcmp( arch, "win32" ) && strcmp( arch, "win64" ))
-            fatal_error( "WINEARCH set to invalid value '%s', it must be either win32 or win64.\n", arch );
+        if (arch && strcmp( arch, "win32" ) && strcmp( arch, "win64" ) && strcmp( arch, "wow64" ))
+            fatal_error( "WINEARCH set to invalid value '%s', it must be win32, win64, or wow64.\n", arch );
 
         fd_socket = server_connect();
     }
@@ -1635,8 +1679,8 @@ size_t server_init_process(void)
     {
         if (is_win64)
             fatal_error( "'%s' is a 32-bit installation, it cannot support 64-bit applications.\n", config_dir );
-        if (arch && !strcmp( arch, "win64" ))
-            fatal_error( "WINEARCH set to win64 but '%s' is a 32-bit installation.\n", config_dir );
+        if (arch && (!strcmp( arch, "win64" ) || !strcmp( arch, "wow64" )))
+            fatal_error( "WINEARCH set to %s but '%s' is a 32-bit installation.\n", arch, config_dir );
     }
 
     set_thread_id( NtCurrentTeb(), pid, tid );
@@ -1657,6 +1701,7 @@ void server_init_process_done(void)
     unsigned int status;
     int suspend;
     FILE_FS_DEVICE_INFORMATION info;
+    struct ntdll_thread_data *thread_data = ntdll_get_thread_data();
 
     if (!get_device_info( initial_cwd, &info ) && (info.Characteristics & FILE_REMOVABLE_MEDIA))
         chdir( "/" );
@@ -1670,6 +1715,8 @@ void server_init_process_done(void)
      * send exceptions to the debugger before the create process event that
      * is sent by init_process_done */
     signal_init_process();
+    thread_data->syscall_table = KeServiceDescriptorTable;
+    thread_data->syscall_trace = TRACE_ON(syscall);
 
     /* always send the native TEB */
     if (!(teb = NtCurrentTeb64())) teb = NtCurrentTeb();

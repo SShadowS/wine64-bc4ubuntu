@@ -72,35 +72,18 @@ extern DWORD EXC_CallHandler( EXCEPTION_RECORD *record, EXCEPTION_REGISTRATION_R
                               PEXCEPTION_HANDLER handler, PEXCEPTION_HANDLER nested_handler );
 
 
-#ifdef __WINE_PE_BUILD
-
-enum syscall_ids
-{
-#define SYSCALL_ENTRY(id,name,args) __id_##name = id,
-ALL_SYSCALLS32
-#undef SYSCALL_ENTRY
-};
-
-/*******************************************************************
- *         NtQueryInformationProcess
- */
-void NtQueryInformationProcess_wrapper(void)
-{
-    asm( ".globl " __ASM_STDCALL("NtQueryInformationProcess", 20) "\n"
-         __ASM_STDCALL("NtQueryInformationProcess", 20) ":\n\t"
-         "movl %0,%%eax\n\t"
-         "call *%%fs:0xc0\n\t"
-         "ret $20"  :: "i" (__id_NtQueryInformationProcess) );
-}
-#define NtQueryInformationProcess syscall_NtQueryInformationProcess
-
-#endif /* __WINE_PE_BUILD */
+#undef SYSCALL_ENTRY_NtQueryInformationProcess
+#define SYSCALL_ENTRY_NtQueryInformationProcess(id,name,args) \
+    __ASM_STDCALL_FUNC( name, args, \
+                        "movl $(" #id "),%eax\n\t" \
+                        "call *%fs:0xc0\n\t" \
+                        "ret $" #args )
 
 /*******************************************************************
  *         syscalls
  */
 #define SYSCALL_ENTRY(id,name,args) __ASM_SYSCALL_FUNC( id, name, args )
-ALL_SYSCALLS32
+ALL_SYSCALLS
 DEFINE_SYSCALL_HELPER32()
 #undef SYSCALL_ENTRY
 
@@ -232,7 +215,6 @@ void WINAPI KiUserCallbackDispatcher( ULONG id, void *args, ULONG len )
  */
 static inline void save_fpu( CONTEXT *context )
 {
-#ifdef __GNUC__
     struct
     {
         DWORD ControlWord;
@@ -253,7 +235,6 @@ static inline void save_fpu( CONTEXT *context )
     float_status.StatusWord &= float_status.ControlWord | 0xffffff80;
 
     __asm__ __volatile__( "fldenv %0" : : "m" (float_status) );
-#endif
 }
 
 
@@ -264,7 +245,6 @@ static inline void save_fpu( CONTEXT *context )
  */
 static inline void save_fpux( CONTEXT *context )
 {
-#ifdef __GNUC__
     /* we have to enforce alignment by hand */
     char buffer[sizeof(XSAVE_FORMAT) + 16];
     XSAVE_FORMAT *state = (XSAVE_FORMAT *)(((ULONG_PTR)buffer + 15) & ~15);
@@ -272,7 +252,6 @@ static inline void save_fpux( CONTEXT *context )
     context->ContextFlags |= CONTEXT_EXTENDED_REGISTERS;
     __asm__ __volatile__( "fxsave %0" : "=m" (*state) );
     memcpy( context->ExtendedRegisters, state, sizeof(*state) );
-#endif
 }
 
 
@@ -539,7 +518,7 @@ __ASM_GLOBAL_FUNC( signal_start_thread,
                    "leal -12(%esi),%edi\n\t"
                    /* clear the thread stack */
                    "andl $~0xfff,%edi\n\t"   /* round down to page size */
-                   "movl $0xf0000,%ecx\n\t"
+                   "movl $0xf000,%ecx\n\t"
                    "subl %ecx,%edi\n\t"
                    "movl %edi,%esp\n\t"
                    "xorl %eax,%eax\n\t"
@@ -617,7 +596,7 @@ __ASM_STDCALL_FUNC( DbgUserBreakPoint, 0, "int $3; ret"
 /**********************************************************************
  *           NtCurrentTeb   (NTDLL.@)
  */
-__ASM_STDCALL_FUNC( NtCurrentTeb, 0, ".byte 0x64\n\tmovl 0x18,%eax\n\tret" )
+__ASM_STDCALL_FUNC( NtCurrentTeb, 0, "movl %fs:0x18,%eax\n\tret" )
 
 
 /**************************************************************************
@@ -683,20 +662,16 @@ __ASM_GLOBAL_FUNC(call_exception_handler,
                   "subl $12,%esp\n\t"
                   "pushl 12(%ebp)\n\t"      /* make any exceptions in this... */
                   "pushl %edx\n\t"          /* handler be handled by... */
-                  ".byte 0x64\n\t"
-                  "pushl (0)\n\t"           /* nested_handler (passed in edx). */
-                  ".byte 0x64\n\t"
-                  "movl %esp,(0)\n\t"       /* push the new exception frame onto the exception stack. */
+                  "pushl %fs:0\n\t"         /* nested_handler (passed in edx). */
+                  "movl %esp,%fs:0\n\t"     /* push the new exception frame onto the exception stack. */
                   "pushl 20(%ebp)\n\t"
                   "pushl 16(%ebp)\n\t"
                   "pushl 12(%ebp)\n\t"
                   "pushl 8(%ebp)\n\t"
                   "movl 24(%ebp), %ecx\n\t" /* (*1) */
                   "call *%ecx\n\t"          /* call handler. (*2) */
-                  ".byte 0x64\n\t"
-                  "movl (0), %esp\n\t"      /* restore previous... (*3) */
-                  ".byte 0x64\n\t"
-                  "popl (0)\n\t"            /* exception frame. */
+                  "movl %fs:0, %esp\n\t"    /* restore previous... (*3) */
+                  "popl %fs:0\n\t"          /* exception frame. */
                   "movl %ebp, %esp\n\t"     /* restore saved stack, in case it was corrupted */
                   "popl %ebp\n\t"
                    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")

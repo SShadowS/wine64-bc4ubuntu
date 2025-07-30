@@ -119,6 +119,8 @@ DECL_HANDLER(add_atom);
 DECL_HANDLER(delete_atom);
 DECL_HANDLER(find_atom);
 DECL_HANDLER(get_atom_information);
+DECL_HANDLER(add_user_atom);
+DECL_HANDLER(get_user_atom_name);
 DECL_HANDLER(get_msg_queue_handle);
 DECL_HANDLER(get_msg_queue);
 DECL_HANDLER(set_queue_fd);
@@ -153,10 +155,12 @@ DECL_HANDLER(destroy_window);
 DECL_HANDLER(get_desktop_window);
 DECL_HANDLER(set_window_owner);
 DECL_HANDLER(get_window_info);
+DECL_HANDLER(init_window_info);
 DECL_HANDLER(set_window_info);
 DECL_HANDLER(set_parent);
 DECL_HANDLER(get_window_parents);
-DECL_HANDLER(get_window_children);
+DECL_HANDLER(get_window_list);
+DECL_HANDLER(get_class_windows);
 DECL_HANDLER(get_window_children_from_point);
 DECL_HANDLER(get_window_tree);
 DECL_HANDLER(set_window_pos);
@@ -188,7 +192,6 @@ DECL_HANDLER(set_input_desktop);
 DECL_HANDLER(close_desktop);
 DECL_HANDLER(get_thread_desktop);
 DECL_HANDLER(set_thread_desktop);
-DECL_HANDLER(enum_desktop);
 DECL_HANDLER(set_user_object_info);
 DECL_HANDLER(register_hotkey);
 DECL_HANDLER(unregister_hotkey);
@@ -264,6 +267,7 @@ DECL_HANDLER(grab_kernel_object);
 DECL_HANDLER(release_kernel_object);
 DECL_HANDLER(get_kernel_object_handle);
 DECL_HANDLER(make_process_system);
+DECL_HANDLER(grant_process_admin_token);
 DECL_HANDLER(get_token_info);
 DECL_HANDLER(create_linked_token);
 DECL_HANDLER(create_completion);
@@ -296,6 +300,7 @@ DECL_HANDLER(get_job_info);
 DECL_HANDLER(terminate_job);
 DECL_HANDLER(suspend_process);
 DECL_HANDLER(resume_process);
+DECL_HANDLER(get_next_process);
 DECL_HANDLER(get_next_thread);
 DECL_HANDLER(set_keyboard_repeat);
 
@@ -414,6 +419,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_delete_atom,
     (req_handler)req_find_atom,
     (req_handler)req_get_atom_information,
+    (req_handler)req_add_user_atom,
+    (req_handler)req_get_user_atom_name,
     (req_handler)req_get_msg_queue_handle,
     (req_handler)req_get_msg_queue,
     (req_handler)req_set_queue_fd,
@@ -448,10 +455,12 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_desktop_window,
     (req_handler)req_set_window_owner,
     (req_handler)req_get_window_info,
+    (req_handler)req_init_window_info,
     (req_handler)req_set_window_info,
     (req_handler)req_set_parent,
     (req_handler)req_get_window_parents,
-    (req_handler)req_get_window_children,
+    (req_handler)req_get_window_list,
+    (req_handler)req_get_class_windows,
     (req_handler)req_get_window_children_from_point,
     (req_handler)req_get_window_tree,
     (req_handler)req_set_window_pos,
@@ -483,7 +492,6 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_close_desktop,
     (req_handler)req_get_thread_desktop,
     (req_handler)req_set_thread_desktop,
-    (req_handler)req_enum_desktop,
     (req_handler)req_set_user_object_info,
     (req_handler)req_register_hotkey,
     (req_handler)req_unregister_hotkey,
@@ -559,6 +567,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_release_kernel_object,
     (req_handler)req_get_kernel_object_handle,
     (req_handler)req_make_process_system,
+    (req_handler)req_grant_process_admin_token,
     (req_handler)req_get_token_info,
     (req_handler)req_create_linked_token,
     (req_handler)req_create_completion,
@@ -591,6 +600,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_terminate_job,
     (req_handler)req_suspend_process,
     (req_handler)req_resume_process,
+    (req_handler)req_get_next_process,
     (req_handler)req_get_next_thread,
     (req_handler)req_set_keyboard_repeat,
 };
@@ -601,40 +611,38 @@ C_ASSERT( sizeof(apc_param_t) == 8 );
 C_ASSERT( sizeof(atom_t) == 4 );
 C_ASSERT( sizeof(char) == 1 );
 C_ASSERT( sizeof(client_ptr_t) == 8 );
-C_ASSERT( sizeof(context_t) == 1728 );
-C_ASSERT( sizeof(cursor_pos_t) == 24 );
 C_ASSERT( sizeof(data_size_t) == 4 );
 C_ASSERT( sizeof(file_pos_t) == 8 );
-C_ASSERT( sizeof(generic_map_t) == 16 );
 C_ASSERT( sizeof(int) == 4 );
 C_ASSERT( sizeof(ioctl_code_t) == 4 );
 C_ASSERT( sizeof(lparam_t) == 8 );
 C_ASSERT( sizeof(mem_size_t) == 8 );
 C_ASSERT( sizeof(mod_handle_t) == 8 );
 C_ASSERT( sizeof(obj_handle_t) == 4 );
-C_ASSERT( sizeof(obj_locator_t) == 16 );
 C_ASSERT( sizeof(object_id_t) == 8 );
-C_ASSERT( sizeof(pe_image_info_t) == 88 );
 C_ASSERT( sizeof(process_id_t) == 4 );
-C_ASSERT( sizeof(property_data_t) == 16 );
-C_ASSERT( sizeof(rectangle_t) == 16 );
 C_ASSERT( sizeof(short int) == 2 );
-C_ASSERT( sizeof(startup_info_t) == 96 );
 C_ASSERT( sizeof(struct async_data) == 40 );
+C_ASSERT( sizeof(struct context_data) == 1720 );
+C_ASSERT( sizeof(struct cursor_pos) == 24 );
 C_ASSERT( sizeof(struct filesystem_event) == 12 );
+C_ASSERT( sizeof(struct generic_map) == 16 );
 C_ASSERT( sizeof(struct handle_info) == 20 );
 C_ASSERT( sizeof(struct luid) == 8 );
 C_ASSERT( sizeof(struct luid_attr) == 12 );
+C_ASSERT( sizeof(struct obj_locator) == 16 );
 C_ASSERT( sizeof(struct object_attributes) == 16 );
 C_ASSERT( sizeof(struct object_type_info) == 44 );
+C_ASSERT( sizeof(struct pe_image_info) == 96 );
 C_ASSERT( sizeof(struct process_info) == 40 );
+C_ASSERT( sizeof(struct property_data) == 16 );
 C_ASSERT( sizeof(struct rawinput_device) == 12 );
+C_ASSERT( sizeof(struct rectangle) == 16 );
+C_ASSERT( sizeof(struct startup_info_data) == 96 );
 C_ASSERT( sizeof(struct thread_info) == 40 );
 C_ASSERT( sizeof(struct user_apc) == 40 );
-C_ASSERT( sizeof(tcp_connection) == 60 );
 C_ASSERT( sizeof(thread_id_t) == 4 );
 C_ASSERT( sizeof(timeout_t) == 8 );
-C_ASSERT( sizeof(udp_endpoint) == 32 );
 C_ASSERT( sizeof(union apc_call) == 64 );
 C_ASSERT( sizeof(union apc_result) == 40 );
 C_ASSERT( sizeof(union debug_event_data) == 160 );
@@ -642,6 +650,8 @@ C_ASSERT( sizeof(union hw_input) == 40 );
 C_ASSERT( sizeof(union irp_params) == 32 );
 C_ASSERT( sizeof(union message_data) == 48 );
 C_ASSERT( sizeof(union select_op) == 264 );
+C_ASSERT( sizeof(union tcp_connection) == 60 );
+C_ASSERT( sizeof(union udp_endpoint) == 32 );
 C_ASSERT( sizeof(unsigned __int64) == 8 );
 C_ASSERT( sizeof(unsigned char) == 1 );
 C_ASSERT( sizeof(unsigned int) == 4 );
@@ -726,7 +736,8 @@ C_ASSERT( offsetof(struct get_process_info_reply, end_time) == 40 );
 C_ASSERT( offsetof(struct get_process_info_reply, session_id) == 48 );
 C_ASSERT( offsetof(struct get_process_info_reply, exit_code) == 52 );
 C_ASSERT( offsetof(struct get_process_info_reply, priority) == 56 );
-C_ASSERT( offsetof(struct get_process_info_reply, machine) == 60 );
+C_ASSERT( offsetof(struct get_process_info_reply, base_priority) == 60 );
+C_ASSERT( offsetof(struct get_process_info_reply, machine) == 62 );
 C_ASSERT( sizeof(struct get_process_info_reply) == 64 );
 C_ASSERT( offsetof(struct get_process_debug_info_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_process_debug_info_request) == 16 );
@@ -749,10 +760,11 @@ C_ASSERT( offsetof(struct get_process_vm_counters_reply, pagefile_usage) == 40 )
 C_ASSERT( offsetof(struct get_process_vm_counters_reply, peak_pagefile_usage) == 48 );
 C_ASSERT( sizeof(struct get_process_vm_counters_reply) == 56 );
 C_ASSERT( offsetof(struct set_process_info_request, handle) == 12 );
-C_ASSERT( offsetof(struct set_process_info_request, mask) == 16 );
-C_ASSERT( offsetof(struct set_process_info_request, priority) == 20 );
+C_ASSERT( offsetof(struct set_process_info_request, priority) == 16 );
+C_ASSERT( offsetof(struct set_process_info_request, base_priority) == 20 );
 C_ASSERT( offsetof(struct set_process_info_request, affinity) == 24 );
 C_ASSERT( offsetof(struct set_process_info_request, token) == 32 );
+C_ASSERT( offsetof(struct set_process_info_request, mask) == 36 );
 C_ASSERT( sizeof(struct set_process_info_request) == 40 );
 C_ASSERT( offsetof(struct get_thread_info_request, handle) == 12 );
 C_ASSERT( offsetof(struct get_thread_info_request, access) == 16 );
@@ -764,7 +776,7 @@ C_ASSERT( offsetof(struct get_thread_info_reply, entry_point) == 24 );
 C_ASSERT( offsetof(struct get_thread_info_reply, affinity) == 32 );
 C_ASSERT( offsetof(struct get_thread_info_reply, exit_code) == 40 );
 C_ASSERT( offsetof(struct get_thread_info_reply, priority) == 44 );
-C_ASSERT( offsetof(struct get_thread_info_reply, last) == 48 );
+C_ASSERT( offsetof(struct get_thread_info_reply, base_priority) == 48 );
 C_ASSERT( offsetof(struct get_thread_info_reply, suspend_count) == 52 );
 C_ASSERT( offsetof(struct get_thread_info_reply, flags) == 56 );
 C_ASSERT( offsetof(struct get_thread_info_reply, desc_len) == 60 );
@@ -777,11 +789,12 @@ C_ASSERT( offsetof(struct get_thread_times_reply, unix_pid) == 24 );
 C_ASSERT( offsetof(struct get_thread_times_reply, unix_tid) == 28 );
 C_ASSERT( sizeof(struct get_thread_times_reply) == 32 );
 C_ASSERT( offsetof(struct set_thread_info_request, handle) == 12 );
-C_ASSERT( offsetof(struct set_thread_info_request, mask) == 16 );
-C_ASSERT( offsetof(struct set_thread_info_request, priority) == 20 );
+C_ASSERT( offsetof(struct set_thread_info_request, priority) == 16 );
+C_ASSERT( offsetof(struct set_thread_info_request, base_priority) == 20 );
 C_ASSERT( offsetof(struct set_thread_info_request, affinity) == 24 );
 C_ASSERT( offsetof(struct set_thread_info_request, entry_point) == 32 );
 C_ASSERT( offsetof(struct set_thread_info_request, token) == 40 );
+C_ASSERT( offsetof(struct set_thread_info_request, mask) == 44 );
 C_ASSERT( sizeof(struct set_thread_info_request) == 48 );
 C_ASSERT( offsetof(struct suspend_thread_request, handle) == 12 );
 C_ASSERT( sizeof(struct suspend_thread_request) == 16 );
@@ -1271,6 +1284,13 @@ C_ASSERT( offsetof(struct get_atom_information_reply, count) == 8 );
 C_ASSERT( offsetof(struct get_atom_information_reply, pinned) == 12 );
 C_ASSERT( offsetof(struct get_atom_information_reply, total) == 16 );
 C_ASSERT( sizeof(struct get_atom_information_reply) == 24 );
+C_ASSERT( sizeof(struct add_user_atom_request) == 16 );
+C_ASSERT( offsetof(struct add_user_atom_reply, atom) == 8 );
+C_ASSERT( sizeof(struct add_user_atom_reply) == 16 );
+C_ASSERT( offsetof(struct get_user_atom_name_request, atom) == 12 );
+C_ASSERT( sizeof(struct get_user_atom_name_request) == 16 );
+C_ASSERT( offsetof(struct get_user_atom_name_reply, total) == 8 );
+C_ASSERT( sizeof(struct get_user_atom_name_reply) == 16 );
 C_ASSERT( sizeof(struct get_msg_queue_handle_request) == 16 );
 C_ASSERT( offsetof(struct get_msg_queue_handle_reply, handle) == 8 );
 C_ASSERT( sizeof(struct get_msg_queue_handle_reply) == 16 );
@@ -1432,18 +1452,18 @@ C_ASSERT( sizeof(struct set_named_pipe_info_request) == 24 );
 C_ASSERT( offsetof(struct create_window_request, parent) == 12 );
 C_ASSERT( offsetof(struct create_window_request, owner) == 16 );
 C_ASSERT( offsetof(struct create_window_request, atom) == 20 );
-C_ASSERT( offsetof(struct create_window_request, instance) == 24 );
-C_ASSERT( offsetof(struct create_window_request, dpi_context) == 32 );
-C_ASSERT( offsetof(struct create_window_request, style) == 36 );
-C_ASSERT( offsetof(struct create_window_request, ex_style) == 40 );
-C_ASSERT( sizeof(struct create_window_request) == 48 );
+C_ASSERT( offsetof(struct create_window_request, class_instance) == 24 );
+C_ASSERT( offsetof(struct create_window_request, instance) == 32 );
+C_ASSERT( offsetof(struct create_window_request, dpi_context) == 40 );
+C_ASSERT( offsetof(struct create_window_request, style) == 44 );
+C_ASSERT( offsetof(struct create_window_request, ex_style) == 48 );
+C_ASSERT( sizeof(struct create_window_request) == 56 );
 C_ASSERT( offsetof(struct create_window_reply, handle) == 8 );
 C_ASSERT( offsetof(struct create_window_reply, parent) == 12 );
 C_ASSERT( offsetof(struct create_window_reply, owner) == 16 );
 C_ASSERT( offsetof(struct create_window_reply, extra) == 20 );
 C_ASSERT( offsetof(struct create_window_reply, class_ptr) == 24 );
-C_ASSERT( offsetof(struct create_window_reply, dpi_context) == 32 );
-C_ASSERT( sizeof(struct create_window_reply) == 40 );
+C_ASSERT( sizeof(struct create_window_reply) == 32 );
 C_ASSERT( offsetof(struct destroy_window_request, handle) == 12 );
 C_ASSERT( sizeof(struct destroy_window_request) == 16 );
 C_ASSERT( offsetof(struct get_desktop_window_request, force) == 12 );
@@ -1458,51 +1478,49 @@ C_ASSERT( offsetof(struct set_window_owner_reply, full_owner) == 8 );
 C_ASSERT( offsetof(struct set_window_owner_reply, prev_owner) == 12 );
 C_ASSERT( sizeof(struct set_window_owner_reply) == 16 );
 C_ASSERT( offsetof(struct get_window_info_request, handle) == 12 );
-C_ASSERT( sizeof(struct get_window_info_request) == 16 );
-C_ASSERT( offsetof(struct get_window_info_reply, full_handle) == 8 );
-C_ASSERT( offsetof(struct get_window_info_reply, last_active) == 12 );
-C_ASSERT( offsetof(struct get_window_info_reply, pid) == 16 );
-C_ASSERT( offsetof(struct get_window_info_reply, tid) == 20 );
-C_ASSERT( offsetof(struct get_window_info_reply, atom) == 24 );
-C_ASSERT( offsetof(struct get_window_info_reply, is_unicode) == 28 );
-C_ASSERT( offsetof(struct get_window_info_reply, dpi_context) == 32 );
-C_ASSERT( sizeof(struct get_window_info_reply) == 40 );
-C_ASSERT( offsetof(struct set_window_info_request, flags) == 12 );
-C_ASSERT( offsetof(struct set_window_info_request, is_unicode) == 14 );
-C_ASSERT( offsetof(struct set_window_info_request, handle) == 16 );
-C_ASSERT( offsetof(struct set_window_info_request, style) == 20 );
-C_ASSERT( offsetof(struct set_window_info_request, ex_style) == 24 );
-C_ASSERT( offsetof(struct set_window_info_request, extra_size) == 28 );
-C_ASSERT( offsetof(struct set_window_info_request, instance) == 32 );
-C_ASSERT( offsetof(struct set_window_info_request, user_data) == 40 );
-C_ASSERT( offsetof(struct set_window_info_request, extra_value) == 48 );
-C_ASSERT( offsetof(struct set_window_info_request, extra_offset) == 56 );
-C_ASSERT( sizeof(struct set_window_info_request) == 64 );
-C_ASSERT( offsetof(struct set_window_info_reply, old_style) == 8 );
-C_ASSERT( offsetof(struct set_window_info_reply, old_ex_style) == 12 );
-C_ASSERT( offsetof(struct set_window_info_reply, old_instance) == 16 );
-C_ASSERT( offsetof(struct set_window_info_reply, old_user_data) == 24 );
-C_ASSERT( offsetof(struct set_window_info_reply, old_extra_value) == 32 );
-C_ASSERT( offsetof(struct set_window_info_reply, old_id) == 40 );
-C_ASSERT( sizeof(struct set_window_info_reply) == 48 );
+C_ASSERT( offsetof(struct get_window_info_request, offset) == 16 );
+C_ASSERT( offsetof(struct get_window_info_request, size) == 20 );
+C_ASSERT( sizeof(struct get_window_info_request) == 24 );
+C_ASSERT( offsetof(struct get_window_info_reply, last_active) == 8 );
+C_ASSERT( offsetof(struct get_window_info_reply, is_unicode) == 12 );
+C_ASSERT( offsetof(struct get_window_info_reply, info) == 16 );
+C_ASSERT( sizeof(struct get_window_info_reply) == 24 );
+C_ASSERT( offsetof(struct init_window_info_request, handle) == 12 );
+C_ASSERT( offsetof(struct init_window_info_request, style) == 16 );
+C_ASSERT( offsetof(struct init_window_info_request, ex_style) == 20 );
+C_ASSERT( offsetof(struct init_window_info_request, is_unicode) == 24 );
+C_ASSERT( sizeof(struct init_window_info_request) == 32 );
+C_ASSERT( sizeof(struct init_window_info_reply) == 8 );
+C_ASSERT( offsetof(struct set_window_info_request, handle) == 12 );
+C_ASSERT( offsetof(struct set_window_info_request, offset) == 16 );
+C_ASSERT( offsetof(struct set_window_info_request, size) == 20 );
+C_ASSERT( offsetof(struct set_window_info_request, new_info) == 24 );
+C_ASSERT( sizeof(struct set_window_info_request) == 32 );
+C_ASSERT( offsetof(struct set_window_info_reply, old_info) == 8 );
+C_ASSERT( sizeof(struct set_window_info_reply) == 16 );
 C_ASSERT( offsetof(struct set_parent_request, handle) == 12 );
 C_ASSERT( offsetof(struct set_parent_request, parent) == 16 );
 C_ASSERT( sizeof(struct set_parent_request) == 24 );
 C_ASSERT( offsetof(struct set_parent_reply, old_parent) == 8 );
 C_ASSERT( offsetof(struct set_parent_reply, full_parent) == 12 );
-C_ASSERT( offsetof(struct set_parent_reply, dpi_context) == 16 );
-C_ASSERT( sizeof(struct set_parent_reply) == 24 );
+C_ASSERT( sizeof(struct set_parent_reply) == 16 );
 C_ASSERT( offsetof(struct get_window_parents_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_window_parents_request) == 16 );
 C_ASSERT( offsetof(struct get_window_parents_reply, count) == 8 );
 C_ASSERT( sizeof(struct get_window_parents_reply) == 16 );
-C_ASSERT( offsetof(struct get_window_children_request, desktop) == 12 );
-C_ASSERT( offsetof(struct get_window_children_request, parent) == 16 );
-C_ASSERT( offsetof(struct get_window_children_request, atom) == 20 );
-C_ASSERT( offsetof(struct get_window_children_request, tid) == 24 );
-C_ASSERT( sizeof(struct get_window_children_request) == 32 );
-C_ASSERT( offsetof(struct get_window_children_reply, count) == 8 );
-C_ASSERT( sizeof(struct get_window_children_reply) == 16 );
+C_ASSERT( offsetof(struct get_window_list_request, desktop) == 12 );
+C_ASSERT( offsetof(struct get_window_list_request, handle) == 16 );
+C_ASSERT( offsetof(struct get_window_list_request, tid) == 20 );
+C_ASSERT( offsetof(struct get_window_list_request, children) == 24 );
+C_ASSERT( sizeof(struct get_window_list_request) == 32 );
+C_ASSERT( offsetof(struct get_window_list_reply, count) == 8 );
+C_ASSERT( sizeof(struct get_window_list_reply) == 16 );
+C_ASSERT( offsetof(struct get_class_windows_request, parent) == 12 );
+C_ASSERT( offsetof(struct get_class_windows_request, child) == 16 );
+C_ASSERT( offsetof(struct get_class_windows_request, atom) == 20 );
+C_ASSERT( sizeof(struct get_class_windows_request) == 24 );
+C_ASSERT( offsetof(struct get_class_windows_reply, count) == 8 );
+C_ASSERT( sizeof(struct get_class_windows_reply) == 16 );
 C_ASSERT( offsetof(struct get_window_children_from_point_request, parent) == 12 );
 C_ASSERT( offsetof(struct get_window_children_from_point_request, x) == 16 );
 C_ASSERT( offsetof(struct get_window_children_from_point_request, y) == 20 );
@@ -1532,7 +1550,6 @@ C_ASSERT( sizeof(struct set_window_pos_request) == 64 );
 C_ASSERT( offsetof(struct set_window_pos_reply, new_style) == 8 );
 C_ASSERT( offsetof(struct set_window_pos_reply, new_ex_style) == 12 );
 C_ASSERT( offsetof(struct set_window_pos_reply, surface_win) == 16 );
-C_ASSERT( offsetof(struct set_window_pos_reply, needs_update) == 20 );
 C_ASSERT( sizeof(struct set_window_pos_reply) == 24 );
 C_ASSERT( offsetof(struct get_window_rectangles_request, handle) == 12 );
 C_ASSERT( offsetof(struct get_window_rectangles_request, relative) == 16 );
@@ -1620,15 +1637,19 @@ C_ASSERT( offsetof(struct open_winstation_reply, handle) == 8 );
 C_ASSERT( sizeof(struct open_winstation_reply) == 16 );
 C_ASSERT( offsetof(struct close_winstation_request, handle) == 12 );
 C_ASSERT( sizeof(struct close_winstation_request) == 16 );
+C_ASSERT( offsetof(struct set_winstation_monitors_request, increment) == 12 );
 C_ASSERT( sizeof(struct set_winstation_monitors_request) == 16 );
+C_ASSERT( offsetof(struct set_winstation_monitors_reply, serial) == 8 );
+C_ASSERT( sizeof(struct set_winstation_monitors_reply) == 16 );
 C_ASSERT( sizeof(struct get_process_winstation_request) == 16 );
 C_ASSERT( offsetof(struct get_process_winstation_reply, handle) == 8 );
 C_ASSERT( sizeof(struct get_process_winstation_reply) == 16 );
 C_ASSERT( offsetof(struct set_process_winstation_request, handle) == 12 );
 C_ASSERT( sizeof(struct set_process_winstation_request) == 16 );
-C_ASSERT( offsetof(struct enum_winstation_request, index) == 12 );
+C_ASSERT( offsetof(struct enum_winstation_request, handle) == 12 );
 C_ASSERT( sizeof(struct enum_winstation_request) == 16 );
-C_ASSERT( offsetof(struct enum_winstation_reply, next) == 8 );
+C_ASSERT( offsetof(struct enum_winstation_reply, count) == 8 );
+C_ASSERT( offsetof(struct enum_winstation_reply, total) == 12 );
 C_ASSERT( sizeof(struct enum_winstation_reply) == 16 );
 C_ASSERT( offsetof(struct create_desktop_request, flags) == 12 );
 C_ASSERT( offsetof(struct create_desktop_request, access) == 16 );
@@ -1662,11 +1683,6 @@ C_ASSERT( offsetof(struct set_thread_desktop_request, handle) == 12 );
 C_ASSERT( sizeof(struct set_thread_desktop_request) == 16 );
 C_ASSERT( offsetof(struct set_thread_desktop_reply, locator) == 8 );
 C_ASSERT( sizeof(struct set_thread_desktop_reply) == 24 );
-C_ASSERT( offsetof(struct enum_desktop_request, winstation) == 12 );
-C_ASSERT( offsetof(struct enum_desktop_request, index) == 16 );
-C_ASSERT( sizeof(struct enum_desktop_request) == 24 );
-C_ASSERT( offsetof(struct enum_desktop_reply, next) == 8 );
-C_ASSERT( sizeof(struct enum_desktop_reply) == 16 );
 C_ASSERT( offsetof(struct set_user_object_info_request, handle) == 12 );
 C_ASSERT( offsetof(struct set_user_object_info_request, flags) == 16 );
 C_ASSERT( offsetof(struct set_user_object_info_request, obj_flags) == 20 );
@@ -2094,6 +2110,8 @@ C_ASSERT( offsetof(struct make_process_system_request, handle) == 12 );
 C_ASSERT( sizeof(struct make_process_system_request) == 16 );
 C_ASSERT( offsetof(struct make_process_system_reply, event) == 8 );
 C_ASSERT( sizeof(struct make_process_system_reply) == 16 );
+C_ASSERT( offsetof(struct grant_process_admin_token_request, handle) == 12 );
+C_ASSERT( sizeof(struct grant_process_admin_token_request) == 16 );
 C_ASSERT( offsetof(struct get_token_info_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_token_info_request) == 16 );
 C_ASSERT( offsetof(struct get_token_info_reply, token_id) == 8 );
@@ -2101,10 +2119,11 @@ C_ASSERT( offsetof(struct get_token_info_reply, modified_id) == 16 );
 C_ASSERT( offsetof(struct get_token_info_reply, session_id) == 24 );
 C_ASSERT( offsetof(struct get_token_info_reply, primary) == 28 );
 C_ASSERT( offsetof(struct get_token_info_reply, impersonation_level) == 32 );
-C_ASSERT( offsetof(struct get_token_info_reply, elevation) == 36 );
-C_ASSERT( offsetof(struct get_token_info_reply, group_count) == 40 );
-C_ASSERT( offsetof(struct get_token_info_reply, privilege_count) == 44 );
-C_ASSERT( sizeof(struct get_token_info_reply) == 48 );
+C_ASSERT( offsetof(struct get_token_info_reply, elevation_type) == 36 );
+C_ASSERT( offsetof(struct get_token_info_reply, is_elevated) == 40 );
+C_ASSERT( offsetof(struct get_token_info_reply, group_count) == 44 );
+C_ASSERT( offsetof(struct get_token_info_reply, privilege_count) == 48 );
+C_ASSERT( sizeof(struct get_token_info_reply) == 56 );
 C_ASSERT( offsetof(struct create_linked_token_request, handle) == 12 );
 C_ASSERT( sizeof(struct create_linked_token_request) == 16 );
 C_ASSERT( offsetof(struct create_linked_token_reply, linked) == 8 );
@@ -2182,11 +2201,13 @@ C_ASSERT( offsetof(struct set_window_layered_info_request, color_key) == 16 );
 C_ASSERT( offsetof(struct set_window_layered_info_request, alpha) == 20 );
 C_ASSERT( offsetof(struct set_window_layered_info_request, flags) == 24 );
 C_ASSERT( sizeof(struct set_window_layered_info_request) == 32 );
+C_ASSERT( offsetof(struct alloc_user_handle_request, type) == 12 );
 C_ASSERT( sizeof(struct alloc_user_handle_request) == 16 );
 C_ASSERT( offsetof(struct alloc_user_handle_reply, handle) == 8 );
 C_ASSERT( sizeof(struct alloc_user_handle_reply) == 16 );
-C_ASSERT( offsetof(struct free_user_handle_request, handle) == 12 );
-C_ASSERT( sizeof(struct free_user_handle_request) == 16 );
+C_ASSERT( offsetof(struct free_user_handle_request, type) == 12 );
+C_ASSERT( offsetof(struct free_user_handle_request, handle) == 16 );
+C_ASSERT( sizeof(struct free_user_handle_request) == 24 );
 C_ASSERT( offsetof(struct set_cursor_request, flags) == 12 );
 C_ASSERT( offsetof(struct set_cursor_request, handle) == 16 );
 C_ASSERT( offsetof(struct set_cursor_request, show_count) == 20 );
@@ -2248,6 +2269,13 @@ C_ASSERT( offsetof(struct suspend_process_request, handle) == 12 );
 C_ASSERT( sizeof(struct suspend_process_request) == 16 );
 C_ASSERT( offsetof(struct resume_process_request, handle) == 12 );
 C_ASSERT( sizeof(struct resume_process_request) == 16 );
+C_ASSERT( offsetof(struct get_next_process_request, last) == 12 );
+C_ASSERT( offsetof(struct get_next_process_request, access) == 16 );
+C_ASSERT( offsetof(struct get_next_process_request, attributes) == 20 );
+C_ASSERT( offsetof(struct get_next_process_request, flags) == 24 );
+C_ASSERT( sizeof(struct get_next_process_request) == 32 );
+C_ASSERT( offsetof(struct get_next_process_reply, handle) == 8 );
+C_ASSERT( sizeof(struct get_next_process_reply) == 16 );
 C_ASSERT( offsetof(struct get_next_thread_request, process) == 12 );
 C_ASSERT( offsetof(struct get_next_thread_request, last) == 16 );
 C_ASSERT( offsetof(struct get_next_thread_request, access) == 20 );
