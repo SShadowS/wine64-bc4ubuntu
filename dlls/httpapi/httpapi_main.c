@@ -94,35 +94,48 @@ ULONG WINAPI HttpInitialize(HTTPAPI_VERSION version, ULONG flags, void *reserved
             || version.HttpApiMinorVersion)
         return ERROR_REVISION_MISMATCH;
 
-    if (flags & ~HTTP_INITIALIZE_SERVER)
+    if (flags & ~(HTTP_INITIALIZE_SERVER | HTTP_INITIALIZE_CONFIG))
     {
-        FIXME("Unhandled flags %#lx.\n", flags);
+        FIXME("Unhandled flags %#lx.\n", flags & ~(HTTP_INITIALIZE_SERVER | HTTP_INITIALIZE_CONFIG));
         return ERROR_SUCCESS;
     }
 
     if (reserved)
         WARN("Reserved parameter is not NULL (%p)\n", reserved);
 
-    if (!(manager = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT)))
-        return GetLastError();
-
-    if (!(service = OpenServiceW(manager, L"http", SERVICE_START)))
+    if (flags & HTTP_INITIALIZE_SERVER)
     {
-        ERR("Failed to open HTTP service, error %lu.\n", GetLastError());
-        CloseServiceHandle(manager);
-        return GetLastError();
-    }
+        if (!(manager = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT)))
+            return GetLastError();
 
-    if (!StartServiceW(service, 0, NULL) && GetLastError() != ERROR_SERVICE_ALREADY_RUNNING)
-    {
-        ERR("Failed to start HTTP service, error %lu.\n", GetLastError());
+        if (!(service = OpenServiceW(manager, L"http", SERVICE_START)))
+        {
+            ERR("Failed to open HTTP service, error %lu.\n", GetLastError());
+            CloseServiceHandle(manager);
+            return GetLastError();
+        }
+
+        if (!StartServiceW(service, 0, NULL) && GetLastError() != ERROR_SERVICE_ALREADY_RUNNING)
+        {
+            ERR("Failed to start HTTP service, error %lu.\n", GetLastError());
+            CloseServiceHandle(service);
+            CloseServiceHandle(manager);
+            return GetLastError();
+        }
+
         CloseServiceHandle(service);
         CloseServiceHandle(manager);
-        return GetLastError();
     }
 
-    CloseServiceHandle(service);
-    CloseServiceHandle(manager);
+    if (flags & HTTP_INITIALIZE_CONFIG)
+    {
+        /* HTTP_INITIALIZE_CONFIG is used to initialize configuration APIs.
+         * On Windows, this would set up access to the HTTP Server API configuration store.
+         * For Wine, we don't need to do anything special here as configuration
+         * functions are already available. */
+        TRACE("HTTP_INITIALIZE_CONFIG flag set, configuration APIs initialized.\n");
+    }
+
     return ERROR_SUCCESS;
 }
 
@@ -201,9 +214,16 @@ ULONG WINAPI HttpTerminate(ULONG flags, void *reserved)
         CloseServiceHandle(service);
         CloseServiceHandle(manager);
     }
-    else if (flags) /* Any other flags are unhandled */
+    if (flags & HTTP_INITIALIZE_CONFIG)
     {
-        FIXME("Unhandled flags %#lx.\n", flags);
+        /* Clean up configuration-related resources if any.
+         * Currently no specific cleanup needed for Wine. */
+        TRACE("HTTP_INITIALIZE_CONFIG cleanup.\n");
+    }
+    
+    if (flags & ~(HTTP_INITIALIZE_SERVER | HTTP_INITIALIZE_CONFIG))
+    {
+        FIXME("Unhandled flags %#lx.\n", flags & ~(HTTP_INITIALIZE_SERVER | HTTP_INITIALIZE_CONFIG));
     }
         
     return NO_ERROR;
@@ -602,6 +622,8 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
     if (!(buffer = malloc(sizeof(struct http_response) + len)))
         return ERROR_OUTOFMEMORY;
     buffer->id = id;
+    buffer->is_body = FALSE;
+    buffer->more_data = !!(flags & HTTP_SEND_RESPONSE_FLAG_MORE_DATA);
     buffer->response_flags = flags;
     buffer->len = len;
     sprintf(buffer->buffer, "HTTP/1.1 %u %.*s\r\n", response->s.StatusCode,
@@ -720,6 +742,8 @@ ULONG WINAPI HttpSendResponseEntityBody(HANDLE queue, HTTP_REQUEST_ID id,
     if (!(buffer = malloc(sizeof(struct http_response) + len)))
         return ERROR_OUTOFMEMORY;
     buffer->id = id;
+    buffer->is_body = TRUE;
+    buffer->more_data = !!(flags & HTTP_SEND_RESPONSE_FLAG_MORE_DATA);
     buffer->response_flags = flags;
     buffer->len = len;
 
@@ -902,6 +926,14 @@ ULONG WINAPI HttpSetUrlGroupProperty(HTTP_URL_GROUP_ID id, HTTP_SERVER_PROPERTY 
 
     switch (property)
     {
+        case HttpServerAuthenticationProperty:
+        {
+            /* Authentication property configuration. This would typically include
+             * authentication schemes, realm, domains, etc.
+             * For now, we accept the settings and return success. */
+            TRACE("Authentication property set, length %lu.\n", length);
+            return ERROR_SUCCESS;
+        }
         case HttpServerBindingProperty:
         {
             const HTTP_BINDING_INFO *info = value;
@@ -918,6 +950,27 @@ ULONG WINAPI HttpSetUrlGroupProperty(HTTP_URL_GROUP_ID id, HTTP_SERVER_PROPERTY 
         case HttpServerLoggingProperty:
             WARN("Ignoring logging property.\n");
             return ERROR_SUCCESS;
+        case HttpServerQosProperty:
+        {
+            const HTTP_QOS_SETTING_INFO *qos_info = value;
+            
+            if (length < sizeof(HTTP_QOS_SETTING_INFO))
+                return ERROR_INSUFFICIENT_BUFFER;
+                
+            TRACE("QoS property set, QosType %u.\n", qos_info->QosType);
+            /* QoS settings are not implemented in Wine's HTTP.sys driver yet.
+             * Return success to allow applications to continue. */
+            return ERROR_SUCCESS;
+        }
+        case HttpServerTimeoutsProperty:
+        {
+            /* The timeout property structure contains various timeout values like:
+             * EntityBodyTimeout, DrainEntityBodyTimeout, RequestQueueTimeout,
+             * IdleConnectionTimeout, HeaderWaitTimeout, MinSendRate.
+             * For now, we just accept the settings and return success. */
+            TRACE("Timeouts property set, length %lu.\n", length);
+            return ERROR_SUCCESS;
+        }
         default:
             FIXME("Unhandled property %u.\n", property);
             return ERROR_CALL_NOT_IMPLEMENTED;
@@ -1062,6 +1115,7 @@ ULONG WINAPI HttpCreateRequestQueue(HTTPAPI_VERSION version, const WCHAR *name,
     if (sa && sa->bInheritHandle)
         attr.Attributes |= OBJ_INHERIT;
     attr.SecurityDescriptor = sa ? sa->lpSecurityDescriptor : NULL;
+    
     return RtlNtStatusToDosError(NtCreateFile(handle, SYNCHRONIZE, &attr, &iosb, NULL,
             FILE_ATTRIBUTE_NORMAL, 0, FILE_OPEN, FILE_NON_DIRECTORY_FILE, NULL, 0));
 }
@@ -1243,6 +1297,9 @@ ULONG WINAPI HttpQueryServerSessionProperty(HTTP_SERVER_SESSION_ID id,
  */
 ULONG WINAPI HttpCancelHttpRequest(HANDLE queue, HTTP_REQUEST_ID id, OVERLAPPED *lpOverlapped)
 {
+    struct http_cancel_request_params params = {
+        .id = id,
+    };
     OVERLAPPED local_ovl;
     ULONG ret = ERROR_SUCCESS;
     DWORD bytes_returned;
@@ -1259,42 +1316,29 @@ ULONG WINAPI HttpCancelHttpRequest(HANDLE queue, HTTP_REQUEST_ID id, OVERLAPPED 
     if (!current_ovl) /* Synchronous cancel operation */
     {
         memset(&local_ovl, 0, sizeof(local_ovl));
-        /* For a truly synchronous call where DeviceIoControl itself is synchronous,
-         * current_ovl would be &local_ovl, but local_ovl.hEvent is not set.
-         * If DeviceIoControl is called with a NULL OVERLAPPED, it's synchronous.
-         * So, if lpOverlapped is NULL, current_ovl will be NULL.
-         */
+        local_ovl.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+        if (!local_ovl.hEvent)
+            return GetLastError();
+        current_ovl = &local_ovl;
     }
 
-    /* The IOCTL_HTTP_CANCEL_REQUEST would take HTTP_REQUEST_ID as input */
-    if (!DeviceIoControl(queue, IOCTL_HTTP_CANCEL_REQUEST,
-                         &id, sizeof(id),
-                         NULL, 0, &bytes_returned, current_ovl)) /* Pass current_ovl (which is lpOverlapped) */
+    /* The IOCTL_HTTP_CANCEL_REQUEST takes cancel request params as input */
+    if (!DeviceIoControl(queue, IOCTL_HTTP_CANCEL_REQUEST, &params, sizeof(params),
+                         NULL, 0, &bytes_returned, current_ovl))
     {
         ret = GetLastError();
     }
 
-    if (!lpOverlapped && ret == ERROR_IO_PENDING) /* If called synchronously but returned pending */
+    if (!lpOverlapped && ret == ERROR_IO_PENDING)
     {
-        /* This indicates the IOCTL might only support asynchronous completion,
-         * or it completed synchronously with an error that looks like pending.
-         * A truly synchronous call to DeviceIoControl (with OVERLAPPED == NULL) should not return ERROR_IO_PENDING.
-         * If it does, it's an API misuse or driver issue.
-         * For now, we handle the case where GetOverlappedResult might be needed if we created a local event.
-         * However, without a local event for a NULL lpOverlapped, GetOverlappedResult cannot be used.
-         */
-        WARN("Synchronous HttpCancelHttpRequest returned PENDING (Error %lu). This is unexpected for a synchronous call.\n", ret);
-        /* If the IOCTL is always async, the caller should provide an OVERLAPPED structure.
-         * If they didn't, and it pends, we return the pending error.
-         * The original code for synchronous HttpWaitForDisconnect created a local event.
-         * We could do that here too if synchronous completion with GetOverlappedResult is desired.
-         * For now, let's simplify and assume if lpOverlapped is NULL, DeviceIoControl behaves synchronously.
-         * If it returns ERROR_IO_PENDING with a NULL lpOverlapped, that's an issue.
-         * The previous logic for local_ovl was incomplete without an event.
-         * Let's stick to passing current_ovl (which is lpOverlapped) directly.
-         * If lpOverlapped is NULL, DeviceIoControl is synchronous.
-         */
+        if (GetOverlappedResult(queue, current_ovl, &bytes_returned, TRUE))
+            ret = ERROR_SUCCESS;
+        else
+            ret = GetLastError();
     }
+
+    if (!lpOverlapped && local_ovl.hEvent)
+        CloseHandle(local_ovl.hEvent);
     
     return (ret == ERROR_SUCCESS) ? NO_ERROR : ret;
 }
@@ -1497,6 +1541,9 @@ ULONG WINAPI HttpReadFragmentFromCache(HANDLE cache, const WCHAR *url, HTTP_BYTE
  */
 ULONG WINAPI HttpWaitForDisconnect(HANDLE queue, HTTP_CONNECTION_ID connection_id, OVERLAPPED *overlapped)
 {
+    struct http_wait_for_disconnect_params params = {
+        .id = connection_id,
+    };
     ULONG ret = ERROR_SUCCESS;
     OVERLAPPED local_ovl;
     OVERLAPPED *povl = overlapped;
@@ -1520,8 +1567,7 @@ ULONG WINAPI HttpWaitForDisconnect(HANDLE queue, HTTP_CONNECTION_ID connection_i
         povl = &local_ovl;
     }
 
-    if (!DeviceIoControl(queue, IOCTL_HTTP_WAIT_FOR_DISCONNECT,
-                         &connection_id, sizeof(connection_id),
+    if (!DeviceIoControl(queue, IOCTL_HTTP_WAIT_FOR_DISCONNECT, &params, sizeof(params),
                          NULL, 0, &bytes_returned, povl))
     {
         ret = GetLastError();
@@ -1538,7 +1584,10 @@ ULONG WINAPI HttpWaitForDisconnect(HANDLE queue, HTTP_CONNECTION_ID connection_i
     if (!overlapped && local_ovl.hEvent)
         CloseHandle(local_ovl.hEvent);
 
-    return ret == ERROR_IO_PENDING ? ret : (ret == ERROR_SUCCESS ? NO_ERROR : ret);
+    if (ret == ERROR_CONNECTION_INVALID)
+        return NO_ERROR;
+
+    return (ret == ERROR_SUCCESS) ? NO_ERROR : ret;
 }
 
 /***********************************************************************
@@ -1547,6 +1596,9 @@ ULONG WINAPI HttpWaitForDisconnect(HANDLE queue, HTTP_CONNECTION_ID connection_i
 ULONG WINAPI HttpWaitForDisconnectEx(HANDLE queue, HTTP_CONNECTION_ID connection_id,
                                      ULONG reserved, OVERLAPPED *overlapped)
 {
+    struct http_wait_for_disconnect_params params = {
+        .id = connection_id,
+    };
     ULONG ret = ERROR_SUCCESS;
     OVERLAPPED local_ovl;
     OVERLAPPED *povl = overlapped;
@@ -1573,8 +1625,7 @@ ULONG WINAPI HttpWaitForDisconnectEx(HANDLE queue, HTTP_CONNECTION_ID connection
         povl = &local_ovl;
     }
 
-    if (!DeviceIoControl(queue, IOCTL_HTTP_WAIT_FOR_DISCONNECT,
-                         &connection_id, sizeof(connection_id),
+    if (!DeviceIoControl(queue, IOCTL_HTTP_WAIT_FOR_DISCONNECT, &params, sizeof(params),
                          NULL, 0, &bytes_returned, povl))
     {
         ret = GetLastError();
@@ -1591,5 +1642,8 @@ ULONG WINAPI HttpWaitForDisconnectEx(HANDLE queue, HTTP_CONNECTION_ID connection
     if (!overlapped && local_ovl.hEvent)
         CloseHandle(local_ovl.hEvent);
     
-    return ret == ERROR_IO_PENDING ? ret : (ret == ERROR_SUCCESS ? NO_ERROR : ret);
+    if (ret == ERROR_CONNECTION_INVALID)
+        return NO_ERROR;
+
+    return (ret == ERROR_SUCCESS) ? NO_ERROR : ret;
 }
