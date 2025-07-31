@@ -1,0 +1,10 @@
+diff a/include/wine/http.h b/include/wine/http.h	(rejected hunks)
+@@ -46,6 +46,8 @@ struct http_receive_request_params
+ struct http_response
+ {
+     HTTP_REQUEST_ID id;
++    BOOL is_body;
++    BOOL more_data;
+     int len;
+     char buffer[1];
+ };

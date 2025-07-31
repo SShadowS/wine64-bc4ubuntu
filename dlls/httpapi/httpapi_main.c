@@ -30,6 +30,18 @@
 #define FILE_DEVICE_HTTP 0x00000037
 #endif
 
+#ifndef HTTP_SEND_RESPONSE_FLAG_DISCONNECT
+#define HTTP_SEND_RESPONSE_FLAG_DISCONNECT 0x00000001
+#endif
+
+#ifndef HTTP_SEND_RESPONSE_FLAG_MORE_DATA
+#define HTTP_SEND_RESPONSE_FLAG_MORE_DATA 0x00000002
+#endif
+
+#ifndef HTTP_SEND_RESPONSE_FLAG_BUFFER_DATA
+#define HTTP_SEND_RESPONSE_FLAG_BUFFER_DATA 0x00000004
+#endif
+
 #ifndef CTL_CODE
 #define CTL_CODE(DeviceType, Function, Method, Access) \
     (((DeviceType) << 16) | ((Access) << 14) | ((Function) << 2) | (Method))
@@ -68,6 +80,16 @@ typedef enum _HTTP_PERFORMANCE_COUNTER_ID {
 } HTTP_PERFORMANCE_COUNTER_ID;
 
 WINE_DEFAULT_DEBUG_CHANNEL(http);
+
+/* Global critical section for thread safety */
+static CRITICAL_SECTION g_httpapi_cs;
+static CRITICAL_SECTION_DEBUG g_httpapi_cs_debug =
+{
+    0, 0, &g_httpapi_cs,
+    { &g_httpapi_cs_debug.ProcessLocksList, &g_httpapi_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": g_httpapi_cs") }
+};
+static CRITICAL_SECTION g_httpapi_cs = { &g_httpapi_cs_debug, -1, 0, 0, 0, 0 };
 
 /***********************************************************************
  *        HttpInitialize       (HTTPAPI.@)
@@ -227,6 +249,47 @@ ULONG WINAPI HttpTerminate(ULONG flags, void *reserved)
     }
         
     return NO_ERROR;
+}
+
+/***********************************************************************
+ *        HttpIsFeatureSupported     (HTTPAPI.@)
+ *
+ * Check if a specific HTTP Server API feature is supported.
+ *
+ * PARAMS
+ *   feature_id [I] The feature to check
+ *
+ * RETURNS
+ *   TRUE if the feature is supported, FALSE otherwise.
+ */
+BOOL WINAPI HttpIsFeatureSupported(ULONG feature_id)
+{
+    TRACE("feature_id %lu\n", feature_id);
+
+    switch (feature_id)
+    {
+        case 0: /* HttpFeatureUnknown */
+            return FALSE;
+            
+        case 1: /* HttpFeatureResponseTrailers */
+            /* Response trailers in HTTP/1.1 chunked responses */
+            TRACE("HttpFeatureResponseTrailers not supported\n");
+            return FALSE;
+            
+        case 2: /* HttpFeatureApiTimings */
+            /* Performance counters for HTTP API calls */
+            TRACE("HttpFeatureApiTimings not supported\n");
+            return FALSE;
+            
+        case 3: /* HttpFeatureDelegateEx */
+            /* Extended delegation for kernel-mode drivers */
+            TRACE("HttpFeatureDelegateEx not supported\n");
+            return FALSE;
+            
+        default:
+            WARN("Unknown feature_id %lu\n", feature_id);
+            return FALSE;
+    }
 }
 
 /***********************************************************************
@@ -580,8 +643,14 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
             queue, wine_dbgstr_longlong(id), flags, response, cache_policy,
             ret_size, reserved1, reserved2, ovl, log_data);
 
-    if (flags & ~HTTP_SEND_RESPONSE_FLAG_MORE_DATA)
-        FIXME("Unhandled flags %#lx.\n", flags & ~HTTP_SEND_RESPONSE_FLAG_MORE_DATA);
+    if (flags & ~(HTTP_SEND_RESPONSE_FLAG_DISCONNECT | HTTP_SEND_RESPONSE_FLAG_MORE_DATA | HTTP_SEND_RESPONSE_FLAG_BUFFER_DATA))
+        FIXME("Unhandled flags %#lx.\n", flags & ~(HTTP_SEND_RESPONSE_FLAG_DISCONNECT | HTTP_SEND_RESPONSE_FLAG_MORE_DATA | HTTP_SEND_RESPONSE_FLAG_BUFFER_DATA));
+    
+    if (flags & HTTP_SEND_RESPONSE_FLAG_DISCONNECT)
+        TRACE("HTTP_SEND_RESPONSE_FLAG_DISCONNECT is set, connection will be closed after send.\n");
+    
+    if (flags & HTTP_SEND_RESPONSE_FLAG_BUFFER_DATA)
+        TRACE("HTTP_SEND_RESPONSE_FLAG_BUFFER_DATA is set.\n");
     if (response->s.Flags)
         FIXME("Unhandled response flags %#lx.\n", response->s.Flags);
     if (cache_policy)
@@ -723,8 +792,14 @@ ULONG WINAPI HttpSendResponseEntityBody(HANDLE queue, HTTP_REQUEST_ID id,
     if (!id)
         return ERROR_CONNECTION_INVALID;
 
-    if (flags & ~HTTP_SEND_RESPONSE_FLAG_MORE_DATA)
-        FIXME("Unhandled flags %#lx.\n", flags & ~HTTP_SEND_RESPONSE_FLAG_MORE_DATA);
+    if (flags & ~(HTTP_SEND_RESPONSE_FLAG_DISCONNECT | HTTP_SEND_RESPONSE_FLAG_MORE_DATA | HTTP_SEND_RESPONSE_FLAG_BUFFER_DATA))
+        FIXME("Unhandled flags %#lx.\n", flags & ~(HTTP_SEND_RESPONSE_FLAG_DISCONNECT | HTTP_SEND_RESPONSE_FLAG_MORE_DATA | HTTP_SEND_RESPONSE_FLAG_BUFFER_DATA));
+    
+    if (flags & HTTP_SEND_RESPONSE_FLAG_DISCONNECT)
+        TRACE("HTTP_SEND_RESPONSE_FLAG_DISCONNECT is set, connection will be closed after send.\n");
+    
+    if (flags & HTTP_SEND_RESPONSE_FLAG_BUFFER_DATA)
+        TRACE("HTTP_SEND_RESPONSE_FLAG_BUFFER_DATA is set.\n");
     if (log_data)
         WARN("Ignoring log_data.\n");
 
@@ -770,12 +845,19 @@ ULONG WINAPI HttpSendResponseEntityBody(HANDLE queue, HTTP_REQUEST_ID id,
     return ret;
 }
 
+/* Structure to hold individual URLs within a URL group */
+struct url_group_url
+{
+    struct list entry;
+    WCHAR *url;
+    HTTP_URL_CONTEXT context;
+};
+
 struct url_group
 {
     struct list entry, session_entry;
     HANDLE queue;
-    WCHAR *url;
-    HTTP_URL_CONTEXT context;
+    struct list urls;  /* List of url_group_url entries */
 };
 
 static struct list url_groups = LIST_INIT(url_groups);
@@ -786,11 +868,16 @@ static struct url_group *get_url_group(HTTP_URL_GROUP_ID id)
     
     if (!id) return NULL;
     
+    EnterCriticalSection(&g_httpapi_cs);
     LIST_FOR_EACH_ENTRY(group, &url_groups, struct url_group, entry)
     {
         if ((HTTP_URL_GROUP_ID)(ULONG_PTR)group == id)
+        {
+            LeaveCriticalSection(&g_httpapi_cs);
             return group;
+        }
     }
+    LeaveCriticalSection(&g_httpapi_cs);
     return NULL;
 }
 
@@ -808,11 +895,16 @@ static struct server_session *get_server_session(HTTP_SERVER_SESSION_ID id)
     
     if (!id) return NULL;
     
+    EnterCriticalSection(&g_httpapi_cs);
     LIST_FOR_EACH_ENTRY(session, &server_sessions, struct server_session, entry)
     {
         if ((HTTP_SERVER_SESSION_ID)(ULONG_PTR)session == id)
+        {
+            LeaveCriticalSection(&g_httpapi_cs);
             return session;
+        }
     }
+    LeaveCriticalSection(&g_httpapi_cs);
     return NULL;
 }
 
@@ -836,8 +928,10 @@ ULONG WINAPI HttpCreateServerSession(HTTPAPI_VERSION version, HTTP_SERVER_SESSIO
     if (!(session = malloc(sizeof(*session))))
         return ERROR_OUTOFMEMORY;
 
+    EnterCriticalSection(&g_httpapi_cs);
     list_add_tail(&server_sessions, &session->entry);
     list_init(&session->groups);
+    LeaveCriticalSection(&g_httpapi_cs);
 
     *id = (ULONG_PTR)session;
     return ERROR_SUCCESS;
@@ -856,11 +950,16 @@ ULONG WINAPI HttpCloseServerSession(HTTP_SERVER_SESSION_ID id)
     if (!(session = get_server_session(id)))
         return ERROR_INVALID_PARAMETER;
 
+    EnterCriticalSection(&g_httpapi_cs);
     LIST_FOR_EACH_ENTRY_SAFE(group, group_next, &session->groups, struct url_group, session_entry)
     {
+        LeaveCriticalSection(&g_httpapi_cs);
         HttpCloseUrlGroup((ULONG_PTR)group);
+        EnterCriticalSection(&g_httpapi_cs);
     }
     list_remove(&session->entry);
+    LeaveCriticalSection(&g_httpapi_cs);
+    
     free(session);
     return ERROR_SUCCESS;
 }
@@ -881,8 +980,12 @@ ULONG WINAPI HttpCreateUrlGroup(HTTP_SERVER_SESSION_ID session_id, HTTP_URL_GROU
 
     if (!(group = calloc(1, sizeof(*group))))
         return ERROR_OUTOFMEMORY;
+    
+    EnterCriticalSection(&g_httpapi_cs);
+    list_init(&group->urls);
     list_add_tail(&url_groups, &group->entry);
     list_add_tail(&session->groups, &group->session_entry);
+    LeaveCriticalSection(&g_httpapi_cs);
 
     *group_id = (ULONG_PTR)group;
 
@@ -895,14 +998,32 @@ ULONG WINAPI HttpCreateUrlGroup(HTTP_SERVER_SESSION_ID session_id, HTTP_URL_GROU
 ULONG WINAPI HttpCloseUrlGroup(HTTP_URL_GROUP_ID id)
 {
     struct url_group *group;
+    struct url_group_url *url_entry, *url_next;
 
     TRACE("id %s.\n", wine_dbgstr_longlong(id));
 
     if (!(group = get_url_group(id)))
         return ERROR_INVALID_PARAMETER;
 
+    EnterCriticalSection(&g_httpapi_cs);
+    /* Free all URLs in the group */
+    LIST_FOR_EACH_ENTRY_SAFE(url_entry, url_next, &group->urls, struct url_group_url, entry)
+    {
+        if (group->queue && url_entry->url)
+        {
+            LeaveCriticalSection(&g_httpapi_cs);
+            remove_url(group->queue, url_entry->url);
+            EnterCriticalSection(&g_httpapi_cs);
+        }
+        list_remove(&url_entry->entry);
+        free(url_entry->url);
+        free(url_entry);
+    }
+
     list_remove(&group->session_entry);
     list_remove(&group->entry);
+    LeaveCriticalSection(&g_httpapi_cs);
+    
     free(group);
 
     return ERROR_SUCCESS;
@@ -941,10 +1062,33 @@ ULONG WINAPI HttpSetUrlGroupProperty(HTTP_URL_GROUP_ID id, HTTP_SERVER_PROPERTY 
             if (length < sizeof(HTTP_BINDING_INFO))
                 return ERROR_INSUFFICIENT_BUFFER;
 
-            TRACE("Binding to queue %p.\n", info->RequestQueueHandle);
+            TRACE("Binding URL group %s to queue %p.\n", wine_dbgstr_longlong(id), info->RequestQueueHandle);
             group->queue = info->RequestQueueHandle;
-            if (group->url)
-                add_url(group->queue, group->url, group->context);
+            
+            /* Add all URLs in this group to the queue */
+            EnterCriticalSection(&g_httpapi_cs);
+            if (!list_empty(&group->urls))
+            {
+                struct url_group_url *url_entry;
+                LIST_FOR_EACH_ENTRY(url_entry, &group->urls, struct url_group_url, entry)
+                {
+                    ULONG ret;
+                    TRACE("Adding URL %s to newly bound queue\n", debugstr_w(url_entry->url));
+                    LeaveCriticalSection(&g_httpapi_cs);
+                    ret = add_url(group->queue, url_entry->url, url_entry->context);
+                    EnterCriticalSection(&g_httpapi_cs);
+                    if (ret)
+                    {
+                        WARN("Failed to add URL %s to queue: %lu\n", debugstr_w(url_entry->url), ret);
+                        /* Don't fail the binding, continue with other URLs */
+                    }
+                    else if (wcsstr(url_entry->url, L"BusinessCentral") || wcsstr(url_entry->url, L":7049"))
+                    {
+                        FIXME("BC URL %s successfully bound to queue %p\n", debugstr_w(url_entry->url), group->queue);
+                    }
+                }
+            }
+            LeaveCriticalSection(&g_httpapi_cs);
             return ERROR_SUCCESS;
         }
         case HttpServerLoggingProperty:
@@ -984,10 +1128,16 @@ ULONG WINAPI HttpAddUrlToUrlGroup(HTTP_URL_GROUP_ID id, const WCHAR *url,
         HTTP_URL_CONTEXT context, ULONG reserved)
 {
     struct url_group *group;
+    struct url_group_url *url_entry;
     ULONG ret;
 
     TRACE("id %s, url %s, context %s, reserved %#lx.\n", wine_dbgstr_longlong(id),
             debugstr_w(url), wine_dbgstr_longlong(context), reserved);
+
+    if (wcsstr(url, L"BusinessCentral") || wcsstr(url, L":7049"))
+    {
+        FIXME("BC adding URL to group: %s (group id=%s)\n", debugstr_w(url), wine_dbgstr_longlong(id));
+    }
 
     if (!url)
         return ERROR_INVALID_PARAMETER;
@@ -998,23 +1148,50 @@ ULONG WINAPI HttpAddUrlToUrlGroup(HTTP_URL_GROUP_ID id, const WCHAR *url,
     if (reserved)
         WARN("Reserved parameter is not zero (%lu)\n", reserved);
 
-    if (group->url)
+    /* Check if URL already exists in this group */
+    EnterCriticalSection(&g_httpapi_cs);
+    LIST_FOR_EACH_ENTRY(url_entry, &group->urls, struct url_group_url, entry)
     {
-        FIXME("Multiple URLs are not handled!\n");
-        return ERROR_CALL_NOT_IMPLEMENTED;
+        if (!wcscmp(url_entry->url, url))
+        {
+            LeaveCriticalSection(&g_httpapi_cs);
+            return ERROR_ALREADY_EXISTS;
+        }
     }
 
+    /* Add new URL to the group */
+    if (!(url_entry = calloc(1, sizeof(*url_entry))))
+        return ERROR_OUTOFMEMORY;
+
+    if (!(url_entry->url = wcsdup(url)))
+    {
+        free(url_entry);
+        return ERROR_OUTOFMEMORY;
+    }
+    url_entry->context = context;
+    list_add_tail(&group->urls, &url_entry->entry);
+    LeaveCriticalSection(&g_httpapi_cs);
+
+    /* If the group is already bound to a queue, add the URL immediately */
     if (group->queue)
     {
+        TRACE("Group already bound to queue %p, adding URL immediately\n", group->queue);
         ret = add_url(group->queue, url, context);
         if (ret)
+        {
+            WARN("Failed to add URL %s to queue: %lu\n", debugstr_w(url), ret);
+            list_remove(&url_entry->entry);
+            free(url_entry->url);
+            free(url_entry);
             return ret;
+        }
+        if (wcsstr(url, L"BusinessCentral") || wcsstr(url, L":7049"))
+        {
+            FIXME("BC URL %s successfully added to queue %p\n", debugstr_w(url), group->queue);
+        }
     }
-
-    if (!(group->url = wcsdup(url)))
-        return ERROR_OUTOFMEMORY;
-    group->context = context;
-
+    
+    TRACE("URL %s added to group %s\n", debugstr_w(url), wine_dbgstr_longlong(id));
     return ERROR_SUCCESS;
 }
 
@@ -1024,6 +1201,7 @@ ULONG WINAPI HttpAddUrlToUrlGroup(HTTP_URL_GROUP_ID id, const WCHAR *url,
 ULONG WINAPI HttpRemoveUrlFromUrlGroup(HTTP_URL_GROUP_ID id, const WCHAR *url, ULONG flags)
 {
     struct url_group *group;
+    struct url_group_url *url_entry;
 
     TRACE("id %s, url %s, flags %#lx.\n", wine_dbgstr_longlong(id), debugstr_w(url), flags);
 
@@ -1033,19 +1211,38 @@ ULONG WINAPI HttpRemoveUrlFromUrlGroup(HTTP_URL_GROUP_ID id, const WCHAR *url, U
     if (!(group = get_url_group(id)))
         return ERROR_INVALID_PARAMETER;
 
-    if (!group->url)
-        return ERROR_FILE_NOT_FOUND;
-
     if (flags)
         FIXME("Ignoring flags %#lx.\n", flags);
 
-    free(group->url);
-    group->url = NULL;
+    /* Find and remove the URL from the group */
+    EnterCriticalSection(&g_httpapi_cs);
+    LIST_FOR_EACH_ENTRY(url_entry, &group->urls, struct url_group_url, entry)
+    {
+        if (!wcscmp(url_entry->url, url))
+        {
+            /* Remove from queue if bound */
+            if (group->queue)
+            {
+                ULONG ret;
+                LeaveCriticalSection(&g_httpapi_cs);
+                ret = remove_url(group->queue, url);
+                if (ret && ret != ERROR_FILE_NOT_FOUND)
+                    return ret;
+                EnterCriticalSection(&g_httpapi_cs);
+            }
+            
+            /* Remove from group's URL list */
+            list_remove(&url_entry->entry);
+            LeaveCriticalSection(&g_httpapi_cs);
+            
+            free(url_entry->url);
+            free(url_entry);
+            return ERROR_SUCCESS;
+        }
+    }
+    LeaveCriticalSection(&g_httpapi_cs);
 
-    if (group->queue)
-        return remove_url(group->queue, url);
-
-    return ERROR_SUCCESS;
+    return ERROR_FILE_NOT_FOUND;
 }
 
 /***********************************************************************
@@ -1584,8 +1781,7 @@ ULONG WINAPI HttpWaitForDisconnect(HANDLE queue, HTTP_CONNECTION_ID connection_i
     if (!overlapped && local_ovl.hEvent)
         CloseHandle(local_ovl.hEvent);
 
-    if (ret == ERROR_CONNECTION_INVALID)
-        return NO_ERROR;
+    /* Don't mask connection errors - let the caller handle them */
 
     return (ret == ERROR_SUCCESS) ? NO_ERROR : ret;
 }
@@ -1642,8 +1838,47 @@ ULONG WINAPI HttpWaitForDisconnectEx(HANDLE queue, HTTP_CONNECTION_ID connection
     if (!overlapped && local_ovl.hEvent)
         CloseHandle(local_ovl.hEvent);
     
-    if (ret == ERROR_CONNECTION_INVALID)
-        return NO_ERROR;
+    /* Don't mask connection errors - let the caller handle them */
 
     return (ret == ERROR_SUCCESS) ? NO_ERROR : ret;
+}
+
+/***********************************************************************
+ *        DllMain     (HTTPAPI.@)
+ */
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
+{
+    switch (reason)
+    {
+    case DLL_PROCESS_ATTACH:
+        DisableThreadLibraryCalls(instance);
+        break;
+    case DLL_PROCESS_DETACH:
+        if (reserved) break; /* Process termination */
+        
+        /* Clean up global lists */
+        EnterCriticalSection(&g_httpapi_cs);
+        {
+            struct server_session *session, *session_next;
+            struct url_group *group, *group_next;
+            
+            /* Clean up all URL groups */
+            LIST_FOR_EACH_ENTRY_SAFE(group, group_next, &url_groups, struct url_group, entry)
+            {
+                list_remove(&group->entry);
+                /* Note: We're not freeing URLs here as they should have been cleaned up */
+                free(group);
+            }
+            
+            /* Clean up all server sessions */
+            LIST_FOR_EACH_ENTRY_SAFE(session, session_next, &server_sessions, struct server_session, entry)
+            {
+                list_remove(&session->entry);
+                free(session);
+            }
+        }
+        LeaveCriticalSection(&g_httpapi_cs);
+        break;
+    }
+    return TRUE;
 }

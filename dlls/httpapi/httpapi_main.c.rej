@@ -1,0 +1,10 @@
+diff a/dlls/httpapi/httpapi_main.c b/dlls/httpapi/httpapi_main.c	(rejected hunks)
+@@ -471,6 +471,8 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
+     if (!(buffer = malloc(offsetof(struct http_response, buffer[len]))))
+         return ERROR_OUTOFMEMORY;
+     buffer->id = id;
++    buffer->is_body = FALSE;
++    buffer->more_data = FALSE;
+     buffer->len = len;
+     sprintf(buffer->buffer, "HTTP/1.1 %u %.*s\r\n", response->s.StatusCode,
+             response->s.ReasonLength, response->s.pReason);

@@ -27,6 +27,7 @@
 #include "ddk/wdm.h"
 #include "wine/debug.h"
 #include "wine/list.h"
+#include "http.h"
 
 static HANDLE directory_obj;
 static DEVICE_OBJECT *device_obj;
@@ -80,6 +81,7 @@ struct connection
     HTTP_VERSION version;
     const char *url, *host;
     ULONG unk_verb_len, url_len, content_len;
+    size_t host_len;  /* Length of host header value */
 };
 
 static struct list connections = LIST_INIT(connections);
@@ -378,9 +380,12 @@ static unsigned int compare_paths(const char *queue_path, const char *conn_path,
         return 0;
 }
 
-static BOOL host_matches(const struct url *url, const char *conn_host)
+static BOOL host_matches(const struct url *url, const char *conn_host, size_t conn_host_len)
 {
     size_t host_len;
+
+    TRACE("BC: Checking host match between URL '%s' and host '%.*s'\n", 
+          url->url, (int)conn_host_len, conn_host);
 
     if (!url->url)
         return FALSE;
@@ -388,14 +393,40 @@ static BOOL host_matches(const struct url *url, const char *conn_host)
     if (url->url[7] == '+')
     {
         const char *queue_port = strchr(url->url + 7, ':');
-        host_len = strchr(queue_port, '/') - queue_port - 1;
-        if (!strncmp(queue_port, strchr(conn_host, ':'), host_len))
-            return TRUE;
+        const char *conn_port = memchr(conn_host, ':', conn_host_len);
+        
+        if (queue_port && conn_port)
+        {
+            /* For wildcard hosts, compare only the port part */
+            const char *queue_port_end = strchr(queue_port, '/');
+            const char *conn_port_end = memchr(conn_port, '/',
+                conn_host_len - (conn_port - conn_host));
+            size_t queue_port_len, conn_port_len;
+            
+            if (!queue_port_end) queue_port_end = queue_port + strlen(queue_port);
+            if (!conn_port_end) 
+                conn_port_end = conn_host + conn_host_len;
+            
+            queue_port_len = queue_port_end - queue_port;
+            conn_port_len = conn_port_end - conn_port;
+            
+            TRACE("Comparing wildcard port '%.*s' with connection port '%.*s'\n",
+                  (int)queue_port_len, queue_port, (int)conn_port_len, conn_port);
+            
+            if (queue_port_len == conn_port_len && !memcmp(queue_port, conn_port, queue_port_len))
+                return TRUE;
+        }
     }
     else
     {
-        host_len = strchr(url->url + 7, '/') - url->url - 7;
-        if (!memicmp(url->url + 7, conn_host, host_len))
+        const char *url_slash = strchr(url->url + 7, '/');
+        if (url_slash)
+            host_len = url_slash - url->url - 7;
+        else
+            host_len = strlen(url->url + 7);
+            
+        /* Check if the URL host length matches conn_host_len first */
+        if (host_len == conn_host_len && !memicmp(url->url + 7, conn_host, host_len))
             return TRUE;
     }
 
@@ -407,31 +438,58 @@ static struct url *url_matches(const struct connection *conn, const struct reque
 {
     const char *queue_path, *conn_host, *conn_path;
     unsigned int max_slash_count = 0, slash_count;
-    size_t conn_path_len;
+    size_t conn_path_len, conn_host_len;
     struct url *url, *ret = NULL;
+
+    if (strstr(conn->url, "BusinessCentral"))
+    {
+        TRACE("BC: Checking URL '%s' against queue %p\n", conn->url, queue);
+    }
 
     if (conn->url[0] == '/')
     {
         conn_host = conn->host;
+        conn_host_len = conn->host_len;
         conn_path = conn->url;
         conn_path_len = conn->url_len;
-
     }
     else
     {
         conn_host = conn->url + 7;
         conn_path = strchr(conn_host, '/');
-        conn_path_len = (conn->url + conn->url_len) - conn_path;
+        if (conn_path)
+        {
+            conn_host_len = conn_path - conn_host;
+            conn_path_len = (conn->url + conn->url_len) - conn_path;
+        }
+        else
+        {
+            conn_host_len = (conn->url + conn->url_len) - conn_host;
+            conn_path = "/";
+            conn_path_len = 1;
+        }
     }
 
     LIST_FOR_EACH_ENTRY(url, &queue->urls, struct url, entry)
     {
-        if (host_matches(url, conn_host))
+        if (strstr(conn->url, "BusinessCentral"))
+        {
+            TRACE("BC: Testing URL pattern '%s'\n", url->url);
+        }
+        
+        if (host_matches(url, conn_host, conn_host_len))
         {
             queue_path = strchr(url->url + 7, '/');
             if (!queue_path)
                 continue;
             slash_count = compare_paths(queue_path, conn_path, conn_path_len);
+            
+            if (strstr(conn->url, "BusinessCentral"))
+            {
+                TRACE("BC: Host matched, path comparison: queue='%s' conn='%.*s' slash_count=%u\n",
+                      queue_path, (int)conn_path_len, conn_path, slash_count);
+            }
+            
             if (slash_count > max_slash_count)
             {
                 max_slash_count = slash_count;
@@ -501,6 +559,7 @@ static int parse_request(struct connection *conn)
 
     /* headers */
     conn->host = NULL;
+    conn->host_len = 0;
     conn->content_len = 0;
     for (;;)
     {
@@ -522,7 +581,16 @@ static int parse_request(struct connection *conn)
         TRACE("Got %s header.\n", debugstr_an(name, len));
 
         if (!strncmp(name, "Host", len))
+        {
+            const char *header_start = p;
             conn->host = p;
+            /* Find end of header value (before \r\n) */
+            while (p < end && (isprint(*p) || *p == '\t')) ++p;
+            conn->host_len = p - header_start;
+            if ((ret = compare_exact(p, "\r\n", end)) <= 0) return ret;
+            p += 2;
+            continue;
+        }
         else if (!strncmp(name, "Content-Length", len))
         {
             conn->content_len = parse_number(p, &q, end);
@@ -546,10 +614,14 @@ static int parse_request(struct connection *conn)
 
     conn->queue = NULL;
     /* Find a queue which can receive this request. */
+    TRACE("Looking for queue to handle URL: %s\n", debugstr_a(conn->url));
+    
     LIST_FOR_EACH_ENTRY(queue, &request_queues, struct request_queue, entry)
     {
+        TRACE("Checking queue %p\n", queue);
         if ((conn_url = url_matches(conn, queue, &slash_count)))
         {
+            TRACE("Found matching URL with slash_count=%u\n", slash_count);
             if (slash_count > best_slash_count)
             {
                 best_slash_count = slash_count;
@@ -564,6 +636,10 @@ static int parse_request(struct connection *conn)
         TRACE("Assigning request to queue %p.\n", best_queue);
         conn->queue = best_queue;
         conn->context = best_conn_url->context;
+    }
+    else
+    {
+        TRACE("No queue found for URL: %s\n", debugstr_a(conn->url));
     }
 
     /* Stop selecting on incoming data until a response is queued. */
@@ -763,6 +839,8 @@ static NTSTATUS http_add_url(struct request_queue *queue, IRP *irp)
     new_url_len = strlen(url);
     if (url[new_url_len - 1] == '/')
         new_url_len--;
+    
+    TRACE("Adding URL: %s to queue %p\n", url, queue);
 
     EnterCriticalSection(&http_cs);
 
@@ -851,6 +929,16 @@ static NTSTATUS http_add_url(struct request_queue *queue, IRP *irp)
     new_entry->context = params->context;
     new_entry->listening_sock = listening_sock;
     list_add_head(&queue->urls, &new_entry->entry);
+    
+    /* Log all URLs in this queue for debugging */
+    {
+        struct url *existing;
+        int count = 0;
+        LIST_FOR_EACH_ENTRY(existing, &queue->urls, struct url, entry)
+        {
+            TRACE("Queue %p now has URL[%d]: %s\n", queue, count++, existing->url);
+        }
+    }
 
     /* See if any pending requests now match this queue. */
     LIST_FOR_EACH_ENTRY(conn, &connections, struct connection, entry)
@@ -1006,9 +1094,16 @@ static NTSTATUS http_send_response(struct request_queue *queue, IRP *irp)
     {
         if (send(conn->socket, response->buffer, response->len, 0) >= 0)
         {
-            /* Clean up the connection if we are not sending more response data. */
-            if (response->response_flags != HTTP_SEND_RESPONSE_FLAG_MORE_DATA)
+            /* Handle connection based on response flags */
+            if (response->response_flags & HTTP_SEND_RESPONSE_FLAG_DISCONNECT)
             {
+                /* Client requested to close the connection */
+                TRACE("Closing connection due to DISCONNECT flag.\n");
+                close_connection(conn);
+            }
+            else if (!(response->response_flags & HTTP_SEND_RESPONSE_FLAG_MORE_DATA))
+            {
+                /* No more data for this response, but keep connection alive for potential pipelining */
                 if (conn->content_len)
                 {
                     /* Discard whatever entity body is left. */
@@ -1103,6 +1198,22 @@ static NTSTATUS WINAPI dispatch_ioctl(DEVICE_OBJECT *device, IRP *irp)
         break;
     case IOCTL_HTTP_RECEIVE_BODY:
         ret = http_receive_body(queue, irp);
+        break;
+    case IOCTL_HTTP_WAIT_FOR_DISCONNECT:
+        {
+            const struct http_wait_for_disconnect_params *params = irp->AssociatedIrp.SystemBuffer;
+            TRACE("IOCTL_HTTP_WAIT_FOR_DISCONNECT: connection_id %s.\n", wine_dbgstr_longlong(params->id));
+            /* TODO: Implement connection tracking and disconnect notification */
+            ret = STATUS_NOT_IMPLEMENTED;
+        }
+        break;
+    case IOCTL_HTTP_CANCEL_REQUEST:
+        {
+            const struct http_cancel_request_params *params = irp->AssociatedIrp.SystemBuffer;
+            TRACE("IOCTL_HTTP_CANCEL_REQUEST: id %s.\n", wine_dbgstr_longlong(params->id));
+            /* TODO: Implement request cancellation */
+            ret = STATUS_NOT_IMPLEMENTED;
+        }
         break;
     default:
         FIXME("Unhandled ioctl %#lx.\n", stack->Parameters.DeviceIoControl.IoControlCode);

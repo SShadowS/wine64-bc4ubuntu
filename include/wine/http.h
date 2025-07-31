@@ -28,8 +28,8 @@
 #define IOCTL_HTTP_RECEIVE_REQUEST      CTL_CODE(FILE_DEVICE_UNKNOWN, 0x802, METHOD_BUFFERED, 0)
 #define IOCTL_HTTP_SEND_RESPONSE        CTL_CODE(FILE_DEVICE_UNKNOWN, 0x803, METHOD_BUFFERED, 0)
 #define IOCTL_HTTP_RECEIVE_BODY         CTL_CODE(FILE_DEVICE_UNKNOWN, 0x804, METHOD_BUFFERED, 0)
-#define IOCTL_HTTP_WAIT_FOR_DISCONNECT  CTL_CODE(FILE_DEVICE_UNKNOWN, 0x805, METHOD_BUFFERED, 0)
-#define IOCTL_HTTP_CANCEL_REQUEST       CTL_CODE(FILE_DEVICE_UNKNOWN, 0x806, METHOD_BUFFERED, 0)
+#define IOCTL_HTTP_WAIT_FOR_DISCONNECT  CTL_CODE(FILE_DEVICE_UNKNOWN, 0x80e, METHOD_BUFFERED, 0)
+#define IOCTL_HTTP_CANCEL_REQUEST       CTL_CODE(FILE_DEVICE_UNKNOWN, 0x80f, METHOD_BUFFERED, 0)
 
 struct http_add_url_params
 {
@@ -61,14 +61,14 @@ struct http_receive_body_params
     ULONG bits;
 };
 
-struct http_wait_for_disconnect_params
+struct http_cancel_request_params
 {
     HTTP_REQUEST_ID id;
 };
 
-struct http_cancel_request_params
+struct http_wait_for_disconnect_params
 {
-    HTTP_REQUEST_ID id;
+    HTTP_CONNECTION_ID id;
 };
 
 #endif

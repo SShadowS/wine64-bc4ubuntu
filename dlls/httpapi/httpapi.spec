@@ -14,6 +14,7 @@
 @ stdcall HttpFlushResponseCache(ptr wstr long ptr)
 @ stdcall HttpGetCounters(ptr long ptr long long)
 @ stdcall HttpInitialize(long long ptr)
+@ stdcall HttpIsFeatureSupported(long)
 @ stdcall HttpQueryRequestQueueProperty(ptr long ptr long long ptr ptr)
 @ stdcall HttpQueryServerSessionProperty(int64 long ptr long ptr)
 @ stdcall HttpQueryServiceConfiguration(ptr long ptr long ptr long ptr ptr)
