@@ -82,6 +82,9 @@ struct connection
     const char *url, *host;
     ULONG unk_verb_len, url_len, content_len;
     size_t host_len;  /* Length of host header value */
+
+    /* List of IRPs waiting for disconnect notification */
+    LIST_ENTRY wait_queue;
 };
 
 static struct list connections = LIST_INIT(connections);
@@ -140,6 +143,7 @@ static void accept_connection(SOCKET socket)
     WSAEventSelect(peer, request_event, FD_READ | FD_CLOSE);
     ioctlsocket(peer, FIONBIO, &one);
     conn->socket = peer;
+    InitializeListHead(&conn->wait_queue);
     list_add_head(&connections, &conn->entry);
 }
 
@@ -152,8 +156,20 @@ static void shutdown_connection(struct connection *conn)
 
 static void close_connection(struct connection *conn)
 {
+    LIST_ENTRY *entry;
+    
     if (!conn->shutdown)
         shutdown_connection(conn);
+    
+    /* Complete any pending wait-for-disconnect IRPs */
+    while ((entry = RemoveHeadList(&conn->wait_queue)) != &conn->wait_queue)
+    {
+        IRP *irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.ListEntry);
+        irp->IoStatus.Status = STATUS_SUCCESS;
+        irp->IoStatus.Information = 0;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+    }
+    
     closesocket(conn->socket);
     list_remove(&conn->entry);
     free(conn);
@@ -1038,6 +1054,20 @@ static void WINAPI http_receive_request_cancel(DEVICE_OBJECT *device, IRP *irp)
     IoCompleteRequest(irp, IO_NO_INCREMENT);
 }
 
+static void WINAPI http_wait_for_disconnect_cancel(DEVICE_OBJECT *device, IRP *irp)
+{
+    TRACE("device %p, irp %p.\n", device, irp);
+
+    IoReleaseCancelSpinLock(irp->CancelIrql);
+
+    EnterCriticalSection(&http_cs);
+    RemoveEntryList(&irp->Tail.Overlay.ListEntry);
+    LeaveCriticalSection(&http_cs);
+
+    irp->IoStatus.Status = STATUS_CANCELLED;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
+}
+
 static NTSTATUS http_receive_request(struct request_queue *queue, IRP *irp)
 {
     const struct http_receive_request_params *params = irp->AssociatedIrp.SystemBuffer;
@@ -1202,17 +1232,105 @@ static NTSTATUS WINAPI dispatch_ioctl(DEVICE_OBJECT *device, IRP *irp)
     case IOCTL_HTTP_WAIT_FOR_DISCONNECT:
         {
             const struct http_wait_for_disconnect_params *params = irp->AssociatedIrp.SystemBuffer;
+            struct connection *conn;
+            
             TRACE("IOCTL_HTTP_WAIT_FOR_DISCONNECT: connection_id %s.\n", wine_dbgstr_longlong(params->id));
-            /* TODO: Implement connection tracking and disconnect notification */
-            ret = STATUS_NOT_IMPLEMENTED;
+            
+            EnterCriticalSection(&http_cs);
+            
+            if ((conn = get_connection(params->id)))
+            {
+                /* If connection is already shutting down, complete immediately */
+                if (conn->shutdown)
+                {
+                    LeaveCriticalSection(&http_cs);
+                    ret = STATUS_SUCCESS;
+                }
+                else
+                {
+                    /* Queue this IRP to be completed on disconnect */
+                    IoSetCancelRoutine(irp, http_wait_for_disconnect_cancel);
+                    if (irp->Cancel && !IoSetCancelRoutine(irp, NULL))
+                    {
+                        /* The IRP was canceled before we set the cancel routine. */
+                        LeaveCriticalSection(&http_cs);
+                        ret = STATUS_CANCELLED;
+                    }
+                    else
+                    {
+                        IoMarkIrpPending(irp);
+                        InsertTailList(&conn->wait_queue, &irp->Tail.Overlay.ListEntry);
+                        LeaveCriticalSection(&http_cs);
+                        ret = STATUS_PENDING;
+                    }
+                }
+            }
+            else
+            {
+                LeaveCriticalSection(&http_cs);
+                ret = STATUS_CONNECTION_INVALID;
+            }
         }
         break;
     case IOCTL_HTTP_CANCEL_REQUEST:
         {
             const struct http_cancel_request_params *params = irp->AssociatedIrp.SystemBuffer;
+            struct connection *conn;
+            BOOL found = FALSE;
+            
             TRACE("IOCTL_HTTP_CANCEL_REQUEST: id %s.\n", wine_dbgstr_longlong(params->id));
-            /* TODO: Implement request cancellation */
-            ret = STATUS_NOT_IMPLEMENTED;
+            
+            EnterCriticalSection(&http_cs);
+            
+            /* Find the connection with this request ID */
+            if ((conn = get_connection(params->id)))
+            {
+                /* Check if there's a pending receive request IRP in the queue */
+                struct request_queue *queue = conn->queue;
+                if (queue)
+                {
+                    LIST_ENTRY *entry = queue->irp_queue.Flink;
+                    while (entry != &queue->irp_queue)
+                    {
+                        LIST_ENTRY *next = entry->Flink;
+                        IRP *pending_irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.ListEntry);
+                        struct http_receive_request_params *pending_params = pending_irp->AssociatedIrp.SystemBuffer;
+                        
+                        if (pending_params->id == params->id)
+                        {
+                            /* Found the IRP to cancel */
+                            RemoveEntryList(&pending_irp->Tail.Overlay.ListEntry);
+                            if (IoSetCancelRoutine(pending_irp, NULL))
+                            {
+                                pending_irp->IoStatus.Status = STATUS_CANCELLED;
+                                pending_irp->IoStatus.Information = 0;
+                                IoCompleteRequest(pending_irp, IO_NO_INCREMENT);
+                            }
+                            found = TRUE;
+                            break;
+                        }
+                        entry = next;
+                    }
+                }
+                
+                /* Also mark the connection as no longer having a pending request */
+                if (found || conn->req_id == params->id)
+                {
+                    conn->available = FALSE;
+                    conn->req_id = HTTP_NULL_ID;
+                    ret = STATUS_SUCCESS;
+                }
+                else
+                {
+                    ret = STATUS_NOT_FOUND;
+                }
+            }
+            else
+            {
+                ret = STATUS_CONNECTION_INVALID;
+            }
+            
+            LeaveCriticalSection(&http_cs);
         }
         break;
     default:

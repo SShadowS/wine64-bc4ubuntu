@@ -22,6 +22,7 @@
 #pragma makedep unix
 #endif
 
+#define _GNU_SOURCE  /* for mremap */
 #include "config.h"
 
 #include <assert.h>
@@ -33,6 +34,11 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/mman.h>
+#include <errno.h>
+#include <pthread.h>
+#include <time.h>
+#include <limits.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -62,6 +68,20 @@ static unsigned char default_flags = (1 << __WINE_DBCL_ERR) | (1 << __WINE_DBCL_
 static int nb_debug_options = -1;
 static int options_size;
 static struct __wine_debug_channel *debug_options;
+
+/* RAM-based relay logging buffer for high-performance capture */
+static int relay_buffer_fd = -1;
+static char *relay_buffer = NULL;
+static size_t relay_buffer_size = 0;
+static size_t relay_buffer_pos = 0;
+static pthread_mutex_t relay_buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
+#define RELAY_BUFFER_INITIAL_SIZE (256ULL * 1024 * 1024)        /* 256MB initial */
+#define RELAY_BUFFER_MAX_SIZE (20ULL * 1024 * 1024 * 1024)      /* 20GB max */
+#define RELAY_BUFFER_GROW_SIZE (512ULL * 1024 * 1024)           /* 512MB increments */
+static int relay_buffering_enabled = 0;
+
+/* Forward declaration */
+static void write_to_relay_buffer(const char *data, size_t len);
 
 static const char * const debug_classes[] = { "fixme", "err", "warn", "trace" };
 
@@ -279,6 +299,11 @@ NTSTATUS unixcall_wine_dbg_write( void *args )
 {
     struct wine_dbg_write_params *params = args;
 
+    if (relay_buffering_enabled)
+    {
+        write_to_relay_buffer( params->str, params->len );
+        return params->len;
+    }
     return write( 2, params->str, params->len );
 }
 
@@ -294,9 +319,131 @@ NTSTATUS wow64_wine_dbg_write( void *args )
         unsigned int len;
     } const *params32 = args;
 
+    if (relay_buffering_enabled)
+    {
+        write_to_relay_buffer( ULongToPtr(params32->str), params32->len );
+        return params32->len;
+    }
     return write( 2, ULongToPtr(params32->str), params32->len );
 }
 #endif
+
+/***********************************************************************
+ *		init_relay_buffer
+ *
+ * Initialize RAM-based buffer for relay logging when WINE_RELAY_BUFFER is set
+ */
+static void init_relay_buffer(void)
+{
+    const char *buffer_path = getenv("WINE_RELAY_BUFFER");
+    if (!buffer_path) return;
+
+    /* Check if relay is enabled */
+    const char *debug_str = getenv("WINEDEBUG");
+    if (!debug_str || !strstr(debug_str, "+relay")) return;
+
+    /* Create unique filename per process */
+    char unique_path[PATH_MAX];
+    snprintf(unique_path, sizeof(unique_path), "%s.%d", buffer_path, getpid());
+    
+    /* Create or open the buffer file */
+    relay_buffer_fd = open(unique_path, O_RDWR | O_CREAT | O_TRUNC, 0666);
+    if (relay_buffer_fd < 0)
+    {
+        fprintf(stderr, "wine: failed to create relay buffer file %s: %s\n", 
+                unique_path, strerror(errno));
+        return;
+    }
+
+    /* Extend file to initial size */
+    if (ftruncate(relay_buffer_fd, RELAY_BUFFER_INITIAL_SIZE) < 0)
+    {
+        fprintf(stderr, "wine: failed to set relay buffer size: %s\n", strerror(errno));
+        close(relay_buffer_fd);
+        relay_buffer_fd = -1;
+        return;
+    }
+
+    /* Memory map the file */
+    relay_buffer = mmap(NULL, RELAY_BUFFER_INITIAL_SIZE, 
+                       PROT_READ | PROT_WRITE, MAP_SHARED, relay_buffer_fd, 0);
+    if (relay_buffer == MAP_FAILED)
+    {
+        fprintf(stderr, "wine: failed to mmap relay buffer: %s\n", strerror(errno));
+        close(relay_buffer_fd);
+        relay_buffer_fd = -1;
+        relay_buffer = NULL;
+        return;
+    }
+
+    relay_buffer_size = RELAY_BUFFER_INITIAL_SIZE;
+    relay_buffer_pos = 0;
+    relay_buffering_enabled = 1;
+
+    /* Write header with timestamp */
+    time_t now = time(NULL);
+    char header[256];
+    snprintf(header, sizeof(header), 
+             "Wine Relay Buffer initialized at %s"
+             "WINE_RELAY_BUFFER=%s\n"
+             "Initial size: %zu MB\n\n", 
+             ctime(&now), buffer_path, relay_buffer_size / (1024*1024));
+    
+    pthread_mutex_lock(&relay_buffer_mutex);
+    memcpy(relay_buffer, header, strlen(header));
+    relay_buffer_pos = strlen(header);
+    pthread_mutex_unlock(&relay_buffer_mutex);
+
+    /* Only print message from main wineserver process or if WINEDEBUG contains relay */
+    if (getenv("WINESERVERSOCKET") || strstr(debug_str, "relay"))
+    {
+        fprintf(stderr, "wine: relay buffering enabled to %s (size: %zu MB)\n", 
+                unique_path, relay_buffer_size / (1024*1024));
+    }
+}
+
+/***********************************************************************
+ *		write_to_relay_buffer
+ *
+ * Write data to the relay buffer, growing it if necessary
+ */
+static void write_to_relay_buffer(const char *data, size_t len)
+{
+    pthread_mutex_lock(&relay_buffer_mutex);
+
+    /* Check if we need to grow the buffer */
+    if (relay_buffer_pos + len > relay_buffer_size)
+    {
+        size_t new_size = relay_buffer_size + RELAY_BUFFER_GROW_SIZE;
+        if (new_size > RELAY_BUFFER_MAX_SIZE)
+        {
+            pthread_mutex_unlock(&relay_buffer_mutex);
+            return; /* Silently drop if we hit the limit */
+        }
+
+        /* Grow the file */
+        if (ftruncate(relay_buffer_fd, new_size) == 0)
+        {
+            /* Remap with new size */
+            void *new_buffer = mremap(relay_buffer, relay_buffer_size, 
+                                     new_size, MREMAP_MAYMOVE);
+            if (new_buffer != MAP_FAILED)
+            {
+                relay_buffer = new_buffer;
+                relay_buffer_size = new_size;
+            }
+        }
+    }
+
+    /* Write data if we have space */
+    if (relay_buffer_pos + len <= relay_buffer_size)
+    {
+        memcpy(relay_buffer + relay_buffer_pos, data, len);
+        relay_buffer_pos += len;
+    }
+
+    pthread_mutex_unlock(&relay_buffer_mutex);
+}
 
 /***********************************************************************
  *		__wine_dbg_output  (NTDLL.@)
@@ -310,7 +457,16 @@ int __cdecl __wine_dbg_output( const char *str )
     if (end)
     {
         ret += append_output( info, str, end + 1 - str );
-        write( 2, info->output, info->out_pos );
+        
+        /* Write to relay buffer if enabled, otherwise stderr */
+        if (relay_buffering_enabled)
+        {
+            write_to_relay_buffer( info->output, info->out_pos );
+        }
+        else
+        {
+            write( 2, info->output, info->out_pos );
+        }
         info->out_pos = 0;
         str = end + 1;
     }
@@ -359,6 +515,9 @@ void dbg_init(void)
 
     setbuf( stdout, NULL );
     setbuf( stderr, NULL );
+
+    /* Initialize relay buffer if requested */
+    init_relay_buffer();
 
     if (nb_debug_options == -1) init_options();
 

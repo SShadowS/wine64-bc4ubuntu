@@ -6,6 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Wine (Wine Is Not an Emulator) is a compatibility layer that allows running Windows applications on Unix-like systems. This is a large, complex codebase that reimplements the Windows API.
 
+## Development Backlog
+
+A `Backlog.md` file exists in this repository to track pending features and optimizations that have been planned but not yet implemented. This includes:
+
+- **Phase 5 Performance Optimizations**: Replacing O(n) operations with hash tables and red-black trees
+- **Future Enhancement Ideas**: HTTP/2 support, async I/O improvements, security enhancements
+- **Completed Work Summary**: Reference of all implemented phases for the HTTP API fixes
+
+Consult `Backlog.md` when looking for the next development priorities or understanding what optimizations are pending.
+
 ## Building Wine
 
 ### Basic Build Commands
@@ -259,9 +269,9 @@ Example: `CreateFileW()` → path translation → Unix `open()` → Windows hand
 
 ```bash
 # Create BC testing environment
-WINEPREFIX=~/.local/share/wineprefixes/bc WINEARCH=win64 wineboot -i
+WINEPREFIX=~/.local/share/wineprefixes/bc1 WINEARCH=win64 wineboot -i
 
-# Install .NET Framework 4.8 (required for BC Server)
+# Install .NET Framework 4.8 (if required for BC Server)
 winetricks arch=64 prefix=bc dotnet48 -q
 
 # Install PowerShell 5.1 (if needed for BC management)
@@ -276,7 +286,7 @@ winetricks arch=64 prefix=bc ps51
 # Compile and run locale enumeration test
 cd /tmp
 i686-w64-mingw32-gcc -o test_locale_enum.exe test_locale_enum.c -lkernel32
-WINEPREFIX=~/.local/share/wineprefixes/bc wine test_locale_enum.exe
+WINEPREFIX=~/.local/share/wineprefixes/bc1 wine test_locale_enum.exe
 ```
 
 **Expected behavior after fix:**
@@ -290,7 +300,7 @@ WINEPREFIX=~/.local/share/wineprefixes/bc wine test_locale_enum.exe
 
 ```bash
 # Set environment for BC testing
-export WINEPREFIX=~/.local/share/wineprefixes/bc
+export WINEPREFIX=~/.local/share/wineprefixes/bc1
 export WINEARCH=win64
 
 # Run BC Server (adjust path as needed)
@@ -320,6 +330,107 @@ WINEDEBUG=+dll,+locale,+httpapi,+ole,+rpc wine program.exe
 
 # Common debug channels: +all, +dll, +reg, +file, +process, +locale, +httpapi
 ```
+
+### Business Central Server Readiness Detection
+
+**Wine now includes special TRACE markers to detect when BC Server is ready:**
+
+**Key readiness markers to watch for:**
+
+1. **URL Binding Stage**:
+   ```
+   *** BUSINESS CENTRAL SERVER BINDING: Adding URL ... to group ... ***
+   ```
+
+2. **Server Ready Stage**:
+   ```
+   *** BUSINESS CENTRAL SERVER READY: URL ... successfully bound ... ***
+   *** BC Server can now accept HTTP requests on this endpoint ***
+   ```
+
+3. **Server Listening Stage**:
+   ```
+   *** HTTP SERVER LISTENING: Waiting for incoming HTTP requests ***
+   *** Server is ready to process client connections ***
+   ```
+
+**Automated detection in scripts:**
+```bash
+# Silent wait - only shows output when server is ready
+(WINEPREFIX=~/.local/share/wineprefixes/bc1 WINEDEBUG=+httpapi wine BC_Server.exe 2>&1 | 
+ grep -m1 -q "BC Server is now ready" && echo "Server ready") &
+
+# Or use the provided script for more control
+./wait_for_bc_ready.sh "wine BC_Server.exe" 60  # command and timeout in seconds
+```
+
+**Quick readiness check:**
+```bash
+# Monitor for all readiness markers
+WINEPREFIX=~/.local/share/wineprefixes/bc1 WINEDEBUG=+httpapi wine cmd 2>&1 | grep -E 'SERVER READY|SERVER LISTENING|SERVER BINDING'
+```
+
+See `BC_Server_Readiness_Detection.md` for comprehensive examples and integration guides.
+
+### Business Central Relay Capture for HTTP Analysis
+
+**Advanced memory-buffered relay capture script for debugging HTTP API issues:**
+
+The `capture_bc_relay_rg.sh` script captures comprehensive Wine relay logs without I/O bottlenecks by using memory buffering and analyzes them with ripgrep for ultra-fast processing.
+
+**Features:**
+- Memory-based capture using tmpfs to avoid missing HTTP calls due to disk I/O
+- Real-time buffer size monitoring during capture
+- Ripgrep-based analysis for 5-10x faster log processing
+- Comprehensive HTTP API call tracking and analysis
+- Automatic Business Central service management
+
+**Usage:**
+```bash
+# Run the memory-buffered capture with ripgrep analysis
+./capture_bc_relay_rg.sh
+
+# The script will:
+# 1. Stop any running BC service
+# 2. Start BC with relay debugging enabled
+# 3. Capture all output to memory (tmpfs)
+# 4. Wait 115 seconds for BC to initialize
+# 5. Make a test HTTP request
+# 6. Stop BC and save logs from memory to disk
+# 7. Analyze logs with ripgrep for HTTP patterns
+```
+
+**Key information captured:**
+- All HTTP API function calls (HttpReceiveHttpRequest, HttpSendHttpResponse, etc.)
+- Missing HTTP functions (GetProcAddress failures)
+- HTTP request/response patterns
+- Socket operations on port 7049
+- Server readiness markers
+- FIXME messages related to HTTP
+
+**Output files:**
+- Log file: `relay_logs/bc_relay_rg_TIMESTAMP.log` (full relay capture)
+- Analysis: `relay_analysis/bc_relay_rg_analysis_TIMESTAMP.txt` (summary report)
+- Curl output: `relay_logs/curl_output_rg_TIMESTAMP.txt` (test request result)
+
+**Advanced ripgrep searches after capture:**
+```bash
+# All HTTP API calls with context
+rg -C 2 'Call HTTPAPI\.' "relay_logs/bc_relay_rg_TIMESTAMP.log"
+
+# HTTP errors
+rg -i 'http.*error|error.*http' "relay_logs/bc_relay_rg_TIMESTAMP.log"
+
+# HTTP request/response flow
+rg 'HttpReceiveHttpRequest|HttpSendHttpResponse' "relay_logs/bc_relay_rg_TIMESTAMP.log"
+```
+
+**Requirements:**
+- ripgrep installed (`sudo apt install ripgrep`)
+- At least 15GB free RAM (script uses up to 5GB for buffer)
+- Business Central installed in the bc1 Wine prefix
+
+This tool is essential for diagnosing HTTP API implementation issues in Wine when running Business Central Server.
 
 ## Debugging
 
