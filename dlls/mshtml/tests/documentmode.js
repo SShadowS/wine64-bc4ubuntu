@@ -486,10 +486,10 @@ sync_test("builtin_obj", function() {
         enumerator.moveNext();
         ok(enumerator.atEnd(), "enumerator not at end");
     }else {
-        elem = f.call.call(f, document, "div");
+        elem1 = f.call.call(f, document, "div");
         f = f.bind(document);
-        elem = f.apply(null, ["style"]);
-        document.body.appendChild(elem);
+        elem1 = f.apply(null, ["style"]);
+        document.body.appendChild(elem1);
 
         try {
             var enumerator = new Enumerator(document.getElementsByTagName("style"));
@@ -502,6 +502,116 @@ sync_test("builtin_obj", function() {
         f.call = function() { };
         ok(f.apply === 0, "changed f.apply = ", f.apply);
         ok(f.call instanceof Function, "changed f.call not instance of Function");
+
+        e = Array.isArray(document.body.childNodes);
+        ok(e === false, "isArray(childNodes) returned " + e);
+        e = Array.prototype.toString.call(Number);
+        ok(e === "[object Function]", "Array.toString(Number) = " + e);
+    }
+
+    function test_toString(msg, constr, err) {
+        var e = 0;
+        if(typeof(err) === "string") {
+            e = constr.prototype.toString.call(document.body);
+            ok(e === err, msg + ".toString(body) = " + e);
+            return;
+        }
+        try {
+            constr.prototype.toString.call(document.body);
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === err - 0x80000000, "[" + msg + ".toString(body)] e = " + e);
+    }
+
+    test_toString("Array", Array, v < 9 ? 0xa13a7 : "[object HTMLBodyElement]");
+    test_toString("Boolean", Boolean, 0xa1392);
+    test_toString("Date", Date, 0xa138e);
+    test_toString("RegExp", RegExp, 0xa1398);
+    test_toString("Number", Number, 0xa1389);
+    test_toString("String", String, 0xa138d);
+
+    if(v >= 9) {
+        var obj = { length: 2 };
+        obj[0] = "foo";
+        obj[1] = "bar";
+        e = Array.prototype.toString.call(obj);
+        ok(e === "[object Object]", "Array.toString(array-like object) = " + e);
+
+        obj = Object.create(null);
+        obj.length = 2;
+        obj[0] = "foo";
+        obj[1] = "bar";
+        e = Array.prototype.toString.call(obj);
+        ok(e === "[object Object]", "Array.toString(array-like object with no prototype) = " + e);
+
+        e = 0;
+        try {
+            Array.prototype.toString.call(null);
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === 0xa138f - 0x80000000, "Array.toString(null) e = " + e);
+    }
+
+    (function(a, b, c) {
+        ok(a === document.body.childNodes[0], "a = " + a);
+        ok(b === document.body.childNodes[1], "b = " + b);
+        ok(c === document.body.childNodes[2], "c = " + c);
+    }).apply(null, document.body.childNodes);
+
+    elem1[0] = "a";
+    elem1[1] = "b";
+    if(v < 9) {
+        try {
+            (function(a, b) {}).apply(null, elem1);
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === 0xa13a4 - 0x80000000, "[function.apply with elem without length] e = " + e);
+    }else {
+        (function(a, b) {
+            ok(a === undefined, "a = " + a);
+            ok(b === undefined, "b = " + b);
+        }).apply(null, elem1);
+    }
+
+    elem1.length = 2;
+    (function(a, b) {
+        ok(a === "a", "a = " + a);
+        ok(b === "b", "b = " + b);
+    }).apply(null, elem1);
+
+    elem1 = new Object;
+    elem1[0] = "c";
+    elem1[1] = "d";
+    if(v < 9) {
+        try {
+            (function(c, d) {}).apply(null, elem1);
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === 0xa13a4 - 0x80000000, "[function.apply with Object without length] e = " + e);
+    }else {
+        (function(c, d) {
+            ok(c === undefined, "c = " + c);
+            ok(d === undefined, "d = " + d);
+        }).apply(null, elem1);
+    }
+
+    elem1.length = 2;
+    if(v < 9) {
+        try {
+            (function(c, d) {}).apply(null, elem1);
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === 0xa13a4 - 0x80000000, "[function.apply with Object with length] e = " + e);
+    }else {
+        (function(c, d) {
+            ok(c === "c", "c = " + c);
+            ok(d === "d", "d = " + d);
+        }).apply(null, elem1);
     }
 });
 
@@ -580,13 +690,29 @@ sync_test("attr_props", function() {
 
     elem.innerHTML = '<span id="test"></span>';
     elem = elem.getElementsByTagName("span")[0];
-    attr = elem.attributes[0];
+    attr = elem.getAttributeNode("id");
+
+    if(v < 8)
+        ok(elem.attributes.length > 50, "attributes.length = " + elem.attributes.length);
+    else {
+        todo_wine_if(v === 8).
+        ok(elem.attributes.length === 1, "attributes.length = " + elem.attributes.length);
+        todo_wine_if(v === 8).
+        ok(elem.attributes[0] === attr, "attributes[0] != attr");
+    }
 
     function test_exposed(prop, expect) {
         if(expect)
             ok(prop in attr, prop + " not found in attribute.");
         else
             ok(!(prop in attr), prop + " found in attribute.");
+    }
+
+    function test_attr(expando, specified) {
+        var r = attr.expando;
+        ok(r === expando, attr.name + " attr.expando = " + r);
+        r = attr.specified;
+        ok(r === specified, attr.name + " attr.specified = " + r);
     }
 
     test_exposed("appendChild", true);
@@ -622,6 +748,35 @@ sync_test("attr_props", function() {
     test_exposed("specified", true);
     test_exposed("textContent", v >= 9);
     test_exposed("value", true);
+    test_attr(false, true);
+
+    elem.setAttribute("test", "wine");
+    elem.setAttribute("z-index", "foobar");
+    elem.setAttribute("innerText", "test");
+    elem.setAttribute("removeAttribute", "funcattr");
+
+    attr = elem.getAttributeNode("test");
+    test_attr(true, true);
+
+    attr = elem.getAttributeNode("z-index");
+    test_attr(true, true);
+
+    attr = elem.getAttributeNode("innerText");
+    if(v < 8)
+        ok(attr === null, "innerText attr != null");
+    else
+        todo_wine_if(v === 8).
+        ok(attr !== null, "innerText attr = null");
+
+    attr = elem.getAttributeNode("removeAttribute");
+    test_attr(true, true);
+
+    attr = elem.getAttributeNode("tabIndex");
+    if(v < 8)
+        test_attr(false, false);
+    else
+        todo_wine_if(v === 8).
+        ok(attr === null, "tabIndex attr not null.");
 });
 
 sync_test("doc_props", function() {
@@ -3923,6 +4078,7 @@ sync_test("prototype props", function() {
         test_own_props(constr.prototype, name, props, todos, flaky);
     }
 
+    check(Attr, [ "expando", "name", "ownerElement", "specified", "value" ]);
     check(CharacterData, [ "appendData", "data", "deleteData", "insertData", "length", "replaceData", "substringData" ]);
     check(Comment, [ "text" ]);
     check(CSSStyleDeclaration, [
@@ -4222,6 +4378,8 @@ sync_test("prototype props", function() {
         "posHeight", "posLeft", "posRight", "posTop", "posWidth", "textDecorationBlink", "textDecorationLineThrough",
         "textDecorationNone", "textDecorationOverline", "textDecorationUnderline"
     ]);
+    check(NamedNodeMap, [ "getNamedItem", "getNamedItemNS", "item", "length", "removeNamedItem", "removeNamedItemNS",
+                          "setNamedItem", "setNamedItemNS" ]);
     check(Node, [
         "ATTRIBUTE_NODE", "CDATA_SECTION_NODE", "COMMENT_NODE", "DOCUMENT_FRAGMENT_NODE",  "DOCUMENT_NODE",
         "DOCUMENT_POSITION_CONTAINED_BY", "DOCUMENT_POSITION_CONTAINS", "DOCUMENT_POSITION_DISCONNECTED",

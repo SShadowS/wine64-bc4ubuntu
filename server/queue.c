@@ -283,6 +283,7 @@ static struct thread_input *create_thread_input( struct thread *thread )
             shared->cursor_count = 0;
             memset( (void *)shared->keystate, 0, sizeof(shared->keystate) );
             shared->keystate_lock = 0;
+            shared->keystate_serial = 1;
         }
         SHARED_WRITE_END;
     }
@@ -379,6 +380,7 @@ static void sync_input_keystate( struct thread_input *input )
             if (input->desktop_keystate[i] == desktop_shm->keystate[i]) continue;
             shared->keystate[i] = input->desktop_keystate[i] = desktop_shm->keystate[i];
         }
+        shared->keystate_serial = desktop_shm->keystate_serial;
     }
     SHARED_WRITE_END;
 }
@@ -1525,6 +1527,7 @@ int attach_thread_input( struct thread *thread_from, struct thread *thread_to )
         SHARED_WRITE_BEGIN( input_shm, input_shm_t )
         {
             memset( (void *)shared->keystate, 0, sizeof(shared->keystate) );
+            shared->keystate_serial = 1;
         }
         SHARED_WRITE_END;
     }
@@ -1612,20 +1615,14 @@ static void set_next_timer( struct msg_queue *queue )
 static struct timer *find_timer( struct msg_queue *queue, user_handle_t win,
                                  unsigned int msg, lparam_t id )
 {
-    struct list *ptr;
+    struct timer *timer;
 
     /* we need to search both lists */
 
-    LIST_FOR_EACH( ptr, &queue->pending_timers )
-    {
-        struct timer *timer = LIST_ENTRY( ptr, struct timer, entry );
+    LIST_FOR_EACH_ENTRY( timer, &queue->pending_timers, struct timer, entry )
         if (timer->win == win && timer->msg == msg && timer->id == id) return timer;
-    }
-    LIST_FOR_EACH( ptr, &queue->expired_timers )
-    {
-        struct timer *timer = LIST_ENTRY( ptr, struct timer, entry );
+    LIST_FOR_EACH_ENTRY( timer, &queue->expired_timers, struct timer, entry )
         if (timer->win == win && timer->msg == msg && timer->id == id) return timer;
-    }
     return NULL;
 }
 
@@ -1678,11 +1675,10 @@ static struct timer *find_expired_timer( struct msg_queue *queue, user_handle_t 
                                          unsigned int get_first, unsigned int get_last,
                                          int remove )
 {
-    struct list *ptr;
+    struct timer *timer;
 
-    LIST_FOR_EACH( ptr, &queue->expired_timers )
+    LIST_FOR_EACH_ENTRY( timer, &queue->expired_timers, struct timer, entry )
     {
-        struct timer *timer = LIST_ENTRY( ptr, struct timer, entry );
         if (win && timer->win != win) continue;
         if (check_msg_filter( timer->msg, get_first, get_last ))
         {
@@ -1797,6 +1793,7 @@ static void update_desktop_key_state( struct desktop *desktop, unsigned int msg,
     SHARED_WRITE_BEGIN( desktop->shared, desktop_shm_t )
     {
         update_key_state( shared->keystate, msg, wparam, 1 );
+        ++shared->keystate_serial;
     }
     SHARED_WRITE_END;
 }
@@ -3808,6 +3805,7 @@ DECL_HANDLER(get_key_state)
         {
             reply->state = shared->keystate[req->key & 0xff];
             shared->keystate[req->key & 0xff] &= ~0x40;
+            ++shared->keystate_serial;
         }
         SHARED_WRITE_END;
         release_object( desktop );
@@ -3845,6 +3843,7 @@ DECL_HANDLER(set_key_state)
         SHARED_WRITE_BEGIN( desktop->shared, desktop_shm_t )
         {
             memcpy( (void *)shared->keystate, get_req_data(), size );
+            ++shared->keystate_serial;
         }
         SHARED_WRITE_END;
         release_object( desktop );

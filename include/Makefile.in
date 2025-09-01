@@ -104,6 +104,7 @@ SOURCES = \
 	crtrow.idl \
 	cryptdlg.h \
 	cryptuiapi.h \
+	cryptxml.h \
 	ctfutb.idl \
 	ctxtcall.idl \
 	custcntl.h \
@@ -342,6 +343,7 @@ SOURCES = \
 	fltdefs.h \
 	fontsub.h \
 	fusion.idl \
+	gameinput.idl \
 	gameux.idl \
 	gamingtcui.h \
 	gdiplus.h \
@@ -866,6 +868,7 @@ SOURCES = \
 	windows.applicationmodel.idl \
 	windows.data.json.idl \
 	windows.data.xml.dom.idl \
+	windows.devices.bluetooth.advertisement.idl \
 	windows.devices.bluetooth.genericattributeprofile.idl \
 	windows.devices.bluetooth.idl \
 	windows.devices.bluetooth.rfcomm.idl \
@@ -897,13 +900,16 @@ SOURCES = \
 	windows.management.deployment.idl \
 	windows.media.capture.idl \
 	windows.media.closedcaptioning.idl \
+	windows.media.core.idl \
 	windows.media.devices.idl \
 	windows.media.effects.idl \
 	windows.media.faceanalysis.idl \
 	windows.media.idl \
+	windows.media.mediaproperties.idl \
 	windows.media.render.idl \
 	windows.media.speechrecognition.idl \
 	windows.media.speechsynthesis.idl \
+	windows.media.transcoding.idl \
 	windows.networking.connectivity.idl \
 	windows.networking.idl \
 	windows.networking.sockets.idl \

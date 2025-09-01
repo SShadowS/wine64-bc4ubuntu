@@ -91,7 +91,7 @@ static VkResult win32u_vkCreateWin32SurfaceKHR( VkInstance client_instance, cons
     {
         static const WCHAR staticW[] = {'s','t','a','t','i','c',0};
         UNICODE_STRING static_us = RTL_CONSTANT_STRING( staticW );
-        dummy = NtUserCreateWindowEx( 0, &static_us, &static_us, &static_us, WS_POPUP, 0, 0, 0, 0,
+        dummy = NtUserCreateWindowEx( 0, &static_us, NULL, &static_us, WS_POPUP, 0, 0, 0, 0,
                                       NULL, NULL, NULL, NULL, 0, NULL, 0, FALSE );
         WARN( "Created dummy window %p for null surface window\n", dummy );
         surface->hwnd = dummy;
@@ -269,9 +269,15 @@ static VkBool32 win32u_vkGetPhysicalDeviceWin32PresentationSupportKHR( VkPhysica
     return driver_funcs->p_vkGetPhysicalDeviceWin32PresentationSupportKHR( physical_device->host.physical_device, queue );
 }
 
+static BOOL extents_equals( const VkExtent2D *extents, const RECT *rect )
+{
+    return extents->width == rect->right - rect->left && extents->height == rect->bottom - rect->top;
+}
+
 static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwapchainCreateInfoKHR *create_info,
                                              const VkAllocationCallbacks *allocator, VkSwapchainKHR *ret )
 {
+    VkSwapchainPresentScalingCreateInfoEXT scaling = {.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_SCALING_CREATE_INFO_EXT};
     struct swapchain *swapchain, *old_swapchain = swapchain_from_handle( create_info->oldSwapchain );
     struct surface *surface = surface_from_handle( create_info->surface );
     struct vulkan_device *device = vulkan_device_from_handle( client_device );
@@ -280,6 +286,7 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
     VkSwapchainCreateInfoKHR create_info_host = *create_info;
     VkSurfaceCapabilitiesKHR capabilities;
     VkSwapchainKHR host_swapchain;
+    RECT client_rect;
     VkResult res;
 
     if (!NtUserIsWindow( surface->hwnd ))
@@ -297,6 +304,18 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
 
     create_info_host.imageExtent.width = max( create_info_host.imageExtent.width, capabilities.minImageExtent.width );
     create_info_host.imageExtent.height = max( create_info_host.imageExtent.height, capabilities.minImageExtent.height );
+
+    /* If the swapchain image size is not equal to the presentation size (e.g. because of DPI virtualization or
+     * display mode change emulation), MoltenVK's vkQueuePresentKHR returns VK_SUBOPTIMAL_KHR.
+     * Create the swapchain with VkSwapchainPresentScalingCreateInfoEXT to avoid this.
+     */
+    if (NtUserGetClientRect( surface->hwnd, &client_rect, NtUserGetWinMonitorDpi( surface->hwnd, MDT_RAW_DPI ) ) &&
+        !extents_equals( &create_info_host.imageExtent, &client_rect ) &&
+        physical_device->has_swapchain_maintenance1)
+    {
+        scaling.scalingBehavior = VK_PRESENT_SCALING_STRETCH_BIT_EXT;
+        create_info_host.pNext = &scaling;
+    }
 
     if (!(swapchain = calloc( 1, sizeof(*swapchain) ))) return VK_ERROR_OUT_OF_HOST_MEMORY;
 
@@ -329,11 +348,6 @@ void win32u_vkDestroySwapchainKHR( VkDevice client_device, VkSwapchainKHR client
     instance->p_remove_object( instance, &swapchain->obj.obj );
 
     free( swapchain );
-}
-
-static BOOL extents_equals( const VkExtent2D *extents, const RECT *rect )
-{
-    return extents->width == rect->right - rect->left && extents->height == rect->bottom - rect->top;
 }
 
 static VkResult win32u_vkAcquireNextImage2KHR( VkDevice client_device, const VkAcquireNextImageInfoKHR *acquire_info,
@@ -416,7 +430,7 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
         struct surface *surface = swapchain->surface;
         RECT client_rect;
 
-        client_surface_present( surface->client, NULL );
+        client_surface_present( surface->client );
 
         if (swapchain_res < VK_SUCCESS) continue;
         if (!NtUserGetClientRect( surface->hwnd, &client_rect, NtUserGetDpiForWindow( surface->hwnd ) ))
@@ -485,15 +499,13 @@ static struct vulkan_funcs vulkan_funcs =
     .p_get_host_surface_extension = win32u_get_host_surface_extension,
 };
 
-static const struct client_surface_funcs nulldrv_vulkan_surface_funcs;
-
 static VkResult nulldrv_vulkan_surface_create( HWND hwnd, const struct vulkan_instance *instance, VkSurfaceKHR *surface,
                                                struct client_surface **client )
 {
     VkHeadlessSurfaceCreateInfoEXT create_info = {.sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT};
     VkResult res;
 
-    if (!(*client = client_surface_create(sizeof(**client), &nulldrv_vulkan_surface_funcs, hwnd))) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    if (!(*client = nulldrv_client_surface_create( hwnd ))) return VK_ERROR_OUT_OF_HOST_MEMORY;
     if ((res = instance->p_vkCreateHeadlessSurfaceEXT( instance->host.instance, &create_info, NULL, surface )))
     {
         client_surface_release(*client);
@@ -501,22 +513,6 @@ static VkResult nulldrv_vulkan_surface_create( HWND hwnd, const struct vulkan_in
     }
 
     return res;
-}
-
-static void nulldrv_vulkan_surface_destroy( struct client_surface *client )
-{
-}
-
-static void nulldrv_vulkan_surface_detach( struct client_surface *client )
-{
-}
-
-static void nulldrv_vulkan_surface_update( struct client_surface *client )
-{
-}
-
-static void nulldrv_vulkan_surface_present( struct client_surface *client, HDC hdc )
-{
 }
 
 static VkBool32 nulldrv_vkGetPhysicalDeviceWin32PresentationSupportKHR( VkPhysicalDevice device, uint32_t queue )
@@ -528,14 +524,6 @@ static const char *nulldrv_get_host_surface_extension(void)
 {
     return "VK_EXT_headless_surface";
 }
-
-static const struct client_surface_funcs nulldrv_vulkan_surface_funcs =
-{
-    .destroy = nulldrv_vulkan_surface_destroy,
-    .detach = nulldrv_vulkan_surface_detach,
-    .update = nulldrv_vulkan_surface_update,
-    .present = nulldrv_vulkan_surface_present,
-};
 
 static const struct vulkan_driver_funcs nulldrv_funcs =
 {

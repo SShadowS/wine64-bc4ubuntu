@@ -2529,6 +2529,8 @@ WINE_CONFIG_MAKEFILE(dlls/cryptowinrt/tests)
 WINE_CONFIG_MAKEFILE(dlls/cryptsp)
 WINE_CONFIG_MAKEFILE(dlls/cryptui)
 WINE_CONFIG_MAKEFILE(dlls/cryptui/tests)
+WINE_CONFIG_MAKEFILE(dlls/cryptxml)
+WINE_CONFIG_MAKEFILE(dlls/cryptxml/tests)
 WINE_CONFIG_MAKEFILE(dlls/ctapi32)
 WINE_CONFIG_MAKEFILE(dlls/ctl3d.dll16)
 WINE_CONFIG_MAKEFILE(dlls/ctl3d32)
@@ -2726,6 +2728,7 @@ WINE_CONFIG_MAKEFILE(dlls/fontsub)
 WINE_CONFIG_MAKEFILE(dlls/fusion)
 WINE_CONFIG_MAKEFILE(dlls/fusion/tests)
 WINE_CONFIG_MAKEFILE(dlls/fwpuclnt)
+WINE_CONFIG_MAKEFILE(dlls/gameinput)
 WINE_CONFIG_MAKEFILE(dlls/gameux)
 WINE_CONFIG_MAKEFILE(dlls/gameux/tests)
 WINE_CONFIG_MAKEFILE(dlls/gamingtcui)
@@ -3219,6 +3222,7 @@ WINE_CONFIG_MAKEFILE(dlls/uxtheme/tests)
 WINE_CONFIG_MAKEFILE(dlls/vbscript)
 WINE_CONFIG_MAKEFILE(dlls/vbscript/tests)
 WINE_CONFIG_MAKEFILE(dlls/vccorlib140)
+WINE_CONFIG_MAKEFILE(dlls/vccorlib140/tests)
 WINE_CONFIG_MAKEFILE(dlls/vcomp)
 WINE_CONFIG_MAKEFILE(dlls/vcomp/tests)
 WINE_CONFIG_MAKEFILE(dlls/vcomp100)
@@ -3268,6 +3272,7 @@ WINE_CONFIG_MAKEFILE(dlls/win32u)
 WINE_CONFIG_MAKEFILE(dlls/win32u/tests)
 WINE_CONFIG_MAKEFILE(dlls/win87em.dll16)
 WINE_CONFIG_MAKEFILE(dlls/winaspi.dll16)
+WINE_CONFIG_MAKEFILE(dlls/winbio)
 WINE_CONFIG_MAKEFILE(dlls/windebug.dll16)
 WINE_CONFIG_MAKEFILE(dlls/windows.applicationmodel)
 WINE_CONFIG_MAKEFILE(dlls/windows.applicationmodel/tests)
@@ -3657,7 +3662,7 @@ fi
 AC_CONFIG_COMMANDS([Makefile], [wine_fn_output_makefile Makefile],
 [wine_fn_output_makefile ()
 {
-    cat <<\_WINE_EOF >\$tmp/makefile && mv -f \$tmp/makefile \$[]1 && "$wine_makedep"$makedep_flags && return
+    cat <<\_WINE_EOF >\$tmp/makefile && "$wine_makedep"$makedep_flags -i\$tmp/makefile && return
 # This Makefile understands the following targets:
 #
 # all (default):   build wine

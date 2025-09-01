@@ -435,9 +435,6 @@ static void test_audioclient(void)
 
     handle = CreateEventW(NULL, FALSE, FALSE, NULL);
 
-    hr = IAudioClient_QueryInterface(ac, &IID_IUnknown, NULL);
-    ok(hr == E_POINTER, "QueryInterface(NULL) returned %08lx\n", hr);
-
     unk = (void*)(LONG_PTR)0x12345678;
     hr = IAudioClient_QueryInterface(ac, &IID_NULL, (void**)&unk);
     ok(hr == E_NOINTERFACE, "QueryInterface(IID_NULL) returned %08lx\n", hr);
@@ -629,6 +626,7 @@ static void test_formats(AUDCLNT_SHAREMODE mode)
         {
             BOOL compatible = fmt.nSamplesPerSec == pwfx->nSamplesPerSec && fmt.nChannels == pwfx->nChannels;
             HRESULT expected = compatible ? S_OK : S_FALSE;
+            todo_wine_if(expected == S_FALSE)
             ok(hr == expected, "Got %lx expected %lx\n", hr, expected);
         }
 
@@ -657,6 +655,7 @@ static void test_formats(AUDCLNT_SHAREMODE mode)
                "Initialize(noexcl., %c%lux%2ux%u) returns %08lx(%08lx)\n",
                format_chr, fmt.nSamplesPerSec, fmt.wBitsPerSample, fmt.nChannels, hr, hrs);
         else
+            todo_wine_if(hr == AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED)
             ok(hrs == S_OK ? hr == S_OK
                : hr == AUDCLNT_E_ENDPOINT_CREATE_FAILED || hr == AUDCLNT_E_UNSUPPORTED_FORMAT,
                "Initialize(exclus., %c%lux%2ux%u) returns %08lx\n",

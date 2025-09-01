@@ -21,6 +21,8 @@
 #include <stdarg.h>
 
 #define IPHLPAPI_DLL_LINKAGE
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -4530,14 +4532,127 @@ char *WINAPI IPHLP_if_indextoname( NET_IFINDEX index, char *name )
     return name;
 }
 
+static void fill_ip_interface_table_row( ADDRESS_FAMILY fam, MIB_IPINTERFACE_ROW *row, struct nsi_ip_interface_key *key,
+                                         struct nsi_ip_interface_rw *rw, struct nsi_ip_interface_dynamic *dyn )
+{
+    row->Family = fam;
+    row->InterfaceLuid = key->luid;
+    row->InterfaceIndex = dyn->if_index;
+    row->RouterDiscoveryBehavior = rw->router_discovery_behaviour;
+    row->DadTransmits = rw->dad_transmits;
+    row->BaseReachableTime = rw->base_reachable_time;
+    row->RetransmitTime = rw->retransmit_time;
+    row->PathMtuDiscoveryTimeout = rw->path_mtu_discovery_timeout;
+    row->LinkLocalAddressBehavior = rw->link_local_address_behavior;
+    row->LinkLocalAddressTimeout = rw->link_local_address_timeout;
+    memcpy( row->ZoneIndices, rw->zone_indices, sizeof(row->ZoneIndices) );
+    row->SitePrefixLength = rw->site_prefix_len;
+    row->Metric = rw->metric;
+    row->NlMtu = rw->mtu;
+    row->Connected = dyn->connected;
+    row->SupportsWakeUpPatterns = dyn->supports_wakeup_patterns;
+    row->ReachableTime = dyn->reachable_time;
+    row->TransmitOffload = dyn->transmit_offload;
+
+    /* MinRouterAdvertisementInterval / MaxRouterAdvertisementInterval don't seem to have an
+     * entry in NSI interface table, or maybe these fields are usually default and NSI tables have 0 in that case
+     * and thus weren't discovered. */
+    row->MinRouterAdvertisementInterval = 200;
+    row->MaxRouterAdvertisementInterval = 600;
+
+    /* Flags exact locations were not yet discovered in NSI table. */
+    row->UseAutomaticMetric = 1;
+    row->UseNeighborUnreachabilityDetection = 1;
+    row->SupportsNeighborDiscovery = 1;
+    row->SupportsRouterDiscovery = 1;
+}
+
 /******************************************************************
  *    GetIpInterfaceTable (IPHLPAPI.@)
  */
-DWORD WINAPI GetIpInterfaceTable(ADDRESS_FAMILY family, PMIB_IPINTERFACE_TABLE *table)
+DWORD WINAPI GetIpInterfaceTable( ADDRESS_FAMILY family, MIB_IPINTERFACE_TABLE **table )
 {
-    FIXME("(%u %p): stub\n", family, table);
-    return ERROR_NOT_SUPPORTED;
+    struct nsi_ip_interface_dynamic *dyn;
+    struct nsi_ip_interface_key *keys;
+    DWORD err, count, total_count = 0;
+    MIB_IPINTERFACE_TABLE *new_alloc;
+    struct nsi_ip_interface_rw *rw;
+    ADDRESS_FAMILY fam[3] = { 0 };
+    unsigned int i, family_idx;
+
+    TRACE( "(%u %p).\n", family, table );
+
+    if (!table) return ERROR_INVALID_PARAMETER;
+
+    if (family == AF_UNSPEC)
+    {
+        fam[0] = AF_INET;
+        fam[1] = AF_INET6;
+    }
+    else fam[0] = family;
+
+    *table = NULL;
+    for (family_idx = 0; fam[family_idx]; ++family_idx)
+    {
+        err = NsiAllocateAndGetTable( 1, ip_module_id( fam[family_idx] ), NSI_IP_INTERFACE_TABLE,
+                                      (void **)&keys, sizeof(*keys), (void **)&rw, sizeof(*rw),
+                                      (void **)&dyn, sizeof(*dyn), NULL, 0, &count, 0 );
+        if (err)
+        {
+            heap_free( *table );
+            return err;
+        }
+        total_count += count;
+        new_alloc = heap_alloc_zero( offsetof(MIB_IPINTERFACE_TABLE, Table[total_count]) );
+        if (!new_alloc)
+        {
+            heap_free( *table );
+            NsiFreeTable( keys, rw, dyn, NULL );
+            return ERROR_NOT_ENOUGH_MEMORY;
+        }
+        if (*table)
+        {
+            memcpy( new_alloc, *table, offsetof(MIB_IPINTERFACE_TABLE, Table[(*table)->NumEntries]) );
+            free( *table );
+        }
+        *table = new_alloc;
+        for (i = 0; i < count; ++i)
+        {
+            fill_ip_interface_table_row( fam[family_idx], &(*table)->Table[(*table)->NumEntries],
+                                         &keys[i], &rw[i], &dyn[i] );
+            ++(*table)->NumEntries;
+        }
+        NsiFreeTable( keys, rw, dyn, NULL );
+    }
+    return ERROR_SUCCESS;
 }
+
+/******************************************************************
+ *    GetIpInterfaceEntry (IPHLPAPI.@)
+ */
+DWORD WINAPI GetIpInterfaceEntry( MIB_IPINTERFACE_ROW *row )
+{
+    struct nsi_ip_interface_dynamic dyn;
+    struct nsi_ip_interface_key key;
+    struct nsi_ip_interface_rw rw;
+    DWORD err;
+
+    TRACE( "%p.\n", row );
+
+    if (!row) return ERROR_INVALID_PARAMETER;
+    if (row->Family != AF_INET && row->Family != AF_INET6) return ERROR_INVALID_PARAMETER;
+
+    key.luid = row->InterfaceLuid;
+    if (!key.luid.Value && ConvertInterfaceIndexToLuid( row->InterfaceIndex, &key.luid )) return ERROR_NOT_FOUND;
+
+    err = NsiGetAllParameters( 1, ip_module_id( row->Family ), NSI_IP_INTERFACE_TABLE,
+                               &key, sizeof(key), &rw, sizeof(rw),
+                               &dyn, sizeof(dyn), NULL, 0 );
+    if (err) return err;
+    fill_ip_interface_table_row( row->Family, row, &key, &rw, &dyn );
+    return ERROR_SUCCESS;
+}
+
 
 /******************************************************************
  *    GetBestRoute2 (IPHLPAPI.@)
@@ -4750,64 +4865,67 @@ void WINAPI icmp_apc_routine( void *context, IO_STATUS_BLOCK *iosb, ULONG reserv
     heap_free( ctxt );
 }
 
-/***********************************************************************
- *    IcmpSendEcho2Ex (IPHLPAPI.@)
- */
-DWORD WINAPI IcmpSendEcho2Ex( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_routine, void *apc_ctxt,
-                              IPAddr src, IPAddr dst, void *request, WORD request_size, IP_OPTION_INFORMATION *opts,
-                              void *reply, DWORD reply_size, DWORD timeout )
+static NTSTATUS icmp_send_echo( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_routine, void *apc_ctxt,
+                                SOCKADDR_INET *src_addr, SOCKADDR_INET *dst_addr, void *request,
+                                WORD request_size, IP_OPTION_INFORMATION *opts, void *reply, DWORD reply_size,
+                                DWORD timeout )
 {
+    static IO_STATUS_BLOCK iosb_placeholder;
     struct icmp_handle_data *data = (struct icmp_handle_data *)handle;
-    struct icmp_apc_ctxt *ctxt = heap_alloc( sizeof(*ctxt) );
-    IO_STATUS_BLOCK *iosb = &ctxt->iosb;
-    DWORD opt_size, in_size, ret = 0;
+    struct icmp_apc_ctxt *ctxt = NULL;
+    IO_STATUS_BLOCK *iosb;
+    DWORD opt_size, in_size;
     struct nsiproxy_icmp_echo *in;
     HANDLE request_event;
     NTSTATUS status;
 
-    if (handle == INVALID_HANDLE_VALUE || !reply)
-    {
-        heap_free( ctxt );
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return 0;
-    }
-
-    ctxt->apc_routine = apc_routine;
-    ctxt->apc_ctxt = apc_ctxt;
+    if (handle == INVALID_HANDLE_VALUE || !reply) return STATUS_INVALID_PARAMETER;
 
     opt_size = opts ? (opts->OptionsSize + 3) & ~3 : 0;
     in_size = FIELD_OFFSET(struct nsiproxy_icmp_echo, data[opt_size + request_size]);
     in = heap_alloc_zero( in_size );
 
-    if (!in)
-    {
-        heap_free( ctxt );
-        SetLastError( IP_NO_RESOURCES );
-        return 0;
-    }
+    if (!in) return STATUS_NO_MEMORY;
 
     in->user_reply_ptr = (ULONG_PTR)reply;
     in->bits = sizeof(void*) * 8;
-    in->src.Ipv4.sin_family = AF_INET;
-    in->src.Ipv4.sin_addr.s_addr = src;
-    in->dst.Ipv4.sin_family = AF_INET;
-    in->dst.Ipv4.sin_addr.s_addr = dst;
+    in->src = *src_addr;
+    in->dst = *dst_addr;
     if (opts)
     {
         in->ttl = opts->Ttl;
+        in->hop_limit = opts->Ttl;
         in->tos = opts->Tos;
         in->flags = opts->Flags;
         memcpy( in->data, opts->OptionsData, opts->OptionsSize );
         in->opt_size = opts->OptionsSize;
     }
+    else in->hop_limit = -1;
     in->req_size = request_size;
     in->timeout = timeout;
     memcpy( in->data + opt_size, request, request_size );
 
+    if (event)
+    {
+        /* Async completion without calling APC routine, IOSB is not delivered anywhere. */
+        iosb = &iosb_placeholder;
+    }
+    else
+    {
+        if (!(ctxt = heap_alloc( sizeof(*ctxt) )))
+        {
+            heap_free( in );
+            return STATUS_NO_MEMORY;
+        }
+        iosb = &ctxt->iosb;
+        ctxt->apc_routine = apc_routine;
+        ctxt->apc_ctxt = apc_ctxt;
+    }
+
     request_event = event ? event : (apc_routine ? NULL : CreateEventW( NULL, 0, 0, NULL ));
 
-    status = NtDeviceIoControlFile( data->nsi_device, request_event, apc_routine ? icmp_apc_routine : NULL,
-                                    apc_routine ? ctxt : apc_ctxt, iosb, IOCTL_NSIPROXY_WINE_ICMP_ECHO,
+    status = NtDeviceIoControlFile( data->nsi_device, request_event, apc_routine && !event ? icmp_apc_routine : NULL,
+                                    ctxt, iosb, IOCTL_NSIPROXY_WINE_ICMP_ECHO,
                                     in, in_size, reply, reply_size );
 
     if (status == STATUS_PENDING)
@@ -4816,15 +4934,36 @@ DWORD WINAPI IcmpSendEcho2Ex( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_r
             status = iosb->Status;
     }
 
-    if (!status)
-        ret = IcmpParseReplies( reply, reply_size );
-
     if (!event && request_event) CloseHandle( request_event );
     if ((!apc_routine && !event) || status != STATUS_PENDING) heap_free( ctxt );
     heap_free( in );
+    return status;
+}
 
-    if (status) SetLastError( RtlNtStatusToDosError( status ) );
-    return ret;
+/***********************************************************************
+ *    IcmpSendEcho2Ex (IPHLPAPI.@)
+ */
+DWORD WINAPI IcmpSendEcho2Ex( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_routine, void *apc_ctxt,
+                              IPAddr src, IPAddr dst, void *request, WORD request_size, IP_OPTION_INFORMATION *opts,
+                              void *reply, DWORD reply_size, DWORD timeout )
+{
+    SOCKADDR_INET src_addr, dst_addr;
+    NTSTATUS status;
+
+    TRACE( "(%p %p %p %p %#lx %#lx %p %u %p %p %lu %lu).\n", handle, event, apc_routine, apc_ctxt, src, dst,
+           request, request_size, opts, reply, reply_size, timeout );
+
+    memset( &src_addr, 0, sizeof(src_addr) );
+    src_addr.Ipv4.sin_family = AF_INET;
+    src_addr.Ipv4.sin_addr.s_addr = src;
+    memset( &dst_addr, 0, sizeof(dst_addr) );
+    dst_addr.Ipv4.sin_family = AF_INET;
+    dst_addr.Ipv4.sin_addr.s_addr = dst;
+    status = icmp_send_echo( handle, event, apc_routine, apc_ctxt, &src_addr, &dst_addr, request, request_size,
+                             opts, reply, reply_size, timeout );
+    if (!status) return IcmpParseReplies( reply, reply_size );
+    SetLastError( RtlNtStatusToDosError( status ) );
+    return 0;
 }
 
 /***********************************************************************
@@ -4832,9 +4971,21 @@ DWORD WINAPI IcmpSendEcho2Ex( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_r
  */
 HANDLE WINAPI Icmp6CreateFile( void )
 {
-    FIXME( "stub\n" );
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-    return INVALID_HANDLE_VALUE;
+    TRACE( ".\n" );
+
+    return IcmpCreateFile();
+}
+
+/******************************************************************
+ *    Icmp6ParseReplies (IPHLPAPI.@)
+ */
+DWORD WINAPI Icmp6ParseReplies( void *reply, DWORD reply_size )
+{
+    ICMPV6_ECHO_REPLY *icmp_reply = reply;
+
+    if (!icmp_reply->Status) return 1;
+    SetLastError( icmp_reply->Status );
+    return 0;
 }
 
 /***********************************************************************
@@ -4844,9 +4995,20 @@ DWORD WINAPI Icmp6SendEcho2( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_ro
                              struct sockaddr_in6 *src, struct sockaddr_in6 *dst, void *request, WORD request_size,
                              IP_OPTION_INFORMATION *opts, void *reply, DWORD reply_size, DWORD timeout )
 {
-    FIXME( "(%p, %p, %p, %p, %p, %p, %p, %d, %p, %p, %ld, %ld): stub\n", handle, event,
+    SOCKADDR_INET src_addr, dst_addr;
+    NTSTATUS status;
+
+    TRACE( "(%p, %p, %p, %p, %p, %p, %p, %d, %p, %p, %ld, %ld).\n", handle, event,
            apc_routine, apc_ctxt, src, dst, request, request_size, opts, reply, reply_size, timeout );
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+
+    src_addr.Ipv6 = *src;
+    if (!src_addr.si_family) src_addr.si_family = AF_INET6;
+    dst_addr.Ipv6 = *dst;
+    if (!dst_addr.si_family) dst_addr.si_family = AF_INET6;
+    status = icmp_send_echo( handle, event, apc_routine, apc_ctxt, &src_addr, &dst_addr, request, request_size,
+                             opts, reply, reply_size, timeout );
+    if (!status) return Icmp6ParseReplies( reply, reply_size );
+    SetLastError( RtlNtStatusToDosError( status ) );
     return 0;
 }
 

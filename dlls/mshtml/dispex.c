@@ -1384,7 +1384,10 @@ HRESULT dispex_get_chain_builtin_id(DispatchEx *dispex, const WCHAR *name, DWORD
     const dispex_data_t *info = dispex->info;
     HRESULT hres;
 
-    assert(compat_mode >= COMPAT_MODE_IE9);
+    hres = get_builtin_id(info, name, flags, pid);
+    if(hres != DISP_E_UNKNOWNNAME || compat_mode < COMPAT_MODE_IE9)
+        return hres;
+    info = info->desc->prototype_info[compat_mode - COMPAT_MODE_IE9];
 
     for(;;) {
         hres = get_builtin_id(info, name, flags, pid);
@@ -1872,6 +1875,43 @@ HRESULT remove_attribute(DispatchEx *This, DISPID id, VARIANT_BOOL *success)
     }
 }
 
+BOOL is_builtin_attribute(DispatchEx *dispex, DISPID id)
+{
+    func_info_t *func;
+
+    if(get_dispid_type(id) != DISPEXPROP_BUILTIN)
+        return FALSE;
+
+    if(FAILED(get_builtin_func(dispex->info, id, &func)))
+        return FALSE;
+
+    return func->func_disp_idx < 0;
+}
+
+BOOL is_builtin_value(DispatchEx *dispex, DISPID id)
+{
+    func_info_t *func;
+
+    if(get_dispid_type(id) != DISPEXPROP_BUILTIN)
+        return FALSE;
+
+    if(FAILED(get_builtin_func(dispex->info, id, &func)))
+        return FALSE;
+
+    if(func->func_disp_idx < 0)
+        return TRUE;
+
+    if(dispex->dynamic_data && dispex->dynamic_data->func_disps) {
+        func_obj_entry_t *entry = dispex->dynamic_data->func_disps + func->func_disp_idx;
+
+        if(entry->func_obj && (V_VT(&entry->val) != VT_DISPATCH ||
+           V_DISPATCH(&entry->val) != (IDispatch*)&entry->func_obj->dispex.IWineJSDispatchHost_iface))
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
 static dispex_data_t *ensure_dispex_info(dispex_static_data_t *desc, compat_mode_t compat_mode)
 {
     if(!desc->info_cache[compat_mode]) {
@@ -2003,6 +2043,14 @@ BOOL dispex_builtin_is_noattr(DispatchEx *dispex, DISPID id)
 
     hres = get_builtin_func(dispex->info, id, &func);
     assert(SUCCEEDED(hres));
+
+    if(func->func_disp_idx >= 0 && dispex->dynamic_data && dispex->dynamic_data->func_disps) {
+        func_obj_entry_t *entry = dispex->dynamic_data->func_disps + func->func_disp_idx;
+
+        if(entry->func_obj && (V_VT(&entry->val) != VT_DISPATCH ||
+           V_DISPATCH(&entry->val) != (IDispatch*)&entry->func_obj->dispex.IWineJSDispatchHost_iface))
+            return FALSE;
+    }
 
     return func->noattr;
 }
