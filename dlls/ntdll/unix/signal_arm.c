@@ -562,12 +562,14 @@ static void setup_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec )
 /***********************************************************************
  *           call_user_apc_dispatcher
  */
-NTSTATUS call_user_apc_dispatcher( CONTEXT *context, ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3,
+NTSTATUS call_user_apc_dispatcher( CONTEXT *context, unsigned int flags, ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3,
                                    PNTAPCFUNC func, NTSTATUS status )
 {
     struct syscall_frame *frame = get_syscall_frame();
     ULONG sp = context ? context->Sp : frame->sp;
     struct apc_stack_layout *stack;
+
+    if (flags) FIXME( "flags %#x are not supported.\n", flags );
 
     sp &= ~7;
     stack = (struct apc_stack_layout *)sp - 1;
@@ -850,7 +852,9 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         break;
     case TRAP_ARM_PAGEFLT:  /* Page fault */
         rec.NumberParameters = 2;
-        rec.ExceptionInformation[0] = (get_error_code(context) & 0x800) != 0;
+        if (get_error_code(context) & 0x80000000) rec.ExceptionInformation[0] = EXCEPTION_EXECUTE_FAULT;
+        else if (get_error_code(context) & 0x800) rec.ExceptionInformation[0] = EXCEPTION_WRITE_FAULT;
+        else rec.ExceptionInformation[0] = EXCEPTION_READ_FAULT;
         rec.ExceptionInformation[1] = (ULONG_PTR)siginfo->si_addr;
         if (!virtual_handle_fault( &rec, (void *)SP_sig(context) )) return;
         break;

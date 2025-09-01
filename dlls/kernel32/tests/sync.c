@@ -56,6 +56,8 @@ static VOID   (WINAPI *pReleaseSRWLockShared)(PSRWLOCK);
 static BOOLEAN (WINAPI *pTryAcquireSRWLockExclusive)(PSRWLOCK);
 static BOOLEAN (WINAPI *pTryAcquireSRWLockShared)(PSRWLOCK);
 
+static DWORD (WINAPI *pQueueUserAPC2)(PAPCFUNC,HANDLE,ULONG_PTR,QUEUE_USER_APC_FLAGS);
+
 static NTSTATUS (WINAPI *pNtAllocateVirtualMemory)(HANDLE, PVOID *, ULONG_PTR, SIZE_T *, ULONG, ULONG);
 static NTSTATUS (WINAPI *pNtFreeVirtualMemory)(HANDLE, PVOID *, SIZE_T *, ULONG);
 static NTSTATUS (WINAPI *pNtWaitForSingleObject)(HANDLE, BOOLEAN, const LARGE_INTEGER *);
@@ -228,12 +230,35 @@ static void test_temporary_objects(void)
     ok(GetLastError() == ERROR_FILE_NOT_FOUND, "wrong error %lu\n", GetLastError());
 }
 
+struct test_mutex_thread_params
+{
+    HANDLE mutex;
+    HANDLE start_event;
+    HANDLE stop_event;
+    BOOL owner;
+};
+
+static DWORD WINAPI test_mutex_thread(void *arg)
+{
+    struct test_mutex_thread_params *params = arg;
+    DWORD ret;
+
+    ret = WaitForSingleObject(params->mutex, INFINITE);
+    if (params->owner) ok(!ret, "got %#lx\n", ret);
+    else ok(ret == WAIT_ABANDONED, "got %#lx\n", ret);
+    SetEvent(params->start_event);
+
+    ret = WaitForSingleObject(params->stop_event, INFINITE);
+    ok(!ret, "got %#lx\n", ret);
+    return 0;
+}
+
 static void test_mutex(void)
 {
     DWORD wait_ret;
     BOOL ret;
-    HANDLE hCreated;
-    HANDLE hOpened;
+    HANDLE hCreated, hOpened, owner_thread, waiter_thread;
+    struct test_mutex_thread_params params;
     int i;
     DWORD failed = 0;
 
@@ -336,6 +361,42 @@ static void test_mutex(void)
     CloseHandle(hOpened);
 
     CloseHandle(hCreated);
+
+    params.start_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    params.stop_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    params.mutex = CreateMutexA(NULL, FALSE, NULL);
+
+    params.owner = TRUE;
+    owner_thread = CreateThread(NULL, 0, test_mutex_thread, &params, 0, NULL);
+    ok(!!owner_thread, "CreateThread failed, error %lu\n", GetLastError());
+    ret = WaitForSingleObject(params.start_event, 1000);
+    ok(!ret, "got %#x\n", ret);
+
+    params.owner = FALSE;
+    waiter_thread = CreateThread(NULL, 0, test_mutex_thread, &params, 0, NULL);
+    ok(!!waiter_thread, "CreateThread failed, error %lu\n", GetLastError());
+    ret = WaitForSingleObject(params.start_event, 100);
+    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+
+    CloseHandle(params.mutex);
+    ret = WaitForSingleObject(params.start_event, 100);
+    ok(ret == WAIT_TIMEOUT, "got %#x\n", ret);
+
+    TerminateThread(owner_thread, 0);
+    ret = WaitForSingleObject(owner_thread, 1000);
+    ok(!ret, "got %#x\n", ret);
+    ret = WaitForSingleObject(params.start_event, 1000);
+    ok(!ret, "got %#x\n", ret);
+
+    SetEvent(params.stop_event);
+    ret = WaitForSingleObject(waiter_thread, 1000);
+    ok(!ret, "got %#x\n", ret);
+
+    CloseHandle(owner_thread);
+    CloseHandle(waiter_thread);
+
+    CloseHandle(params.start_event);
+    CloseHandle(params.stop_event);
 }
 
 static void test_slist(void)
@@ -2869,6 +2930,8 @@ static void test_QueueUserAPC(void)
     ok(ret == STATUS_UNSUCCESSFUL, "got %#lx\n", ret);
     ret = pNtQueueApcThread(thread, NULL, 0, 0, 0);
     ok(ret == STATUS_UNSUCCESSFUL, "got %#lx\n", ret);
+    ret = pNtQueueApcThread((HANDLE)0xdeadbeef, call_user_apc, (ULONG_PTR)user_apc, 0, 0);
+    ok(ret == STATUS_INVALID_HANDLE, "got %#lx\n", ret);
 
     SetLastError(0xdeadbeef);
     ret = QueueUserAPC(user_apc, thread, 0);
@@ -2900,6 +2963,33 @@ static void test_QueueUserAPC(void)
     status = pNtTestAlert();
     ok(!status, "got %lx\n", status);
     ok(apc_count == 1, "APC count %u\n", apc_count);
+
+    if (!pQueueUserAPC2)
+    {
+        win_skip("QueueUserAPC2 is not available.\n");
+        return;
+    }
+
+    apc_count = 0;
+    ret = pQueueUserAPC2(user_apc, GetCurrentThread(), 0, QUEUE_USER_APC_FLAGS_NONE);
+    ok(ret, "QueueUserAPC failed err %lu\n", GetLastError());
+    ok(!apc_count, "got %d.\n", apc_count);
+    SleepEx( 0, TRUE );
+    ok(apc_count == 1, "got %d.\n", apc_count);
+
+    apc_count = 0;
+    ret = pQueueUserAPC2(user_apc, GetCurrentThread(), 0, QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC);
+    if (sizeof(void *) == 4)
+        ok(!ret && GetLastError() == ERROR_NOT_SUPPORTED, "got ret %lu, error %lu.\n", ret, GetLastError());
+    else
+        ok(ret, "got error %lu.\n", GetLastError());
+
+    if (ret)
+    {
+        todo_wine ok(apc_count == 1, "got %d.\n", apc_count);
+        SleepEx( 0, TRUE );
+        ok(apc_count == 1, "got %d.\n", apc_count);
+    }
 }
 
 START_TEST(sync)
@@ -2926,6 +3016,7 @@ START_TEST(sync)
     pReleaseSRWLockShared = (void *)GetProcAddress(hdll, "ReleaseSRWLockShared");
     pTryAcquireSRWLockExclusive = (void *)GetProcAddress(hdll, "TryAcquireSRWLockExclusive");
     pTryAcquireSRWLockShared = (void *)GetProcAddress(hdll, "TryAcquireSRWLockShared");
+    pQueueUserAPC2 = (void *)GetProcAddress(hdll, "QueueUserAPC2");
     pNtAllocateVirtualMemory = (void *)GetProcAddress(hntdll, "NtAllocateVirtualMemory");
     pNtFreeVirtualMemory = (void *)GetProcAddress(hntdll, "NtFreeVirtualMemory");
     pNtWaitForSingleObject = (void *)GetProcAddress(hntdll, "NtWaitForSingleObject");

@@ -4654,12 +4654,26 @@ static void test_event_queue(void)
     hr = IMFMediaEventQueue_EndGetEvent(queue, result, &event);
     ok(hr == E_FAIL, "Unexpected hr %#lx.\n", hr);
 
+
     /* Shutdown behavior. */
+    hr = MFCreateMediaEvent(MEError, &GUID_NULL, E_FAIL, NULL, &event);
+    ok(hr == S_OK, "Failed to create event object, hr %#lx.\n", hr);
+    hr = IMFMediaEventQueue_QueueEvent(queue, event);
+    ok(hr == S_OK, "Failed to queue event, hr %#lx.\n", hr);
+    IMFMediaEvent_Release(event);
+
     hr = IMFMediaEventQueue_Shutdown(queue);
     ok(hr == S_OK, "Failed to shut down, hr %#lx.\n", hr);
 
+    event = (void *)0xdeadbeef;
+    hr = IMFMediaEventQueue_GetEvent(queue, 0, &event);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
+    ok(event == (void *)0xdeadbeef, "Unexpected event %p.\n", event);
+    event = (void *)0xdeadbeef;
     hr = IMFMediaEventQueue_GetEvent(queue, MF_EVENT_FLAG_NO_WAIT, &event);
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
+    ok(event == (void *)0xdeadbeef, "Unexpected event %p.\n", event);
+
 
     hr = MFCreateMediaEvent(MEError, &GUID_NULL, E_FAIL, NULL, &event);
     ok(hr == S_OK, "Failed to create event object, hr %#lx.\n", hr);
@@ -4706,6 +4720,33 @@ static void test_event_queue(void)
        "Unexpected refcount %ld, expected 1.\n", ret);
     IMFAsyncCallback_Release(&callback->IMFAsyncCallback_iface);
     IMFAsyncCallback_Release(&callback2->IMFAsyncCallback_iface);
+
+
+    callback = create_test_callback(&test_async_callback_result_vtbl);
+
+    hr = MFCreateEventQueue(&queue);
+    ok(hr == S_OK, "Failed to create event queue, hr %#lx.\n", hr);
+    hr = IMFMediaEventQueue_BeginGetEvent(queue, &callback->IMFAsyncCallback_iface, NULL);
+    ok(hr == S_OK, "Failed to Begin*, hr %#lx.\n", hr);
+    hr = IMFMediaEventQueue_QueueEventParamVar(queue, MEError, &GUID_NULL, E_FAIL, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaEventQueue_Shutdown(queue);
+    ok(hr == S_OK, "Failed to shut down, hr %#lx.\n", hr);
+
+    ret = WaitForSingleObject(callback->event, 500);
+    ok(ret == WAIT_OBJECT_0, "Unexpected return value %#lx.\n", ret);
+    result = callback->result;
+    callback->result = NULL;
+
+    event = (void *)0xdeadbeef;
+    hr = IMFMediaEventQueue_EndGetEvent(queue, result, &event);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
+    ok(event == (void *)0xdeadbeef, "Unexpected event %p.\n", event);
+    IMFAsyncResult_Release(result);
+
+    IMFMediaEventQueue_Release(queue);
+    IMFAsyncCallback_Release(&callback->IMFAsyncCallback_iface);
+
 
     hr = MFShutdown();
     ok(hr == S_OK, "Failed to shut down, hr %#lx.\n", hr);
@@ -5631,6 +5672,7 @@ image_size_tests[] =
     { &MFVideoFormat_NV12, 3, 2, 12, 9, 192, 9, 64 },
     { &MFVideoFormat_NV12, 4, 2, 12, 0, 192, 12, 64 },
     { &MFVideoFormat_NV12, 320, 240, 115200, 0, 115200, 115200, 320 },
+    { &MFVideoFormat_NV12, 650, 850, 828750, 0, 897600, 828750, 704 },
 
     /* YUV 4:2:0, 12 bpp, planar, half stride (the secondary plane has
      * the same height, half the width and half the stride of the
@@ -5703,6 +5745,13 @@ image_size_tests[] =
     { &MFVideoFormat_IYUV, 4, 2, 12, 0, 384, 12, 128 },
     { &MFVideoFormat_IYUV, 4, 3, 18, 0, 576, 18, 128 },
     { &MFVideoFormat_IYUV, 320, 240, 115200, 0, 138240, 115200, 384 },
+
+    { &MFVideoFormat_P010, 1, 2, 12, 6, 192, 6, 64 },
+    { &MFVideoFormat_P010, 2, 2, 12, 0, 192, 12, 64 },
+    { &MFVideoFormat_P010, 2, 4, 24, 0, 384, 24, 64 },
+    { &MFVideoFormat_P010, 3, 2, 24, 18, 192, 18, 64 },
+    { &MFVideoFormat_P010, 4, 2, 24, 0, 192, 24, 64 },
+    { &MFVideoFormat_P010, 320, 240, 230400, 0, 230400, 230400, 640 },
 };
 
 static void test_MFCalculateImageSize(void)

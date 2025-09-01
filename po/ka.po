@@ -275,7 +275,7 @@ msgstr ""
 msgid "Not specified"
 msgstr "მითითებული არაა"
 
-#: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:38
+#: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:35
 #: dlls/shell32/shell32.rc:141 dlls/shell32/shell32.rc:243
 #: programs/regedit/regedit.rc:150 programs/winefile/winefile.rc:106
 msgid "Name"
@@ -387,6 +387,21 @@ msgstr "Wine AVI-ის-ნაგულისხმები-დამმუშ�
 msgid "uncompressed"
 msgstr "შეუკუმშავი"
 
+#: dlls/bluetoothapis/bluetoothapis.rc:31
+#, fuzzy
+#| msgid "&Confirm password:"
+msgid "Confirm pairing"
+msgstr "&დაადასტურეთ პაროლი:"
+
+#: dlls/bluetoothapis/bluetoothapis.rc:32
+msgid "Pair with '%1!s!' using the following PIN/passkey value: %2!lu!?"
+msgstr ""
+
+#: dlls/bluetoothapis/bluetoothapis.rc:33
+msgid ""
+"Pair with unnamed device %1!s! using the following PIN/passkey value: %2!lu!?"
+msgstr ""
+
 #: dlls/browseui/browseui.rc:28
 msgid "Canceling..."
 msgstr "გაუქმება..."
@@ -434,7 +449,7 @@ msgstr "ოსტატი"
 msgid "< &Back"
 msgstr "< &უკან"
 
-#: dlls/comctl32/comctl32.rc:85 dlls/oledb32/version.rc:61
+#: dlls/comctl32/comctl32.rc:85 dlls/oledb32/version.rc:58
 msgid "&Next >"
 msgstr "&შემდეგი >"
 
@@ -1393,7 +1408,7 @@ msgid "&User name:"
 msgstr "&მომხმარებლის სახელი:"
 
 #: dlls/credui/credui.rc:48 dlls/cryptui/cryptui.rc:402
-#: dlls/oledb32/version.rc:81
+#: dlls/oledb32/version.rc:78
 msgid "&Password:"
 msgstr "&პაროლი:"
 
@@ -2729,7 +2744,7 @@ msgstr "სერტიფიკატი უნაკლოა."
 msgid "Field"
 msgstr "ველი"
 
-#: dlls/cryptui/cryptui.rc:48 dlls/oledb32/version.rc:39
+#: dlls/cryptui/cryptui.rc:48 dlls/oledb32/version.rc:36
 msgid "Value"
 msgstr "მნიშვნელობა"
 
@@ -3323,7 +3338,7 @@ msgstr "სიმბოლო"
 msgid "OEM/DOS"
 msgstr "OEM/DOS"
 
-#: dlls/gdi32/gdi32.rc:45 dlls/oledb32/version.rc:100
+#: dlls/gdi32/gdi32.rc:45 dlls/oledb32/version.rc:97
 #: dlls/wldap32/wldap32.rc:112
 msgid "Other"
 msgstr "სხვა"
@@ -3391,7 +3406,7 @@ msgid "&Stop"
 msgstr "გაჩერება"
 
 #: dlls/hhctrl.ocx/hhctrl.rc:66 dlls/hhctrl.ocx/hhctrl.rc:83
-#: dlls/oledb32/version.rc:73 dlls/shdoclc/shdoclc.rc:59
+#: dlls/oledb32/version.rc:70 dlls/shdoclc/shdoclc.rc:59
 msgid "&Refresh"
 msgstr "&განახლება"
 
@@ -3834,15 +3849,15 @@ msgstr "'hidraw'-ის გათიშვა"
 msgid "DInput"
 msgstr "DInput"
 
-#: dlls/joy.cpl/joy.rc:62
+#: dlls/joy.cpl/joy.rc:62 dlls/joy.cpl/joy.rc:111
 msgid "Axes"
 msgstr "ღერძები"
 
-#: dlls/joy.cpl/joy.rc:63
+#: dlls/joy.cpl/joy.rc:63 dlls/joy.cpl/joy.rc:112
 msgid "POVs"
 msgstr "POV-ები"
 
-#: dlls/joy.cpl/joy.rc:64
+#: dlls/joy.cpl/joy.rc:64 dlls/joy.cpl/joy.rc:113
 msgid "Buttons"
 msgstr "ღილაკები"
 
@@ -3851,8 +3866,12 @@ msgid "Force Feedback Effect"
 msgstr "უკუკავშირის ეფექტის დაძალება"
 
 #: dlls/joy.cpl/joy.rc:67
+#, fuzzy
+#| msgid ""
+#| "Press any button in the controller to activate the chosen effect. The "
+#| "effect direction can be changed with the controller axis."
 msgid ""
-"Press any button in the controller to activate the chosen effect. The effect "
+"Hold any button in the controller to play the chosen effect. The effect "
 "direction can be changed with the controller axis."
 msgstr ""
 "არჩეული ეფექტის გასააქტიურებლად კონტროლერზე ნებისმიერ ღილაკს დააწექით. "
@@ -3911,8 +3930,12 @@ msgstr ""
 "და რომ მას ჯოისტიკების ჩანართში DInput არ ფარავს."
 
 #: dlls/joy.cpl/joy.rc:98 dlls/joy.cpl/joy.rc:99 dlls/joy.cpl/joy.rc:100
-#: dlls/joy.cpl/joy.rc:101
+#: dlls/joy.cpl/joy.rc:101 dlls/joy.cpl/joy.rc:115
 msgid "Rumble"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:106
+msgid "Windows.Gaming.Input"
 msgstr ""
 
 #: dlls/joy.cpl/joy.rc:31
@@ -4027,19 +4050,19 @@ msgstr "პირობითი აგება გამორთულია"
 msgid "Expected '@'"
 msgstr "მოველოდი '@'"
 
-#: dlls/jscript/jscript.rc:90
+#: dlls/jscript/jscript.rc:92
 msgid "Microsoft JScript compilation error"
 msgstr "Microsoft JScript აგების შეცდომა"
 
-#: dlls/jscript/jscript.rc:91
+#: dlls/jscript/jscript.rc:93
 msgid "Microsoft JScript runtime error"
 msgstr "Microsoft JScript გაშვების გარემოს შეცდომა"
 
-#: dlls/jscript/jscript.rc:92 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:94 dlls/vbscript/vbscript.rc:64
 msgid "Unknown runtime error"
 msgstr "უცნობი გაშვების გარემოს შეცდომა"
 
-#: dlls/jscript/jscript.rc:56
+#: dlls/jscript/jscript.rc:57
 msgid "Number expected"
 msgstr "მოველოდი რიცხვს"
 
@@ -4048,145 +4071,157 @@ msgid "Function expected"
 msgstr "მოველოდი ფუნქციას"
 
 #: dlls/jscript/jscript.rc:55
+#, fuzzy
+#| msgid "'[object]' is not a date object"
+msgid "'[object]' is not a string object"
+msgstr "'[object]' თარიღის ობიექტი არაა"
+
+#: dlls/jscript/jscript.rc:56
 msgid "'[object]' is not a date object"
 msgstr "'[object]' თარიღის ობიექტი არაა"
 
-#: dlls/jscript/jscript.rc:57
+#: dlls/jscript/jscript.rc:58
 msgid "Object expected"
 msgstr "მოველოდი ობიექტს"
 
-#: dlls/jscript/jscript.rc:58
+#: dlls/jscript/jscript.rc:59
 msgid "Illegal assignment"
 msgstr "დაუშვებელი მინიჭება"
 
-#: dlls/jscript/jscript.rc:59
+#: dlls/jscript/jscript.rc:60
 msgid "'|' is undefined"
 msgstr "'|' აღწერილი არაა"
 
-#: dlls/jscript/jscript.rc:60
+#: dlls/jscript/jscript.rc:61
 msgid "Boolean object expected"
 msgstr "მოველოდი ლოგიკურ ობიექტს"
 
-#: dlls/jscript/jscript.rc:61
+#: dlls/jscript/jscript.rc:62
 msgid "Cannot delete '|'"
 msgstr "'|'-ის წაშლა შეუძლებელია"
 
-#: dlls/jscript/jscript.rc:62
+#: dlls/jscript/jscript.rc:63
 msgid "VBArray object expected"
 msgstr "მოველოდი VBArray ობიექტს"
 
-#: dlls/jscript/jscript.rc:63
+#: dlls/jscript/jscript.rc:64
 msgid "JScript object expected"
 msgstr "მოველოდი JScript ობიექტს"
 
-#: dlls/jscript/jscript.rc:64
+#: dlls/jscript/jscript.rc:65
 msgid "Enumerator object expected"
 msgstr "მოველოდი ჩამომთვლელ ობიექტს"
 
-#: dlls/jscript/jscript.rc:65
+#: dlls/jscript/jscript.rc:66
 msgid "Regular Expression object expected"
 msgstr "მოველოდი რეგულარული გამოსახულების ობიექტს"
 
-#: dlls/jscript/jscript.rc:66
+#: dlls/jscript/jscript.rc:67
 msgid "Syntax error in regular expression"
 msgstr "რეგულარული გამოსახულების სინტაქსი არასწორია"
 
-#: dlls/jscript/jscript.rc:67
+#: dlls/jscript/jscript.rc:68
 msgid "Unexpected quantifier"
 msgstr "ოველოდი იდენტიფიკატორს"
 
-#: dlls/jscript/jscript.rc:68
+#: dlls/jscript/jscript.rc:69
 msgid "Exception thrown and not caught"
 msgstr "გამონაკლისი გამოტანილია, მაგრამ არა ჩაჭერილი"
 
-#: dlls/jscript/jscript.rc:70
+#: dlls/jscript/jscript.rc:71
 msgid "URI to be encoded contains invalid characters"
 msgstr "დასაშიფრი URI არასწორ სიმბოლოებს შეიცავს"
 
-#: dlls/jscript/jscript.rc:69
+#: dlls/jscript/jscript.rc:70
 msgid "URI to be decoded is incorrect"
 msgstr "გასაშიფრი URI არასწორია"
 
-#: dlls/jscript/jscript.rc:71
+#: dlls/jscript/jscript.rc:72
 msgid "Number of fraction digits is out of range"
 msgstr "მძიმის შემდეგ ციფრების რაოდენობა დასაშვებ დიაპაზონს გარეთაა"
 
-#: dlls/jscript/jscript.rc:72
+#: dlls/jscript/jscript.rc:73
 msgid "Precision is out of range"
 msgstr "სიზუსტე დიაპაზონს გარეთაა"
 
-#: dlls/jscript/jscript.rc:73
-msgid "Array length must be a finite positive integer"
-msgstr "მასივის სიგრძე სასრული დადებითი მთელი რიცხვი უნდა იყოს"
-
 #: dlls/jscript/jscript.rc:74
-msgid "Array object expected"
+#, fuzzy
+#| msgid "Array object expected"
+msgid "Array or arguments object expected"
 msgstr "მოველოდი მასივის ობიექტს"
 
 #: dlls/jscript/jscript.rc:75
+msgid "Array length must be a finite positive integer"
+msgstr "მასივის სიგრძე სასრული დადებითი მთელი რიცხვი უნდა იყოს"
+
+#: dlls/jscript/jscript.rc:76
+msgid "Array object expected"
+msgstr "მოველოდი მასივის ობიექტს"
+
+#: dlls/jscript/jscript.rc:77
 msgid ""
 "'writable' attribute on the property descriptor cannot be set to 'true' on "
 "this object"
 msgstr ""
 "ამ ობიექტზე თვისების აღმწერის ატრიბუტს 'ჩაწერადი' ჭეშმარიტზე ვერ დააყენებთ"
 
-#: dlls/jscript/jscript.rc:76
+#: dlls/jscript/jscript.rc:78
 msgid "Cyclic __proto__ value"
 msgstr "ჩაციკლული __proto__ -ის მნიშვნელობა"
 
-#: dlls/jscript/jscript.rc:77
+#: dlls/jscript/jscript.rc:79
 msgid "Cannot create property for a non-extensible object"
 msgstr "არაგაფართოებადი ობიექტის თვისების შექმნა შეუძლებელია"
 
-#: dlls/jscript/jscript.rc:78
+#: dlls/jscript/jscript.rc:80
 msgid "Cannot define property '|': object is not extensible"
 msgstr "თვისებას \"|\" ვერ აღწერთ: ობიექტი გაფართოებადი არაა"
 
-#: dlls/jscript/jscript.rc:79
+#: dlls/jscript/jscript.rc:81
 msgid "Cannot redefine non-configurable property '|'"
 msgstr "არამორგებადი თვისების '|' თავიდან აღწერა შეუძლებელია"
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:82
 msgid "Cannot modify non-writable property '|'"
 msgstr "არაჩაწერადი თვისების '|' შეცვლა შეუძლებელია"
 
-#: dlls/jscript/jscript.rc:81
+#: dlls/jscript/jscript.rc:83
 msgid "'this' is not a DataView object"
 msgstr "'this'-ი DataView ტიპის ობიექტი არაა"
 
-#: dlls/jscript/jscript.rc:82
+#: dlls/jscript/jscript.rc:84
 msgid "Required argument offset or value in DataView method is not specified"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:83
+#: dlls/jscript/jscript.rc:85
 msgid "DataView operation access beyond specified buffer length"
 msgstr "DataView ოპერაციის წვდომა მითითებული ბუფერის სიგრძის მიღმა"
 
-#: dlls/jscript/jscript.rc:84
+#: dlls/jscript/jscript.rc:86
 msgid "DataView constructor argument offset is invalid"
 msgstr "DataView კონსტრუქტორის არგუმენტის წანაცვლება არასწორია"
 
-#: dlls/jscript/jscript.rc:85
+#: dlls/jscript/jscript.rc:87
 msgid "'this' is not a | object"
 msgstr "'this'-ი | ტიპის ობიექტი არაა"
 
-#: dlls/jscript/jscript.rc:86
+#: dlls/jscript/jscript.rc:88
 msgid "'key' is not an object"
 msgstr "'key' ობიექტი არაა"
 
-#: dlls/jscript/jscript.rc:87
+#: dlls/jscript/jscript.rc:89
 msgid "ArrayBuffer object expected"
 msgstr "მოველოდი ArrayBuffer ტიპის ობიექტს"
 
-#: dlls/jscript/jscript.rc:88
+#: dlls/jscript/jscript.rc:90
 msgid "Property cannot have both accessors and a value"
 msgstr ""
 
-#: include/wine/wine_common_ver.rc:138
+#: include/wine/wine_common_ver.rc:123
 msgid "Wine kernel DLL"
 msgstr "Wine-ის ბირთვის DLL"
 
-#: include/wine/wine_common_ver.rc:143 dlls/winemac.drv/winemac.rc:32
+#: include/wine/wine_common_ver.rc:128 dlls/winemac.drv/winemac.rc:32
 #: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:143
 msgid "Wine"
 msgstr "Wine"
@@ -7981,7 +8016,7 @@ msgid "Vector property is required.\n"
 msgstr "ვექტორული თვისების ქონა აუცილებელია.\n"
 
 #: dlls/mferror/mferror.mc:389
-msgid "Operation was cancelled.\n"
+msgid "Operation was canceled.\n"
 msgstr "ოპერაცია გაუქმდა.\n"
 
 #: dlls/mferror/mferror.mc:396
@@ -9146,12 +9181,12 @@ msgstr "ეკრანის გარეთ"
 
 #: dlls/oleacc/oleacc.rc:115
 msgctxt "object state"
-msgid "sizeable"
+msgid "sizable"
 msgstr "გაზომვადი"
 
 #: dlls/oleacc/oleacc.rc:116
 msgctxt "object state"
-msgid "moveable"
+msgid "movable"
 msgstr "გადატანადი"
 
 #: dlls/oleacc/oleacc.rc:117
@@ -9230,156 +9265,156 @@ msgstr "ჩართული"
 msgid "Off"
 msgstr "გამორთ"
 
-#: dlls/oledb32/version.rc:56
+#: dlls/oledb32/version.rc:53
 msgid "Provider"
 msgstr "პროვაიდერი"
 
-#: dlls/oledb32/version.rc:59
+#: dlls/oledb32/version.rc:56
 msgid "Select the data you want to connect to:"
 msgstr "მიუთითეთ მონაცემების, რომელსაც გნებავთ, მიუერთდეთ:"
 
-#: dlls/oledb32/version.rc:66
+#: dlls/oledb32/version.rc:63
 msgid "Connection"
 msgstr "კავშირი"
 
-#: dlls/oledb32/version.rc:69
+#: dlls/oledb32/version.rc:66
 msgid "Specify the following to connect to ODBC data:"
 msgstr "ODBC-ის მონაცემებთან დასაკავშირებლად საჭიროა შემდეგი:"
 
-#: dlls/oledb32/version.rc:70
+#: dlls/oledb32/version.rc:67
 msgid "1. Specify the source of data:"
 msgstr "1. მიუთითეთ მონაცემების წყარო:"
 
-#: dlls/oledb32/version.rc:71
+#: dlls/oledb32/version.rc:68
 msgid "Use &data source name"
 msgstr "მონაცემების &წყაროს გაოყენება"
 
-#: dlls/oledb32/version.rc:74
+#: dlls/oledb32/version.rc:71
 msgid "Use c&onnection string"
 msgstr "&მიერთების სტრიქონის გამოყენება"
 
-#: dlls/oledb32/version.rc:75
+#: dlls/oledb32/version.rc:72
 msgid "&Connection string:"
 msgstr "&მიერთების სტრიქონი:"
 
-#: dlls/oledb32/version.rc:77
+#: dlls/oledb32/version.rc:74
 msgid "B&uild..."
 msgstr "&აგება.."
 
-#: dlls/oledb32/version.rc:78
+#: dlls/oledb32/version.rc:75
 msgid "2. Enter information to log on to the server"
 msgstr "2. შეიყვანეთ სერვერზე შესვლის ინფორმაცია"
 
-#: dlls/oledb32/version.rc:79
+#: dlls/oledb32/version.rc:76
 msgid "User &name:"
 msgstr "მომხმარებლის &სახელი:"
 
-#: dlls/oledb32/version.rc:83
+#: dlls/oledb32/version.rc:80
 msgid "&Blank password"
 msgstr "&პაროლის დაცარიელება"
 
-#: dlls/oledb32/version.rc:84
+#: dlls/oledb32/version.rc:81
 msgid "Allow &saving password"
 msgstr "&პაროლის შენახვის დაშვება"
 
-#: dlls/oledb32/version.rc:85
+#: dlls/oledb32/version.rc:82
 msgid "3. Enter the &initial catalog to use:"
 msgstr "3. შეიყვანეთ საწყისი გამოსაყენებელი კატალოგი:"
 
-#: dlls/oledb32/version.rc:87
+#: dlls/oledb32/version.rc:84
 msgid "&Test Connection"
 msgstr "&შეერთების შემოწმება"
 
-#: dlls/oledb32/version.rc:92
+#: dlls/oledb32/version.rc:89
 msgid "Advanced"
 msgstr "დაწინაურებული"
 
-#: dlls/oledb32/version.rc:95
+#: dlls/oledb32/version.rc:92
 msgid "Network settings"
 msgstr "ქსელის მორგება"
 
-#: dlls/oledb32/version.rc:96
+#: dlls/oledb32/version.rc:93
 msgid "&Impersonation level:"
 msgstr "განსახ&იერების დონე:"
 
-#: dlls/oledb32/version.rc:98
+#: dlls/oledb32/version.rc:95
 msgid "P&rotection level:"
 msgstr "&დაცვის დონე:"
 
-#: dlls/oledb32/version.rc:101
+#: dlls/oledb32/version.rc:98
 msgid "Connect:"
 msgstr "მიერთება:"
 
-#: dlls/oledb32/version.rc:103
+#: dlls/oledb32/version.rc:100
 msgid "seconds."
 msgstr "წამი."
 
-#: dlls/oledb32/version.rc:104
+#: dlls/oledb32/version.rc:101
 msgid "A&ccess:"
 msgstr "&წვდომა:"
 
-#: dlls/oledb32/version.rc:110
+#: dlls/oledb32/version.rc:107
 msgid "All"
 msgstr "ყველა"
 
-#: dlls/oledb32/version.rc:114
+#: dlls/oledb32/version.rc:111
 msgid ""
 "These are the initialization properties for this type of data. To edit a "
 "value, select a property, then choose Edit Value below."
 msgstr ""
 
-#: dlls/oledb32/version.rc:115
+#: dlls/oledb32/version.rc:112
 msgid "&Edit Value..."
 msgstr "&მნიშვნელობის ჩასწორება..."
 
-#: dlls/oledb32/version.rc:49
+#: dlls/oledb32/version.rc:46
 msgid "Data Link Error"
 msgstr "მონაცემების გადაცემის შეცდომა"
 
-#: dlls/oledb32/version.rc:50
+#: dlls/oledb32/version.rc:47
 msgid "Please select a provider."
 msgstr "აირჩიეთ მომწოდებელი."
 
-#: dlls/oledb32/version.rc:51
+#: dlls/oledb32/version.rc:48
 msgid ""
 "Provider is no longer available. Ensure that the provider is installed "
 "properly."
 msgstr ""
 "მომწოდებელი ხელმისაწვდომი აღარაა. დარწმუნდით, რომ მომწოდებელი სწორად აყენია."
 
-#: dlls/oledb32/version.rc:36
+#: dlls/oledb32/version.rc:33
 msgid "Data Link Properties"
 msgstr "მონაცემების გადაცემის თვისებები"
 
-#: dlls/oledb32/version.rc:37
+#: dlls/oledb32/version.rc:34
 msgid "OLE DB Provider(s)"
 msgstr "OLE DB მომწოდებლები"
 
-#: dlls/oledb32/version.rc:41
+#: dlls/oledb32/version.rc:38
 msgid "Read"
 msgstr "წაკითხვა"
 
-#: dlls/oledb32/version.rc:42
+#: dlls/oledb32/version.rc:39
 msgid "ReadWrite"
 msgstr "ჩაწერაწაკითხვადი"
 
-#: dlls/oledb32/version.rc:43
+#: dlls/oledb32/version.rc:40
 msgid "Share Deny None"
 msgstr "გაზიარებულზე არაფრის უარყოფა"
 
-#: dlls/oledb32/version.rc:44
+#: dlls/oledb32/version.rc:41
 msgid "Share Deny Read"
 msgstr "გაზიარებულზე წაკითხვის უარყოფა"
 
-#: dlls/oledb32/version.rc:45
+#: dlls/oledb32/version.rc:42
 msgid "Share Deny Write"
 msgstr "გაზიარებულზე ჩაწერის უარყოფა"
 
-#: dlls/oledb32/version.rc:46
+#: dlls/oledb32/version.rc:43
 msgid "Share Exclusive"
 msgstr "ექსკლუზიური გაზიარება"
 
-#: dlls/oledb32/version.rc:47
+#: dlls/oledb32/version.rc:44
 msgid "Write"
 msgstr "ჩასწორება"
 
@@ -14336,6 +14371,12 @@ msgstr "სტრიქონის დასასრული"
 msgid "End of file"
 msgstr "ფაილის ბოლო"
 
+#: programs/cmd/cmd.rc:410
+#, fuzzy
+#| msgid "%1!d! file(s) copied\n"
+msgid "%t%1!u! file(s) copied\n"
+msgstr "%1!d! ფაილი დაკოპირდა\n"
+
 #: programs/conhost/conhost.rc:54
 msgid "Cursor size"
 msgstr "კურსორის ზომა"
@@ -15777,7 +15818,7 @@ msgid "reg: The operation completed successfully\n"
 msgstr "რეე: ოპერაცია წარმატებით დასრულდა\n"
 
 #: programs/reg/reg.rc:131
-msgid "reg: The registry operation was cancelled\n"
+msgid "reg: The registry operation was canceled\n"
 msgstr "რეე: რეესტრის ოპერაცია გაუქმდა\n"
 
 #: programs/reg/reg.rc:174
@@ -16892,7 +16933,7 @@ msgid ""
 "Sent termination signal to process with PID %1!u!, child of PID %2!u!.\n"
 msgstr ""
 
-#: include/wine/wine_common_ver.rc:138
+#: include/wine/wine_common_ver.rc:123
 msgid "Wine tasklist"
 msgstr "Wine tasklist"
 

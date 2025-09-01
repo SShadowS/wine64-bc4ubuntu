@@ -12,6 +12,7 @@ SOURCES = \
 	adshlp.h \
 	advpub.h \
 	af_irda.h \
+	afunix.h \
 	amaudio.h \
 	amsi.idl \
 	amstream.idl \
@@ -58,8 +59,10 @@ SOURCES = \
 	bits5_0.idl \
 	bitsmsg.h \
 	bluetoothapis.h \
+	bluetoothleapis.h \
 	bthdef.h \
 	bthioctl.h \
+	bthledef.h \
 	bthsdpdef.h \
 	cderr.h \
 	cdosys.idl \
@@ -101,6 +104,7 @@ SOURCES = \
 	crtrow.idl \
 	cryptdlg.h \
 	cryptuiapi.h \
+	cryptxml.h \
 	ctfutb.idl \
 	ctxtcall.idl \
 	custcntl.h \
@@ -196,6 +200,7 @@ SOURCES = \
 	dde.h \
 	dde.rh \
 	ddeml.h \
+	ddk/bthguid.h \
 	ddk/compstui.h \
 	ddk/csq.h \
 	ddk/d3dkmthk.h \
@@ -230,10 +235,13 @@ SOURCES = \
 	ddstream.idl \
 	delayloadhandler.h \
 	devenum.idl \
+	devfiltertypes.h \
 	devguid.h \
 	devicetopology.idl \
 	devpkey.h \
 	devpropdef.h \
+	devquery.h \
+	devquerydef.h \
 	dhcpcsdk.h \
 	dhtmldid.h \
 	dhtmled.idl \
@@ -311,6 +319,8 @@ SOURCES = \
 	dxvahd.idl \
 	dyngraph.idl \
 	endpointvolume.idl \
+	errhandlingapi.h \
+	errlup.idl \
 	errorrep.h \
 	errors.h \
 	errrec.idl \
@@ -333,6 +343,7 @@ SOURCES = \
 	fltdefs.h \
 	fontsub.h \
 	fusion.idl \
+	gameinput.idl \
 	gameux.idl \
 	gamingtcui.h \
 	gdiplus.h \
@@ -857,7 +868,10 @@ SOURCES = \
 	windows.applicationmodel.idl \
 	windows.data.json.idl \
 	windows.data.xml.dom.idl \
+	windows.devices.bluetooth.advertisement.idl \
+	windows.devices.bluetooth.genericattributeprofile.idl \
 	windows.devices.bluetooth.idl \
+	windows.devices.bluetooth.rfcomm.idl \
 	windows.devices.enumeration.idl \
 	windows.devices.geolocation.idl \
 	windows.devices.haptics.idl \
@@ -886,15 +900,19 @@ SOURCES = \
 	windows.management.deployment.idl \
 	windows.media.capture.idl \
 	windows.media.closedcaptioning.idl \
+	windows.media.core.idl \
 	windows.media.devices.idl \
 	windows.media.effects.idl \
 	windows.media.faceanalysis.idl \
 	windows.media.idl \
+	windows.media.mediaproperties.idl \
 	windows.media.render.idl \
 	windows.media.speechrecognition.idl \
 	windows.media.speechsynthesis.idl \
+	windows.media.transcoding.idl \
 	windows.networking.connectivity.idl \
 	windows.networking.idl \
+	windows.networking.sockets.idl \
 	windows.perception.spatial.idl \
 	windows.perception.spatial.surfaces.idl \
 	windows.security.authentication.onlineid.idl \
@@ -923,6 +941,7 @@ SOURCES = \
 	windows.ui.notifications.idl \
 	windows.ui.viewmanagement.core.idl \
 	windows.ui.viewmanagement.idl \
+	windows.ui.windowmanagement.idl \
 	windows.ui.xaml.hosting.desktopwindowxamlsource.idl \
 	windows.ui.xaml.idl \
 	windows.ui.xaml.interop.idl \

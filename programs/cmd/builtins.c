@@ -36,7 +36,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(cmd);
 
 extern int defaultColor;
 extern BOOL echo_mode;
-extern BOOL interactive;
 
 struct env_stack *pushd_directories;
 const WCHAR inbuilt[][10] = {
@@ -656,6 +655,7 @@ RETURN_CODE WCMD_copy(WCHAR * args)
   WCHAR   copycmd[4];
   DWORD   len;
   BOOL    dstisdevice = FALSE;
+  unsigned numcopied = 0;
 
   typedef struct _COPY_FILES
   {
@@ -840,7 +840,7 @@ RETURN_CODE WCMD_copy(WCHAR * args)
   else {
     /* By default, we will force the overwrite in batch mode and ask for
      * confirmation in interactive mode. */
-    prompt = interactive;
+    prompt = !context;
     /* If COPYCMD is set, then we force the overwrite with /Y and ask for
      * confirmation with /-Y. If COPYCMD is neither of those, then we use the
      * default behavior. */
@@ -954,6 +954,8 @@ RETURN_CODE WCMD_copy(WCHAR * args)
     WCHAR *filenamepart;
     DWORD  attributes;
     BOOL   srcisdevice = FALSE;
+    BOOL   havewildcards = FALSE;
+    BOOL   displaynames = anyconcats; /* Display names if we are concatenating. */
 
     /* If it was not explicit, we now know whether we are concatenating or not and
        hence whether to copy as binary or ascii                                    */
@@ -965,6 +967,13 @@ RETURN_CODE WCMD_copy(WCHAR * args)
         return errorlevel = ERROR_INVALID_FUNCTION;
     WINE_TRACE("Full src name is '%s'\n", wine_dbgstr_w(srcpath));
 
+    havewildcards = wcspbrk(srcpath, L"*?") ? TRUE : FALSE;
+    /* If we are not already displaying file names due to concatenation, then display them
+       if using wildards. */
+    if (!displaynames) {
+      displaynames = havewildcards;
+    }
+
     /* If parameter is a directory, ensure it ends in \* */
     attributes = GetFileAttributesW(srcpath);
     if (ends_with_backslash( srcpath )) {
@@ -972,17 +981,19 @@ RETURN_CODE WCMD_copy(WCHAR * args)
       /* We need to know where the filename part starts, so append * and
          recalculate the full resulting path                              */
       lstrcatW(thiscopy->name, L"*");
+      displaynames = TRUE;
       if (!WCMD_get_fullpath(thiscopy->name, ARRAY_SIZE(srcpath), srcpath, &filenamepart))
           return errorlevel = ERROR_INVALID_FUNCTION;
       WINE_TRACE("Directory, so full name is now '%s'\n", wine_dbgstr_w(srcpath));
 
-    } else if ((wcspbrk(srcpath, L"*?") == NULL) &&
+    } else if (!havewildcards &&
                (attributes != INVALID_FILE_ATTRIBUTES) &&
                (attributes & FILE_ATTRIBUTE_DIRECTORY)) {
 
       /* We need to know where the filename part starts, so append \* and
          recalculate the full resulting path                              */
       lstrcatW(thiscopy->name, L"\\*");
+      displaynames = TRUE;
       if (!WCMD_get_fullpath(thiscopy->name, ARRAY_SIZE(srcpath), srcpath, &filenamepart))
           return errorlevel = ERROR_INVALID_FUNCTION;
       WINE_TRACE("Directory, so full name is now '%s'\n", wine_dbgstr_w(srcpath));
@@ -1064,6 +1075,10 @@ RETURN_CODE WCMD_copy(WCHAR * args)
 
           /* Do the copy as appropriate */
           if (overwrite) {
+            if (displaynames) {
+              WCMD_output_asis(srcpath);
+              WCMD_output_asis(L"\r\n");
+            }
             if (anyconcats && WCMD_IsSameFile(srcpath, outname)) {
               /* behavior is as Unix 'touch' (change last-written time only) */
               HANDLE file = CreateFileW(srcpath, GENERIC_WRITE, FILE_SHARE_WRITE, NULL,
@@ -1097,7 +1112,12 @@ RETURN_CODE WCMD_copy(WCHAR * args)
               return_code = ERROR_INVALID_FUNCTION;
             } else {
               WINE_TRACE("Copied successfully\n");
-              if (anyconcats) writtenoneconcat = TRUE;
+              if (anyconcats) {
+                writtenoneconcat = TRUE;
+                numcopied = 1;
+              } else {
+                numcopied++;
+              }
 
               /* Append EOF if ascii destination and we are not going to add more onto the end
                  Note: Testing shows windows has an optimization whereas if you have a binary
@@ -1133,6 +1153,10 @@ RETURN_CODE WCMD_copy(WCHAR * args)
       WCMD_print_error ();
       return_code = ERROR_INVALID_FUNCTION;
     }
+  }
+
+  if (numcopied) {
+    WCMD_output(WCMD_LoadMessage(WCMD_NUMCOPIED), numcopied);
   }
 
   /* Exit out of the routine, freeing any remaining allocated memory */
@@ -1721,13 +1745,14 @@ RETURN_CODE WCMD_goto(void)
             return ERROR_INVALID_FUNCTION;
         }
 
+        if (!context->batch_file) return ERROR_INVALID_FUNCTION;
         /* Handle special :EOF label */
         if (lstrcmpiW(L":eof", param1) == 0)
         {
-            context->skip_rest = TRUE;
-            return RETURN_CODE_ABORTED;
+            context->file_position.QuadPart = WCMD_FILE_POSITION_EOF;
+            return RETURN_CODE_GOTO;
         }
-        h = CreateFileW(context->batchfileW, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+        h = CreateFileW(context->batch_file->path_name, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
                         NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (h == INVALID_HANDLE_VALUE)
         {
@@ -1743,9 +1768,9 @@ RETURN_CODE WCMD_goto(void)
 
         ret = WCMD_find_label(h, paramStart, &context->file_position);
         CloseHandle(h);
-        if (ret) return RETURN_CODE_ABORTED;
+        if (ret) return RETURN_CODE_GOTO;
         WCMD_output_stderr(WCMD_LoadMessage(WCMD_NOTARGET));
-        context->skip_rest = TRUE;
+        context->file_position.QuadPart = WCMD_FILE_POSITION_EOF;
     }
     return ERROR_INVALID_FUNCTION;
 }
@@ -1907,7 +1932,7 @@ RETURN_CODE WCMD_move(void)
       else {
         /* By default, we will force the overwrite in batch mode and ask for
          * confirmation in interactive mode. */
-        force = !interactive;
+        force = !!context;
         /* If COPYCMD is set, then we force the overwrite with /Y and ask for
          * confirmation with /-Y. If COPYCMD is neither of those, then we use the
          * default behavior. */
@@ -2170,7 +2195,7 @@ RETURN_CODE WCMD_setlocal(WCHAR *args)
   WCHAR *argN = args;
 
   /* setlocal does nothing outside of batch programs */
-  if (!context)
+  if (!WCMD_is_in_context(NULL))
       return NO_ERROR;
   newdelay = delayedsubst;
   while (argN)
@@ -2226,7 +2251,7 @@ RETURN_CODE WCMD_endlocal(void)
   int len, n;
 
   /* setlocal does nothing outside of batch programs */
-  if (!context) return NO_ERROR;
+  if (!WCMD_is_in_context(NULL)) return NO_ERROR;
 
   /* setlocal needs a saved environment from within the same context (batch
      program) as it was saved in                                            */
@@ -3101,7 +3126,7 @@ RETURN_CODE WCMD_setshow_env(WCHAR *s)
       return_code = ERROR_INVALID_FUNCTION;
     }
     /* If we have no context (interactive or cmd.exe /c) print the final result */
-    else if (!context) {
+    else if (!WCMD_is_in_context(NULL)) {
       swprintf(string, ARRAY_SIZE(string), L"%d", result);
       WCMD_output_asis(string);
     }
@@ -3729,7 +3754,7 @@ RETURN_CODE WCMD_exit(void)
     if (context && lstrcmpiW(quals, L"/B") == 0)
     {
         errorlevel = rc;
-        context -> skip_rest = TRUE;
+        context->file_position.QuadPart = WCMD_FILE_POSITION_EOF;
         return RETURN_CODE_ABORTED;
     }
     ExitProcess(rc);

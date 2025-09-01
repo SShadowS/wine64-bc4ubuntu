@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2024-12-15 22:00+0900\n"
+"PO-Revision-Date: 2025-07-02 23:08+0900\n"
 "Last-Translator: Akihiro Sagawa <sagawa.aki@gmail.com>\n"
 "Language-Team: Japanese\n"
 "Language: ja\n"
@@ -276,7 +276,7 @@ msgstr ""
 msgid "Not specified"
 msgstr "指定されていません"
 
-#: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:38
+#: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:35
 #: dlls/shell32/shell32.rc:141 dlls/shell32/shell32.rc:243
 #: programs/regedit/regedit.rc:150 programs/winefile/winefile.rc:106
 msgid "Name"
@@ -331,10 +331,8 @@ msgid "Please wait until the current uninstall/modify process is complete."
 msgstr "実行中のアンインストール・変更が完了するのをお待ちください。"
 
 #: dlls/appwiz.cpl/appwiz.rc:55
-#, fuzzy
-#| msgid "Downloading..."
 msgid "Download failed."
-msgstr "ダウンロードしています..."
+msgstr "ダウンロードに失敗しました。"
 
 #: dlls/avifil32/avifil32.rc:42
 msgid "Compress options"
@@ -388,6 +386,20 @@ msgstr "Wine AVI既定ファイルハンドラー"
 msgid "uncompressed"
 msgstr "未圧縮"
 
+#: dlls/bluetoothapis/bluetoothapis.rc:31
+msgid "Confirm pairing"
+msgstr "ペアリングの確認"
+
+#: dlls/bluetoothapis/bluetoothapis.rc:32
+msgid "Pair with '%1!s!' using the following PIN/passkey value: %2!lu!?"
+msgstr "'%1!s!' と次の PIN/パスキー値を用いてペアリングしますか: %2!lu!?"
+
+#: dlls/bluetoothapis/bluetoothapis.rc:33
+msgid ""
+"Pair with unnamed device %1!s! using the following PIN/passkey value: %2!lu!?"
+msgstr ""
+"無名のデバイス %1!s! と次の PIN/パスキー値を用いてペアリングしますか: %2!lu!?"
+
 #: dlls/browseui/browseui.rc:28
 msgid "Canceling..."
 msgstr "キャンセル中..."
@@ -435,7 +447,7 @@ msgstr "ウィザード"
 msgid "< &Back"
 msgstr "< 戻る(&B)"
 
-#: dlls/comctl32/comctl32.rc:85 dlls/oledb32/version.rc:61
+#: dlls/comctl32/comctl32.rc:85 dlls/oledb32/version.rc:58
 msgid "&Next >"
 msgstr "次へ(&N) >"
 
@@ -580,7 +592,7 @@ msgstr "読み取り専用(&R)"
 
 #: dlls/comdlg32/comdlg32.rc:180
 msgid "Save As..."
-msgstr "名前をつけて保存..."
+msgstr "名前を付けて保存..."
 
 #: dlls/comdlg32/comdlg32.rc:193 dlls/comdlg32/comdlg32.rc:146
 msgid "Save As"
@@ -1355,48 +1367,39 @@ msgid "Default"
 msgstr "デフォルト"
 
 #: dlls/compstui/compstui.rc:35
-#, fuzzy
-#| msgid "&Copy Background"
 msgid "&Copy count"
-msgstr "背景をコピー(&C)"
+msgstr "印刷部数(&C)"
 
 #: dlls/compstui/compstui.rc:36
-#, fuzzy
-#| msgid "Print to File"
 msgid "Print on Both Sides"
-msgstr "ファイルに出力"
+msgstr "両面印刷"
 
 #: dlls/compstui/compstui.rc:32
-#, fuzzy
-#| msgid "C&olor:"
 msgid "C&olor"
-msgstr "色(&O):"
+msgstr "カラー印刷(&O)"
 
 #: dlls/compstui/compstui.rc:34
 msgid "Bla&ck && White"
-msgstr ""
+msgstr "モノクロ(&C)"
 
 #: dlls/compstui/compstui.rc:37
-#, fuzzy
-#| msgctxt "hotkey"
-#| msgid "None"
 msgid "&None"
-msgstr "なし"
+msgstr "なし(&N)"
 
 #: dlls/compstui/compstui.rc:38 dlls/compstui/compstui.rc:41
 msgid "Flip on Shor&t Edge"
-msgstr ""
+msgstr "短辺とじ(&T)"
 
 #: dlls/compstui/compstui.rc:39 dlls/compstui/compstui.rc:40
 msgid "Flip on Long E&dge"
-msgstr ""
+msgstr "長辺とじ(&D)"
 
 #: dlls/credui/credui.rc:45
 msgid "&User name:"
 msgstr "ユーザー名(&U):"
 
 #: dlls/credui/credui.rc:48 dlls/cryptui/cryptui.rc:402
-#: dlls/oledb32/version.rc:81
+#: dlls/oledb32/version.rc:78
 msgid "&Password:"
 msgstr "パスワード(&P):"
 
@@ -2726,7 +2729,7 @@ msgstr "この証明書は問題ありません。"
 msgid "Field"
 msgstr "フィールド"
 
-#: dlls/cryptui/cryptui.rc:48 dlls/oledb32/version.rc:39
+#: dlls/cryptui/cryptui.rc:48 dlls/oledb32/version.rc:36
 msgid "Value"
 msgstr "値"
 
@@ -3323,7 +3326,7 @@ msgstr "シンボル"
 msgid "OEM/DOS"
 msgstr "OEM/DOS"
 
-#: dlls/gdi32/gdi32.rc:45 dlls/oledb32/version.rc:100
+#: dlls/gdi32/gdi32.rc:45 dlls/oledb32/version.rc:97
 #: dlls/wldap32/wldap32.rc:112
 msgid "Other"
 msgstr "その他"
@@ -3391,7 +3394,7 @@ msgid "&Stop"
 msgstr "中止(&S)"
 
 #: dlls/hhctrl.ocx/hhctrl.rc:66 dlls/hhctrl.ocx/hhctrl.rc:83
-#: dlls/oledb32/version.rc:73 dlls/shdoclc/shdoclc.rc:59
+#: dlls/oledb32/version.rc:70 dlls/shdoclc/shdoclc.rc:59
 msgid "&Refresh"
 msgstr "更新(&R)"
 
@@ -3465,10 +3468,8 @@ msgid "Show &Tabs"
 msgstr "タブを表示(&T)"
 
 #: dlls/hhctrl.ocx/hhctrl.rc:39
-#, fuzzy
-#| msgid "Select Source"
 msgid "Select Topic"
-msgstr "ソースの選択"
+msgstr "トピックを選択"
 
 #: dlls/hhctrl.ocx/hhctrl.rc:44
 msgid "Show"
@@ -3833,15 +3834,15 @@ msgstr "hidraw を無効にする"
 msgid "DInput"
 msgstr "DInput"
 
-#: dlls/joy.cpl/joy.rc:62
+#: dlls/joy.cpl/joy.rc:62 dlls/joy.cpl/joy.rc:111
 msgid "Axes"
 msgstr "軸"
 
-#: dlls/joy.cpl/joy.rc:63
+#: dlls/joy.cpl/joy.rc:63 dlls/joy.cpl/joy.rc:112
 msgid "POVs"
 msgstr "POV"
 
-#: dlls/joy.cpl/joy.rc:64
+#: dlls/joy.cpl/joy.rc:64 dlls/joy.cpl/joy.rc:113
 msgid "Buttons"
 msgstr "ボタン"
 
@@ -3850,8 +3851,12 @@ msgid "Force Feedback Effect"
 msgstr "フォース フィードバック効果"
 
 #: dlls/joy.cpl/joy.rc:67
+#, fuzzy
+#| msgid ""
+#| "Press any button in the controller to activate the chosen effect. The "
+#| "effect direction can be changed with the controller axis."
 msgid ""
-"Press any button in the controller to activate the chosen effect. The effect "
+"Hold any button in the controller to play the chosen effect. The effect "
 "direction can be changed with the controller axis."
 msgstr ""
 "選択した効果を有効化するにはコントローラーのボタンを押してください。効果の方"
@@ -3910,9 +3915,13 @@ msgstr ""
 "[ジョイスティック]タブでDInput用に上書きしていないか確認してください。"
 
 #: dlls/joy.cpl/joy.rc:98 dlls/joy.cpl/joy.rc:99 dlls/joy.cpl/joy.rc:100
-#: dlls/joy.cpl/joy.rc:101
+#: dlls/joy.cpl/joy.rc:101 dlls/joy.cpl/joy.rc:115
 msgid "Rumble"
 msgstr "振動"
+
+#: dlls/joy.cpl/joy.rc:106
+msgid "Windows.Gaming.Input"
+msgstr ""
 
 #: dlls/joy.cpl/joy.rc:31
 msgid "Game Controllers"
@@ -4026,19 +4035,19 @@ msgstr "条件コンパイルはオフにされています"
 msgid "Expected '@'"
 msgstr "'@'を期待していました"
 
-#: dlls/jscript/jscript.rc:90
+#: dlls/jscript/jscript.rc:92
 msgid "Microsoft JScript compilation error"
 msgstr "Microsoft JScript コンパイル エラー"
 
-#: dlls/jscript/jscript.rc:91
+#: dlls/jscript/jscript.rc:93
 msgid "Microsoft JScript runtime error"
 msgstr "Microsoft JScript 実行時エラー"
 
-#: dlls/jscript/jscript.rc:92 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:94 dlls/vbscript/vbscript.rc:64
 msgid "Unknown runtime error"
 msgstr "未知の実行時エラー"
 
-#: dlls/jscript/jscript.rc:56
+#: dlls/jscript/jscript.rc:57
 msgid "Number expected"
 msgstr "数値を期待していました"
 
@@ -4047,82 +4056,94 @@ msgid "Function expected"
 msgstr "関数を期待していました"
 
 #: dlls/jscript/jscript.rc:55
+#, fuzzy
+#| msgid "'[object]' is not a date object"
+msgid "'[object]' is not a string object"
+msgstr "'[object]' は日付オブジェクトではありません"
+
+#: dlls/jscript/jscript.rc:56
 msgid "'[object]' is not a date object"
 msgstr "'[object]' は日付オブジェクトではありません"
 
-#: dlls/jscript/jscript.rc:57
+#: dlls/jscript/jscript.rc:58
 msgid "Object expected"
 msgstr "オブジェクトを期待していました"
 
-#: dlls/jscript/jscript.rc:58
+#: dlls/jscript/jscript.rc:59
 msgid "Illegal assignment"
 msgstr "不正な代入です"
 
-#: dlls/jscript/jscript.rc:59
+#: dlls/jscript/jscript.rc:60
 msgid "'|' is undefined"
 msgstr "'|'は未定義です"
 
-#: dlls/jscript/jscript.rc:60
+#: dlls/jscript/jscript.rc:61
 msgid "Boolean object expected"
 msgstr "Boolean オブジェクトを期待していました"
 
-#: dlls/jscript/jscript.rc:61
+#: dlls/jscript/jscript.rc:62
 msgid "Cannot delete '|'"
 msgstr "'|'を削除できません"
 
-#: dlls/jscript/jscript.rc:62
+#: dlls/jscript/jscript.rc:63
 msgid "VBArray object expected"
 msgstr "VBArray オブジェクトを期待していました"
 
-#: dlls/jscript/jscript.rc:63
+#: dlls/jscript/jscript.rc:64
 msgid "JScript object expected"
 msgstr "JScript オブジェクトを期待していました"
 
-#: dlls/jscript/jscript.rc:64
+#: dlls/jscript/jscript.rc:65
 msgid "Enumerator object expected"
 msgstr "列挙子オブジェクトを期待していました"
 
-#: dlls/jscript/jscript.rc:65
+#: dlls/jscript/jscript.rc:66
 msgid "Regular Expression object expected"
 msgstr "正規表現オブジェクトを期待していました"
 
-#: dlls/jscript/jscript.rc:66
+#: dlls/jscript/jscript.rc:67
 msgid "Syntax error in regular expression"
 msgstr "正規表現に構文誤りがあります"
 
-#: dlls/jscript/jscript.rc:67
+#: dlls/jscript/jscript.rc:68
 msgid "Unexpected quantifier"
 msgstr "予期しない数量詞です"
 
-#: dlls/jscript/jscript.rc:68
+#: dlls/jscript/jscript.rc:69
 msgid "Exception thrown and not caught"
 msgstr "例外が送出されましたが捕捉されませんでした"
 
-#: dlls/jscript/jscript.rc:70
+#: dlls/jscript/jscript.rc:71
 msgid "URI to be encoded contains invalid characters"
 msgstr "エンコードされる URI に使用できない文字が含まれています"
 
-#: dlls/jscript/jscript.rc:69
+#: dlls/jscript/jscript.rc:70
 msgid "URI to be decoded is incorrect"
 msgstr "デコードされる URI が正しくありません"
 
-#: dlls/jscript/jscript.rc:71
+#: dlls/jscript/jscript.rc:72
 msgid "Number of fraction digits is out of range"
 msgstr "小数点以下の桁数が範囲外です"
 
-#: dlls/jscript/jscript.rc:72
+#: dlls/jscript/jscript.rc:73
 msgid "Precision is out of range"
 msgstr "精度指定が範囲外です"
 
-#: dlls/jscript/jscript.rc:73
-msgid "Array length must be a finite positive integer"
-msgstr "配列の長さは有限の正整数である必要があります"
-
 #: dlls/jscript/jscript.rc:74
-msgid "Array object expected"
+#, fuzzy
+#| msgid "Array object expected"
+msgid "Array or arguments object expected"
 msgstr "配列オブジェクトを期待していました"
 
 #: dlls/jscript/jscript.rc:75
+msgid "Array length must be a finite positive integer"
+msgstr "配列の長さは有限の正整数である必要があります"
+
+#: dlls/jscript/jscript.rc:76
+msgid "Array object expected"
+msgstr "配列オブジェクトを期待していました"
+
+#: dlls/jscript/jscript.rc:77
 msgid ""
 "'writable' attribute on the property descriptor cannot be set to 'true' on "
 "this object"
@@ -4130,63 +4151,63 @@ msgstr ""
 "このオブジェクトにおけるプロパティ記述子の 'writable' 属性は 'true' に設定で"
 "きません"
 
-#: dlls/jscript/jscript.rc:76
+#: dlls/jscript/jscript.rc:78
 msgid "Cyclic __proto__ value"
 msgstr "循環した __proto__ 値"
 
-#: dlls/jscript/jscript.rc:77
+#: dlls/jscript/jscript.rc:79
 msgid "Cannot create property for a non-extensible object"
 msgstr "拡張可能ではないオブジェクトにプロパティを作成できません"
 
-#: dlls/jscript/jscript.rc:78
+#: dlls/jscript/jscript.rc:80
 msgid "Cannot define property '|': object is not extensible"
 msgstr "プロパティ '|' を定義できません: オブジェクトは拡張可能ではありません"
 
-#: dlls/jscript/jscript.rc:79
+#: dlls/jscript/jscript.rc:81
 msgid "Cannot redefine non-configurable property '|'"
 msgstr "変更不可のプロパティ '|' は再定義できません"
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:82
 msgid "Cannot modify non-writable property '|'"
 msgstr "書換不可のプロパティ '|' は変更できません"
 
-#: dlls/jscript/jscript.rc:81
+#: dlls/jscript/jscript.rc:83
 msgid "'this' is not a DataView object"
 msgstr "'this' は DataView オブジェクトではありません"
 
-#: dlls/jscript/jscript.rc:82
+#: dlls/jscript/jscript.rc:84
 msgid "Required argument offset or value in DataView method is not specified"
 msgstr "DataView メソッドでオフセットと値の引数は省略できません"
 
-#: dlls/jscript/jscript.rc:83
+#: dlls/jscript/jscript.rc:85
 msgid "DataView operation access beyond specified buffer length"
 msgstr "DataView 操作によるアクセスが指定されたバッファ長を超えています"
 
-#: dlls/jscript/jscript.rc:84
+#: dlls/jscript/jscript.rc:86
 msgid "DataView constructor argument offset is invalid"
 msgstr "DataView コンストラクター引数のオフセットが正しくありません"
 
-#: dlls/jscript/jscript.rc:85
+#: dlls/jscript/jscript.rc:87
 msgid "'this' is not a | object"
 msgstr "'this' は | オブジェクトではありません"
 
-#: dlls/jscript/jscript.rc:86
+#: dlls/jscript/jscript.rc:88
 msgid "'key' is not an object"
 msgstr "'key' はオブジェクトではありません"
 
-#: dlls/jscript/jscript.rc:87
+#: dlls/jscript/jscript.rc:89
 msgid "ArrayBuffer object expected"
 msgstr "ArrayBuffer オブジェクトを期待していました"
 
-#: dlls/jscript/jscript.rc:88
+#: dlls/jscript/jscript.rc:90
 msgid "Property cannot have both accessors and a value"
 msgstr "プロパティはアクセサーと値の両方になることはできません"
 
-#: include/wine/wine_common_ver.rc:138
+#: include/wine/wine_common_ver.rc:123
 msgid "Wine kernel DLL"
 msgstr ""
 
-#: include/wine/wine_common_ver.rc:143 dlls/winemac.drv/winemac.rc:32
+#: include/wine/wine_common_ver.rc:128 dlls/winemac.drv/winemac.rc:32
 #: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:143
 msgid "Wine"
 msgstr "Wine"
@@ -7965,7 +7986,7 @@ msgid "Vector property is required.\n"
 msgstr "配列プロパティが必要です。\n"
 
 #: dlls/mferror/mferror.mc:389
-msgid "Operation was cancelled.\n"
+msgid "Operation was canceled.\n"
 msgstr "操作は中断されました。\n"
 
 #: dlls/mferror/mferror.mc:396
@@ -9165,12 +9186,12 @@ msgstr "offscreen"
 
 #: dlls/oleacc/oleacc.rc:115
 msgctxt "object state"
-msgid "sizeable"
+msgid "sizable"
 msgstr "sizeable"
 
 #: dlls/oleacc/oleacc.rc:116
 msgctxt "object state"
-msgid "moveable"
+msgid "movable"
 msgstr "moveable"
 
 #: dlls/oleacc/oleacc.rc:117
@@ -9249,99 +9270,99 @@ msgstr "On"
 msgid "Off"
 msgstr "Off"
 
-#: dlls/oledb32/version.rc:56
+#: dlls/oledb32/version.rc:53
 msgid "Provider"
 msgstr "プロバイダー"
 
-#: dlls/oledb32/version.rc:59
+#: dlls/oledb32/version.rc:56
 msgid "Select the data you want to connect to:"
 msgstr "接続したいデータを選択してください:"
 
-#: dlls/oledb32/version.rc:66
+#: dlls/oledb32/version.rc:63
 msgid "Connection"
 msgstr "接続"
 
-#: dlls/oledb32/version.rc:69
+#: dlls/oledb32/version.rc:66
 msgid "Specify the following to connect to ODBC data:"
 msgstr "ODBC データに接続するため以下を指定してください:"
 
-#: dlls/oledb32/version.rc:70
+#: dlls/oledb32/version.rc:67
 msgid "1. Specify the source of data:"
 msgstr "1. データ ソース:"
 
-#: dlls/oledb32/version.rc:71
+#: dlls/oledb32/version.rc:68
 msgid "Use &data source name"
 msgstr "利用するデータ ソース名(&D)"
 
-#: dlls/oledb32/version.rc:74
+#: dlls/oledb32/version.rc:71
 msgid "Use c&onnection string"
 msgstr "利用する接続文字列(&O)"
 
-#: dlls/oledb32/version.rc:75
+#: dlls/oledb32/version.rc:72
 msgid "&Connection string:"
 msgstr "接続文字列:"
 
-#: dlls/oledb32/version.rc:77
+#: dlls/oledb32/version.rc:74
 msgid "B&uild..."
 msgstr "構築(&U)..."
 
-#: dlls/oledb32/version.rc:78
+#: dlls/oledb32/version.rc:75
 msgid "2. Enter information to log on to the server"
 msgstr "2. サーバーにログオンするための情報"
 
-#: dlls/oledb32/version.rc:79
+#: dlls/oledb32/version.rc:76
 msgid "User &name:"
 msgstr "ユーザー名(&N):"
 
-#: dlls/oledb32/version.rc:83
+#: dlls/oledb32/version.rc:80
 msgid "&Blank password"
 msgstr "空のパスワード(&B)"
 
-#: dlls/oledb32/version.rc:84
+#: dlls/oledb32/version.rc:81
 msgid "Allow &saving password"
 msgstr "パスワードを保存する(&S)"
 
-#: dlls/oledb32/version.rc:85
+#: dlls/oledb32/version.rc:82
 msgid "3. Enter the &initial catalog to use:"
 msgstr "3. 最初に利用するカタログ(&I):"
 
-#: dlls/oledb32/version.rc:87
+#: dlls/oledb32/version.rc:84
 msgid "&Test Connection"
 msgstr "接続をテスト(&T)"
 
-#: dlls/oledb32/version.rc:92
+#: dlls/oledb32/version.rc:89
 msgid "Advanced"
 msgstr "高度"
 
-#: dlls/oledb32/version.rc:95
+#: dlls/oledb32/version.rc:92
 msgid "Network settings"
 msgstr "ネットワーク設定"
 
-#: dlls/oledb32/version.rc:96
+#: dlls/oledb32/version.rc:93
 msgid "&Impersonation level:"
 msgstr "偽装レベル(&I):"
 
-#: dlls/oledb32/version.rc:98
+#: dlls/oledb32/version.rc:95
 msgid "P&rotection level:"
 msgstr "保護レベル(&R):"
 
-#: dlls/oledb32/version.rc:101
+#: dlls/oledb32/version.rc:98
 msgid "Connect:"
 msgstr "接続:"
 
-#: dlls/oledb32/version.rc:103
+#: dlls/oledb32/version.rc:100
 msgid "seconds."
 msgstr "秒"
 
-#: dlls/oledb32/version.rc:104
+#: dlls/oledb32/version.rc:101
 msgid "A&ccess:"
 msgstr "アクセス(&C):"
 
-#: dlls/oledb32/version.rc:110
+#: dlls/oledb32/version.rc:107
 msgid "All"
 msgstr "すべて"
 
-#: dlls/oledb32/version.rc:114
+#: dlls/oledb32/version.rc:111
 msgid ""
 "These are the initialization properties for this type of data. To edit a "
 "value, select a property, then choose Edit Value below."
@@ -9349,19 +9370,19 @@ msgstr ""
 "このデータ型には初期プロパティがあります。値を編集するには、プロパティを選ん"
 "でから、下にある[値の編集]を選択してください。"
 
-#: dlls/oledb32/version.rc:115
+#: dlls/oledb32/version.rc:112
 msgid "&Edit Value..."
 msgstr "値の編集(&E)..."
 
-#: dlls/oledb32/version.rc:49
+#: dlls/oledb32/version.rc:46
 msgid "Data Link Error"
 msgstr "データ リンク エラー"
 
-#: dlls/oledb32/version.rc:50
+#: dlls/oledb32/version.rc:47
 msgid "Please select a provider."
 msgstr "プロバイダーを選択してください。"
 
-#: dlls/oledb32/version.rc:51
+#: dlls/oledb32/version.rc:48
 msgid ""
 "Provider is no longer available. Ensure that the provider is installed "
 "properly."
@@ -9369,39 +9390,39 @@ msgstr ""
 "プロバイダーは使用できません。当該プロバイダーが正しくインストールされている"
 "か確かめてください。"
 
-#: dlls/oledb32/version.rc:36
+#: dlls/oledb32/version.rc:33
 msgid "Data Link Properties"
 msgstr "データ リンク プロパティ"
 
-#: dlls/oledb32/version.rc:37
+#: dlls/oledb32/version.rc:34
 msgid "OLE DB Provider(s)"
 msgstr "OLE DB プロバイダー"
 
-#: dlls/oledb32/version.rc:41
+#: dlls/oledb32/version.rc:38
 msgid "Read"
 msgstr "読み取り"
 
-#: dlls/oledb32/version.rc:42
+#: dlls/oledb32/version.rc:39
 msgid "ReadWrite"
 msgstr "読み書き"
 
-#: dlls/oledb32/version.rc:43
+#: dlls/oledb32/version.rc:40
 msgid "Share Deny None"
 msgstr "共有(拒否なし)"
 
-#: dlls/oledb32/version.rc:44
+#: dlls/oledb32/version.rc:41
 msgid "Share Deny Read"
 msgstr "共有(読取拒否)"
 
-#: dlls/oledb32/version.rc:45
+#: dlls/oledb32/version.rc:42
 msgid "Share Deny Write"
 msgstr "共有(書込拒否)"
 
-#: dlls/oledb32/version.rc:46
+#: dlls/oledb32/version.rc:43
 msgid "Share Exclusive"
 msgstr "共有の排他制御"
 
-#: dlls/oledb32/version.rc:47
+#: dlls/oledb32/version.rc:44
 msgid "Write"
 msgstr "書き込み"
 
@@ -12503,30 +12524,22 @@ msgid "Install"
 msgstr "インストール"
 
 #: dlls/urlmon/urlmon.rc:58
-#, fuzzy
-#| msgid "Local Port"
 msgid "Local intranet"
-msgstr "ローカル ポート"
+msgstr "ローカル イントラネット"
 
 #: dlls/urlmon/urlmon.rc:60
-#, fuzzy
-#| msgid "Trusted Publishers"
 msgid "Trusted sites"
-msgstr "信頼された発行元"
+msgstr "信頼済みサイト"
 
 #: dlls/urlmon/urlmon.rc:62
-#, fuzzy
-#| msgid "Ethernet"
 msgid "Internet"
-msgstr "イーサネット"
+msgstr "インターネット"
 
 #: dlls/urlmon/urlmon.rc:64
 msgid "Restricted sites"
-msgstr ""
+msgstr "制限済みサイト"
 
 #: dlls/urlmon/urlmon.rc:57
-#, fuzzy
-#| msgid "My Computer"
 msgid "Your computer"
 msgstr "マイ コンピューター"
 
@@ -12534,22 +12547,27 @@ msgstr "マイ コンピューター"
 msgid ""
 "This zone contains all Web sites that are on your organization's intranet."
 msgstr ""
+"このゾーンには組織のイントラネット上にあるすべての Web サイトが含まれます。"
 
 #: dlls/urlmon/urlmon.rc:61
 msgid ""
 "This zone contains Web sites that you trust not to damage your computer or "
 "data."
 msgstr ""
+"このゾーンにはコンピューターやデータに損害を与えないと信頼する Web サイトが含"
+"まれます。"
 
 #: dlls/urlmon/urlmon.rc:63
 msgid "This zone contains all Web sites you haven't placed in other zones"
-msgstr ""
+msgstr "このゾーンには他のゾーンに含まれないすべての Web サイトが含まれます。"
 
 #: dlls/urlmon/urlmon.rc:65
 msgid ""
 "This zone contains Web sites that could potentially damage your computer or "
 "data."
 msgstr ""
+"このゾーンにはコンピューターやデータに損害を与える可能性のある Web サイトが含"
+"まれます。"
 
 #: dlls/user32/user32.rc:30 dlls/user32/user32.rc:43
 #: programs/taskmgr/taskmgr.rc:138
@@ -14701,6 +14719,10 @@ msgstr "行末"
 msgid "End of file"
 msgstr "ファイルの終端"
 
+#: programs/cmd/cmd.rc:410
+msgid "%t%1!u! file(s) copied\n"
+msgstr "%t%1!d! ファイルをコピーしました\n"
+
 #: programs/conhost/conhost.rc:54
 msgid "Cursor size"
 msgstr "カーソルの大きさ"
@@ -15322,10 +15344,8 @@ msgid "&Save\tCtrl+S"
 msgstr "保存(&S)\tCtrl+S"
 
 #: programs/notepad/notepad.rc:33
-#, fuzzy
-#| msgid "Save As..."
 msgid "Save &As..."
-msgstr "名前をつけて保存..."
+msgstr "名前を付けて保存(&A)..."
 
 #: programs/notepad/notepad.rc:35 programs/regedit/regedit.rc:39
 #: programs/wordpad/wordpad.rc:36
@@ -15357,10 +15377,8 @@ msgid "&Paste\tCtrl+V"
 msgstr "貼り付け(&P)\tCtrl+V"
 
 #: programs/notepad/notepad.rc:47
-#, fuzzy
-#| msgid "&Delete\tDel"
 msgid "De&lete\tDel"
-msgstr "削除(&D)\tDel"
+msgstr "削除(&L)\tDel"
 
 #: programs/notepad/notepad.rc:49 programs/regedit/regedit.rc:62
 #: programs/regedit/regedit.rc:109 programs/wordpad/wordpad.rc:53
@@ -15368,8 +15386,6 @@ msgid "&Find...\tCtrl+F"
 msgstr "検索(&F)...\tCtrl+F"
 
 #: programs/notepad/notepad.rc:50
-#, fuzzy
-#| msgid "Find &next\tF3"
 msgid "Find &Next\tF3"
 msgstr "次を検索(&N)\tF3"
 
@@ -15382,16 +15398,12 @@ msgid "&Go To...\tCtrl+G"
 msgstr "指定行に移動(&G)...\tCtrl+G"
 
 #: programs/notepad/notepad.rc:54
-#, fuzzy
-#| msgid "Select &all\tCtrl+A"
 msgid "Select &All\tCtrl+A"
 msgstr "すべて選択(&A)\tCtrl+A"
 
 #: programs/notepad/notepad.rc:55
-#, fuzzy
-#| msgid "&Time/Date\tF5"
 msgid "Time/&Date\tF5"
-msgstr "日付と時刻(&T)\tF5"
+msgstr "日付と時刻(&D)\tF5"
 
 #: programs/notepad/notepad.rc:57 programs/wordpad/wordpad.rc:82
 msgid "F&ormat"
@@ -15399,7 +15411,7 @@ msgstr "書式(&O)"
 
 #: programs/notepad/notepad.rc:58
 msgid "&Word Wrap"
-msgstr ""
+msgstr "右端で折り返す(&W)"
 
 #: programs/notepad/notepad.rc:63 programs/oleview/oleview.rc:68
 #: programs/oleview/oleview.rc:90 programs/winefile/winefile.rc:67
@@ -16165,7 +16177,7 @@ msgid "reg: The operation completed successfully\n"
 msgstr "reg: 操作は正常に完了しました\n"
 
 #: programs/reg/reg.rc:131
-msgid "reg: The registry operation was cancelled\n"
+msgid "reg: The registry operation was canceled\n"
 msgstr "reg: レジストリ操作は取り消されました\n"
 
 #: programs/reg/reg.rc:174
@@ -17526,7 +17538,7 @@ msgid ""
 msgstr ""
 "終了シグナルが PID %1!u! のプロセス (PID %2!u! の子) に送られました。\n"
 
-#: include/wine/wine_common_ver.rc:138
+#: include/wine/wine_common_ver.rc:123
 msgid "Wine tasklist"
 msgstr "Wine tasklist"
 
@@ -18356,37 +18368,35 @@ msgstr "タスク"
 
 #: programs/timeout/timeout.rc:28
 msgid "Usage: timeout /T <timeout> [</NOBREAK>]\n"
-msgstr ""
+msgstr "使い方: timeout /T <タイムアウト> [</NOBREAK>]\n"
 
 #: programs/timeout/timeout.rc:29
-#, fuzzy
-#| msgid "FINDSTR: Bad command line\n"
 msgid "TIMEOUT: Bad command line\n"
-msgstr "FINDSTR: コマンド ラインが正しくありません\n"
+msgstr "TIMEOUT: コマンド ラインが正しくありません\n"
 
 #: programs/timeout/timeout.rc:30
 msgid "waiting since %d sec. "
-msgstr ""
+msgstr "%d 秒待機中です。"
 
 #: programs/timeout/timeout.rc:31
 msgid "press CTRL+C..."
-msgstr ""
+msgstr "CTRL+C を押してください..."
 
 #: programs/timeout/timeout.rc:32
-#, fuzzy
-#| msgid "Press any key to continue... "
 msgid "press a key to continue..."
-msgstr "続けるには何かキーを押して下さい... "
+msgstr "続けるにはキーを押して下さい..."
 
 #: programs/timeout/timeout.rc:33
 msgid "ERROR: not possible to redirect input\n"
-msgstr ""
+msgstr "エラー: 入力はリダイレクトできません\n"
 
 #: programs/timeout/timeout.rc:34
 msgid ""
 "ERROR: Timeout value out of range or invalid number. Valid range is -1 to "
 "99999.\n"
 msgstr ""
+"エラー: タイムアウト値が範囲外か正しくない数値です。妥当な範囲は -1 から "
+"99999 です。\n"
 
 #: programs/uninstaller/uninstaller.rc:29
 msgid "Wine Application Uninstaller"

@@ -430,6 +430,7 @@ static UINT (WINAPI *pGetRawInputDeviceInfoW) (HANDLE, UINT, void *, UINT *);
 static UINT (WINAPI *pGetRawInputDeviceInfoA) (HANDLE, UINT, void *, UINT *);
 static BOOL (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
 static HKL (WINAPI *pLoadKeyboardLayoutEx)(HKL, const WCHAR *, UINT);
+static INT (WINAPI *pScheduleDispatchNotification)(HWND);
 
 /**********************adapted from input.c **********************************/
 
@@ -438,6 +439,8 @@ static BOOL is_wow64;
 static void init_function_pointers(void)
 {
     HMODULE hdll = GetModuleHandleA("user32");
+
+    pScheduleDispatchNotification = (void *)GetProcAddress(hdll, (LPCSTR)2582);
 
 #define GET_PROC(func) \
     if (!(p ## func = (void*)GetProcAddress(hdll, #func))) \
@@ -6141,20 +6144,26 @@ static void test_keyboard_layout(void)
     /* Test that the high word of the keyboard layout in CJK locale is the same as the low word,
      * even when IME is on */
     lang_id = PRIMARYLANGID(GetUserDefaultLCID());
-    if (lang_id == LANG_CHINESE || lang_id == LANG_JAPANESE || lang_id == LANG_KOREAN)
+    switch (lang_id)
     {
-        hkl = GetKeyboardLayout(0);
-        ok(HIWORD(hkl) == LOWORD(hkl), "Got unexpected hkl %p.\n", hkl);
-
-        if (lang_id == LANG_CHINESE)
-            layout_name = "00000804";
-        else if (lang_id == LANG_JAPANESE)
-            layout_name = "00000411";
-        else if (lang_id == LANG_KOREAN)
-            layout_name = "00000412";
-        hkl = LoadKeyboardLayoutA(layout_name, 0);
-        ok(HIWORD(hkl) == LOWORD(hkl), "Got unexpected hkl %p.\n", hkl);
+    case LANG_CHINESE:
+        layout_name = "00000804";
+        break;
+    case LANG_JAPANESE:
+        layout_name = "00000411";
+        break;
+    case LANG_KOREAN:
+        layout_name = "00000412";
+        break;
+    default:
+        return;
     }
+
+    hkl = GetKeyboardLayout(0);
+    ok(HIWORD(hkl) == LOWORD(hkl), "Got unexpected hkl %p.\n", hkl);
+
+    hkl = LoadKeyboardLayoutA(layout_name, 0);
+    ok(HIWORD(hkl) == LOWORD(hkl), "Got unexpected hkl %p.\n", hkl);
 }
 
 static void test_system_messages_with_rawinput_nolegacy(void)
@@ -6308,6 +6317,29 @@ static void test_SetFocus_process(void)
     DestroyWindow( hwnd );
 }
 
+static void test_ScheduleDispatchNotification(void)
+{
+    HWND hwnd;
+    INT ret;
+
+    if (!pScheduleDispatchNotification)
+    {
+        win_skip("ScheduleDispatchNotification is unavailable.\n");
+        return;
+    }
+
+    hwnd = CreateWindowW(L"static", NULL, WS_POPUP | WS_VISIBLE, 100, 100, 200, 200, NULL, NULL,
+                         NULL, NULL);
+
+    ret = pScheduleDispatchNotification(NULL);
+    ok(!ret, "Got unexpected %d.\n", ret);
+
+    ret = pScheduleDispatchNotification(hwnd);
+    ok(ret == 2, "Got unexpected %d.\n", ret);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(input)
 {
     char **argv;
@@ -6352,6 +6384,7 @@ START_TEST(input)
     test_OemKeyScan();
     test_rawinput(argv[0]);
     test_DefRawInputProc();
+    test_ScheduleDispatchNotification();
 
     if(pGetMouseMovePointsEx)
         test_GetMouseMovePointsEx( argv );

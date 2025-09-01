@@ -23,6 +23,7 @@
 #include "roparameterizediid.h"
 #include "roerrorapi.h"
 #include "winstring.h"
+#include "errhandlingapi.h"
 
 #include "combase_private.h"
 
@@ -124,7 +125,7 @@ HRESULT WINAPI RoInitialize(RO_INIT_TYPE type)
 {
     switch (type) {
     case RO_INIT_SINGLETHREADED:
-        return CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+        return CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     default:
         FIXME("type %d\n", type);
     case RO_INIT_MULTITHREADED:
@@ -192,6 +193,10 @@ HRESULT WINAPI DECLSPEC_HOTPATCH RoGetActivationFactory(HSTRING classid, REFIID 
             module = NULL;
         }
         IActivationFactory_Release(factory);
+    }
+    else
+    {
+        ERR("Class %s not found in %s, hr %#lx.\n", wine_dbgstr_hstring(classid), debugstr_w(library), hr);
     }
 
 done:
@@ -416,6 +421,15 @@ HRESULT WINAPI RoGetAgileReference(enum AgileReferenceOptions option, REFIID rii
 }
 
 /***********************************************************************
+ *      RoFailFastWithErrorContextInternal2 (combase.@)
+ */
+void WINAPI RoFailFastWithErrorContextInternal2(HRESULT error, ULONG exception_count, /* PSTOWED_EXCEPTION_INFORMATION_V2 */void *information)
+{
+    FIXME("%#lx, %lu, %p stub.\n", error, exception_count, information);
+    RaiseFailFastException(NULL, NULL, 0);
+}
+
+/***********************************************************************
  *      RoGetApartmentIdentifier (combase.@)
  */
 HRESULT WINAPI RoGetApartmentIdentifier(UINT64 *identifier)
@@ -517,6 +531,15 @@ BOOL WINAPI RoOriginateErrorW(HRESULT error, UINT max_len, const WCHAR *message)
 }
 
 /***********************************************************************
+ *      RoReportUnhandledError (combase.@)
+ */
+HRESULT WINAPI RoReportUnhandledError(IRestrictedErrorInfo *info)
+{
+    FIXME("(%p): stub\n", info);
+    return S_OK;
+}
+
+/***********************************************************************
  *      RoSetErrorReportingFlags (combase.@)
  */
 HRESULT WINAPI RoSetErrorReportingFlags(UINT32 flags)
@@ -524,6 +547,21 @@ HRESULT WINAPI RoSetErrorReportingFlags(UINT32 flags)
     FIXME("(%08x): stub\n", flags);
     return S_OK;
 }
+
+/***********************************************************************
+ *      RoGetErrorReportingFlags (combase.@)
+ */
+HRESULT WINAPI RoGetErrorReportingFlags(UINT32 *flags)
+{
+    FIXME("(%p): stub\n", flags);
+
+    if (!flags)
+        return E_POINTER;
+
+    *flags = RO_ERROR_REPORTING_USESETERRORINFO;
+    return S_OK;
+}
+
 
 /***********************************************************************
  *      CleanupTlsOleState (combase.@)

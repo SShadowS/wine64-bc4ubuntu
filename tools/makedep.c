@@ -168,8 +168,8 @@ static const char *arch_dirs[MAX_ARCHS];
 static const char *arch_pe_dirs[MAX_ARCHS];
 static const char *arch_install_dirs[MAX_ARCHS];
 static const char *strip_progs[MAX_ARCHS];
-static const char *debug_flags[MAX_ARCHS];
 static const char *delay_load_flags[MAX_ARCHS];
+static struct strarray debug_flags[MAX_ARCHS];
 static struct strarray target_flags[MAX_ARCHS];
 static struct strarray extra_cflags[MAX_ARCHS];
 static struct strarray extra_cflags_extlib[MAX_ARCHS];
@@ -239,6 +239,7 @@ static struct makefile **submakes;
 
 static const char separator[] = "### Dependencies";
 static const char *output_makefile_name = "Makefile";
+static const char *input_makefile_name;
 static const char *input_file_name;
 static const char *output_file_name;
 static const char *temp_file_name;
@@ -646,11 +647,11 @@ static int get_link_arch( const struct makefile *make, unsigned int arch, unsign
  *         is_multiarch
  *
  * Check if arch is one of the PE architectures in multiarch.
- * Also return TRUE for native arch iff there's no PE support.
+ * Also return TRUE for native arch iff there's no PE architecture, not even "none".
  */
 static int is_multiarch( unsigned int arch )
 {
-    return archs.count == 1 || arch;
+    return archs.count == 1 || (arch && strcmp( archs.str[arch], "none" ));
 }
 
 
@@ -1697,6 +1698,8 @@ static FILE *open_input_makefile( const struct makefile *make )
 
     if (make->obj_dir)
         input_file_name = root_src_dir_path( obj_dir_path( make, "Makefile.in" ));
+    else if (input_makefile_name)
+        input_file_name = input_makefile_name;
     else
         input_file_name = output_makefile_name;  /* always use output name for main Makefile */
 
@@ -2444,16 +2447,22 @@ static struct strarray remove_warning_flags( struct strarray flags )
 
 
 /*******************************************************************
- *         get_debug_file
+ *         get_debug_files
  */
-static const char *get_debug_file( struct makefile *make, const char *name, unsigned int arch )
+static void output_debug_files( struct makefile *make, const char *name, unsigned int arch )
 {
-    const char *debug_file = NULL;
-    if (!debug_flags[arch]) return NULL;
-    if (!strcmp( debug_flags[arch], "pdb" )) debug_file = strmake( "%s.pdb", get_base_name( name ));
-    else if (!strncmp( debug_flags[arch], "split", 5 )) debug_file = strmake( "%s.debug", name );
-    if (debug_file) strarray_add( &make->debug_files, debug_file );
-    return debug_file;
+    unsigned int i;
+
+    for (i = 0; i < debug_flags[arch].count; i++)
+    {
+        const char *debug_file = NULL;
+        const char *flag = debug_flags[arch].str[i];
+        if (!strcmp( flag, "pdb" )) debug_file = strmake( "%s.pdb", get_base_name( name ));
+        else if (!strncmp( flag, "split", 5 )) debug_file = strmake( "%s.debug", name );
+        if (!debug_file) continue;
+        strarray_add( &make->debug_files, debug_file );
+        output_filename( strmake( "-Wl,--debug-file,%s", obj_dir_path( make, debug_file )));
+    }
 }
 
 
@@ -2586,8 +2595,12 @@ static void output_install_commands( struct makefile *make, struct strarray file
             output( "\t%s $(INSTALL_SCRIPT_FLAGS) %s %s\n",
                     install_sh, src_dir_path( make, file ), dest );
             break;
+        case 't':  /* tools file */
+            output( "\tSTRIPPROG=\"$(STRIP)\" %s $(INSTALL_PROGRAM_FLAGS) %s %s\n",
+                    install_sh, tools_path( make, file ), dest );
+            break;
         case 'y':  /* symlink */
-            output_symlink_rule( files.str[i], dest, 1 );
+            output_symlink_rule( file, dest, 1 );
             break;
         default:
             assert(0);
@@ -2622,6 +2635,9 @@ static void output_install_rules( struct makefile *make, enum install_rules rule
         case 'p':  /* program file */
         case 's':  /* script */
             strarray_add_uniq( &targets, obj_dir_path( make, file ));
+            break;
+        case 't':  /* tools file */
+            strarray_add_uniq( &targets, tools_path( make, file ));
             break;
         }
     }
@@ -3137,7 +3153,7 @@ static void output_source_testdll( struct makefile *make, struct incl_file *sour
     struct strarray dll_flags = empty_strarray;
     struct strarray default_imports = empty_strarray;
     struct strarray all_libs, dep_libs;
-    const char *dll_name, *obj_name, *res_name, *output_rsrc, *output_file, *debug_file, *ext = ".dll";
+    const char *dll_name, *obj_name, *res_name, *output_rsrc, *output_file, *ext = ".dll";
     struct incl_file *spec_file = find_src_file( make, strmake( "%s.spec", obj ));
     unsigned int arch, link_arch;
 
@@ -3194,8 +3210,7 @@ static void output_source_testdll( struct makefile *make, struct incl_file *sour
         output_filename( obj_name );
         if (hybrid_obj_name) output_filename( hybrid_obj_name );
         if (res_name) output_filename( res_name );
-        if ((debug_file = get_debug_file( make, dll_name, link_arch )))
-            output_filename( strmake( "-Wl,--debug-file,%s", obj_dir_path( make, debug_file )));
+        output_debug_files( make, dll_name, link_arch );
         output_filenames( all_libs );
         output_filename( arch_make_variable( "LDFLAGS", link_arch ));
         output( "\n" );
@@ -3234,6 +3249,7 @@ static void output_source_one_arch( struct makefile *make, struct incl_file *sou
     if (arch)
     {
         if (source->file->flags & FLAG_C_UNIX) return;
+        if (!is_multiarch( arch )) return;
         if (!is_using_msvcrt( make ) && !make->staticlib && !(source->file->flags & FLAG_C_IMPLIB)) return;
     }
     else if (source->file->flags & FLAG_C_UNIX)
@@ -3472,7 +3488,6 @@ static void output_module( struct makefile *make, unsigned int arch )
     struct strarray dep_libs = empty_strarray;
     struct strarray imports = make->imports;
     const char *module_name;
-    const char *debug_file;
     char *spec_file = NULL;
     unsigned int i, link_arch;
 
@@ -3546,8 +3561,7 @@ static void output_module( struct makefile *make, unsigned int arch )
     output_filenames_obj_dir( make, make->object_files[arch] );
     if (link_arch != arch) output_filenames_obj_dir( make, make->object_files[link_arch] );
     output_filenames_obj_dir( make, make->res_files[arch] );
-    debug_file = get_debug_file( make, module_name, link_arch );
-    if (debug_file) output_filename( strmake( "-Wl,--debug-file,%s", obj_dir_path( make, debug_file )));
+    output_debug_files( make, module_name, link_arch );
     output_filenames( all_libs );
     output_filename( arch_make_variable( "LDFLAGS", link_arch ));
     output( "\n" );
@@ -3631,6 +3645,7 @@ static void output_static_lib( struct makefile *make, unsigned int arch )
 
     if (make->disabled[arch]) return;
     if (native_archs[arch]) return;
+    if (arch && !is_multiarch( arch )) return;
 
     strarray_add( &make->clean_files, name );
     output( "%s: %s", obj_dir_path( make, name ), tools_path( make, "winebuild" ));
@@ -3661,7 +3676,6 @@ static void output_test_module( struct makefile *make, unsigned int arch )
     struct strarray dep_libs = empty_strarray;
     struct strarray all_libs = empty_strarray;
     struct makefile *parent = get_parent_makefile( make );
-    const char *debug_file;
     unsigned int link_arch;
 
     if (!get_link_arch( make, arch, &link_arch )) return;
@@ -3677,8 +3691,7 @@ static void output_test_module( struct makefile *make, unsigned int arch )
     output_filenames_obj_dir( make, make->object_files[arch] );
     if (link_arch != arch) output_filenames_obj_dir( make, make->object_files[link_arch] );
     output_filenames_obj_dir( make, make->res_files[arch] );
-    if ((debug_file = get_debug_file( make, testmodule, arch )))
-        output_filename( strmake( "-Wl,--debug-file,%s", obj_dir_path( make, debug_file )));
+    output_debug_files( make, testmodule, arch );
     output_filenames( all_libs );
     output_filename( arch_make_variable( "LDFLAGS", link_arch ));
     output( "\n" );
@@ -3778,7 +3791,7 @@ static void output_programs( struct makefile *make )
         strarray_addall( &make->all_targets[arch], symlinks );
 
         install_dir = !strcmp( make->obj_dir, "loader" ) ? arch_install_dirs[arch] : "$(bindir)/";
-        add_install_rule( make, program, arch, program, strmake( "p%s%s", install_dir, program ));
+        add_install_rule( make, make->programs.str[i], arch, program, strmake( "p%s%s", install_dir, program ));
         for (j = 0; j < symlinks.count; j++)
             add_install_rule( make, symlinks.str[j], arch, program,
                               strmake( "y$(bindir)/%s%s", symlinks.str[j], exe_ext ));
@@ -3991,14 +4004,15 @@ static void output_sources( struct makefile *make )
         for (arch = 0; arch < archs.count; arch++)
         {
             if (is_multiarch( arch )) output_module( make, arch );
-            if (make->importlib && (is_multiarch( arch ) || !is_native_arch_disabled( make )))
+            if (make->importlib && (is_multiarch( arch ) || (!arch && !is_native_arch_disabled( make ))))
                 output_import_lib( make, arch );
         }
         if (make->unixlib) output_unix_lib( make );
         if (make->is_exe && !make->is_win16 && unix_lib_supported && strendswith( make->module, ".exe" ))
         {
             char *binary = replace_extension( make->module, ".exe", "" );
-            add_install_rule( make, binary, 0, "wine", strmake( "y$(bindir)/%s", binary ));
+            add_install_rule( make, binary, 0, "wine",
+                              strmake( "%c$(bindir)/%s", strcmp( ln_s, "ln -s" ) ? 't' : 'y', binary ));
         }
     }
     else if (make->testdll)
@@ -4373,6 +4387,7 @@ static void output_top_makefile( struct makefile *make )
     /* add special targets for makefile and dependencies */
 
     output( ".INIT: Makefile\n" );
+    output( ".PRECIOUS: Makefile\n" );
     output( ".MAKEFILEDEPS:\n" );
     output( ".SUFFIXES:\n" );
     makedep = strmake( "%s%s",tools_dir_path( make, "makedep" ), tools_ext );
@@ -4596,6 +4611,9 @@ static int parse_option( const char *opt )
     case 'f':
         if (opt[2]) output_makefile_name = opt + 2;
         break;
+    case 'i':
+        if (opt[2]) input_makefile_name = opt + 2;
+        break;
     case 'C':
         compile_commands_mode = 1;
         break;
@@ -4732,13 +4750,13 @@ int main( int argc, char *argv[] )
         disabled_dirs[arch] = get_expanded_arch_var_array( top_makefile, "DISABLED_SUBDIRS", arch );
         if (!is_multiarch( arch )) continue;
         delay_load_flags[arch] = get_expanded_arch_var( top_makefile, "DELAYLOADFLAG", arch );
-        debug_flags[arch] = get_expanded_arch_var( top_makefile, "DEBUG", arch );
+        debug_flags[arch] = get_expanded_arch_var_array( top_makefile, "DEBUG", arch );
     }
 
     if (unix_lib_supported)
     {
         delay_load_flags[0] = "-Wl,-delayload,";
-        debug_flags[0] = NULL;
+        debug_flags[0].count = 0;
     }
 
     top_makefile->src_dir = root_src_dir;

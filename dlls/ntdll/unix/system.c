@@ -245,10 +245,9 @@ enum smbios_type
 #define FIRM 0x4649524D
 #define RSMB 0x52534D42
 
-SYSTEM_CPU_INFORMATION cpu_info = { 0 };
-static SYSTEM_PROCESSOR_FEATURES_INFORMATION cpu_features;
 static char cpu_name[49];
 static char cpu_vendor[13];
+static USHORT cpu_level, cpu_revision;
 static ULONGLONG cpu_id;
 static ULONG *performance_cores;
 static unsigned int performance_cores_capacity = 0;
@@ -263,8 +262,8 @@ static pthread_mutex_t timezone_mutex = PTHREAD_MUTEX_INITIALIZER;
 /*******************************************************************************
  * Architecture specific feature detection for CPUs
  *
- * This a set of mutually exclusive #if define()s each providing its own get_cpuinfo() to be called
- * from init_cpu_info();
+ * This a set of mutually exclusive #if define()s each providing its
+ * own functions to be called from init_cpu_info().
  */
 #if defined(__i386__) || defined(__x86_64__)
 
@@ -322,72 +321,17 @@ void copy_xstate( XSAVE_AREA_HEADER *dst, XSAVE_AREA_HEADER *src, UINT64 mask )
     }
 }
 
-extern void do_cpuid( unsigned int ax, unsigned int cx, unsigned int *p );
-#ifdef __i386__
-__ASM_GLOBAL_FUNC( do_cpuid,
-                   "pushl %esi\n\t"
-                   "pushl %ebx\n\t"
-                   "movl 12(%esp),%eax\n\t"
-                   "movl 16(%esp),%ecx\n\t"
-                   "movl 20(%esp),%esi\n\t"
-                   "cpuid\n\t"
-                   "movl %eax,(%esi)\n\t"
-                   "movl %ebx,4(%esi)\n\t"
-                   "movl %ecx,8(%esi)\n\t"
-                   "movl %edx,12(%esi)\n\t"
-                   "popl %ebx\n\t"
-                   "popl %esi\n\t"
-                   "ret" )
-#else
-__ASM_GLOBAL_FUNC( do_cpuid,
-                   "pushq %rbx\n\t"
-                   "movl %edi,%eax\n\t"
-                   "movl %esi,%ecx\n\t"
-                   "movq %rdx,%r8\n\t"
-                   "cpuid\n\t"
-                   "movl %eax,(%r8)\n\t"
-                   "movl %ebx,4(%r8)\n\t"
-                   "movl %ecx,8(%r8)\n\t"
-                   "movl %edx,12(%r8)\n\t"
-                   "popq %rbx\n\t"
-                   "ret" )
-#endif
-
-extern UINT64 do_xgetbv( unsigned int cx);
-#ifdef __i386__
-__ASM_GLOBAL_FUNC( do_xgetbv,
-                   "movl 4(%esp),%ecx\n\t"
-                   "xgetbv\n\t"
-                   "ret" )
-#else
-__ASM_GLOBAL_FUNC( do_xgetbv,
-                   "movl %edi,%ecx\n\t"
-                   "xgetbv\n\t"
-                   "shlq $32,%rdx\n\t"
-                   "orq %rdx,%rax\n\t"
-                   "ret" )
-#endif
-
-#ifdef __i386__
-extern int have_cpuid(void);
-__ASM_GLOBAL_FUNC( have_cpuid,
-                   "pushfl\n\t"
-                   "pushfl\n\t"
-                   "movl (%esp),%ecx\n\t"
-                   "xorl $0x00200000,(%esp)\n\t"
-                   "popfl\n\t"
-                   "pushfl\n\t"
-                   "popl %eax\n\t"
-                   "popfl\n\t"
-                   "xorl %ecx,%eax\n\t"
-                   "andl $0x00200000,%eax\n\t"
-                   "ret" )
-#else
-static int have_cpuid(void)
+static inline void do_cpuid( unsigned int ax, unsigned int cx, unsigned int *p )
 {
-    return 1;
+    __asm__ ( "cpuid" : "=a" (p[0]), "=b" (p[1]), "=c" (p[2]), "=d" (p[3]) : "a" (ax), "c" (cx) );
 }
-#endif
+
+static inline UINT64 do_xgetbv( unsigned int cx )
+{
+    UINT low, high;
+    __asm__( "xgetbv" : "=a" (low), "=d" (high) : "c" (cx) );
+    return low | ((UINT64)high << 32);
+}
 
 /* Detect if a SSE2 processor is capable of Denormals Are Zero (DAZ) mode.
  *
@@ -408,129 +352,76 @@ static inline BOOL have_sse_daz_mode(void)
 #endif
 }
 
-static void get_cpuid_name( char *buffer )
+static void init_cpu_model(void)
 {
     unsigned int regs[4];
-
-    do_cpuid( 0x80000002, 0, regs );
-    memcpy( buffer, regs, sizeof(regs) );
-    buffer += sizeof(regs);
-    do_cpuid( 0x80000003, 0, regs );
-    memcpy( buffer, regs, sizeof(regs) );
-    buffer += sizeof(regs);
-    do_cpuid( 0x80000004, 0, regs );
-    memcpy( buffer, regs, sizeof(regs) );
-    buffer += sizeof(regs);
-    *buffer = 0;
-}
-
-static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
-{
-    unsigned int regs[4], regs2[4], regs3[4];
-    ULONGLONG features;
-
-#if defined(__i386__)
-    info->ProcessorArchitecture = PROCESSOR_ARCHITECTURE_INTEL;
-#elif defined(__x86_64__)
-    info->ProcessorArchitecture = PROCESSOR_ARCHITECTURE_AMD64;
-#endif
-
-    /* We're at least a 386 */
-    features = CPU_FEATURE_VME | CPU_FEATURE_X86 | CPU_FEATURE_PGE;
-    info->ProcessorLevel = 3;
-
-    if (!have_cpuid()) return;
 
     do_cpuid( 0x00000000, 0, regs );  /* get standard cpuid level and vendor name */
     memcpy( cpu_vendor, &regs[1], sizeof(unsigned int) );
     memcpy( cpu_vendor + 4, &regs[3], sizeof(unsigned int) );
     memcpy( cpu_vendor + 8, &regs[2], sizeof(unsigned int) );
-    if (regs[0]>=0x00000001)   /* Check for supported cpuid version */
+
+    do_cpuid( 0x00000001, 0, regs ); /* get cpu features */
+    cpu_id = regs[0] | ((ULONGLONG)regs[3] << 32);
+    cpu_level = ((regs[0] >> 8) & 0xf) + ((regs[0] >> 20) & 0xff); /* family */
+    cpu_revision  = ((regs[0] >> 16) & 0xf) << 12; /* extended model */
+    cpu_revision |= ((regs[0] >> 4 ) & 0xf) << 8;  /* model    */
+    cpu_revision |= regs[0] & 0xf;                 /* stepping */
+
+    do_cpuid( 0x80000000, 0, regs );  /* get vendor cpuid level */
+    if (regs[0] >= 0x80000004)
     {
-        do_cpuid( 0x00000001, 0, regs2 ); /* get cpu features */
-        if (regs2[3] & (1 << 3 )) features |= CPU_FEATURE_PSE;
-        if (regs2[3] & (1 << 4 )) features |= CPU_FEATURE_TSC;
-        if (regs2[3] & (1 << 6 )) features |= CPU_FEATURE_PAE;
-        if (regs2[3] & (1 << 8 )) features |= CPU_FEATURE_CX8;
-        if (regs2[3] & (1 << 11)) features |= CPU_FEATURE_SEP;
-        if (regs2[3] & (1 << 12)) features |= CPU_FEATURE_MTRR;
-        if (regs2[3] & (1 << 15)) features |= CPU_FEATURE_CMOV;
-        if (regs2[3] & (1 << 16)) features |= CPU_FEATURE_PAT;
-        if (regs2[3] & (1 << 23)) features |= CPU_FEATURE_MMX;
-        if (regs2[3] & (1 << 24)) features |= CPU_FEATURE_FXSR;
-        if (regs2[3] & (1 << 25)) features |= CPU_FEATURE_SSE;
-        if (regs2[3] & (1 << 26)) features |= CPU_FEATURE_SSE2;
-        if (regs2[2] & (1 << 0 )) features |= CPU_FEATURE_SSE3;
-        if (regs2[2] & (1 << 9 )) features |= CPU_FEATURE_SSSE3;
-        if (regs2[2] & (1 << 13)) features |= CPU_FEATURE_CX128;
-        if (regs2[2] & (1 << 19)) features |= CPU_FEATURE_SSE41;
-        if (regs2[2] & (1 << 20)) features |= CPU_FEATURE_SSE42;
-        if (regs2[2] & (1 << 27)) features |= CPU_FEATURE_XSAVE;
-        if (regs2[2] & (1 << 28)) features |= CPU_FEATURE_AVX;
-        if((regs2[3] & (1 << 26)) && (regs2[3] & (1 << 24)) && have_sse_daz_mode()) /* has SSE2 and FXSAVE/FXRSTOR */
-            features |= CPU_FEATURE_DAZ;
+        char *p = cpu_name;
 
-        cpu_id = regs2[0] | ((ULONGLONG)regs2[3] << 32);
-        if (regs[0] >= 0x00000007)
-        {
-            do_cpuid( 0x00000007, 0, regs3 ); /* get extended features */
-            if (regs3[1] & (1 << 5)) features |= CPU_FEATURE_AVX2;
-        }
-
-        if (!strcmp( cpu_vendor, "AuthenticAMD" ))
-        {
-            info->ProcessorLevel = (regs2[0] >> 8) & 0xf; /* family */
-            if (info->ProcessorLevel == 0xf)  /* AMD says to add the extended family to the family if family is 0xf */
-                info->ProcessorLevel += (regs2[0] >> 20) & 0xff;
-
-            /* repack model and stepping to make a "revision" */
-            info->ProcessorRevision  = ((regs2[0] >> 16) & 0xf) << 12; /* extended model */
-            info->ProcessorRevision |= ((regs2[0] >> 4 ) & 0xf) << 8;  /* model          */
-            info->ProcessorRevision |= regs2[0] & 0xf;                 /* stepping       */
-
-            do_cpuid( 0x80000000, 0, regs );  /* get vendor cpuid level */
-            if (regs[0] >= 0x80000001)
-            {
-                do_cpuid( 0x80000001, 0, regs2 );  /* get vendor features */
-                if (regs2[2] & (1 << 2))   features |= CPU_FEATURE_VIRT;
-                if (regs2[3] & (1 << 20))  features |= CPU_FEATURE_NX;
-                if (regs2[3] & (1 << 27))  features |= CPU_FEATURE_TSC;
-                if (regs2[3] & (1u << 31)) features |= CPU_FEATURE_3DNOW;
-            }
-            if (regs[0] >= 0x80000004) get_cpuid_name( cpu_name );
-        }
-        else if (!strcmp( cpu_vendor, "GenuineIntel" ))
-        {
-            info->ProcessorLevel = ((regs2[0] >> 8) & 0xf) + ((regs2[0] >> 20) & 0xff); /* family + extended family */
-            if(info->ProcessorLevel == 15) info->ProcessorLevel = 6;
-
-            /* repack model and stepping to make a "revision" */
-            info->ProcessorRevision  = ((regs2[0] >> 16) & 0xf) << 12; /* extended model */
-            info->ProcessorRevision |= ((regs2[0] >> 4 ) & 0xf) << 8;  /* model          */
-            info->ProcessorRevision |= regs2[0] & 0xf;                 /* stepping       */
-
-            if(regs2[2] & (1 << 5))  features |= CPU_FEATURE_VIRT;
-            if(regs2[3] & (1 << 21)) features |= CPU_FEATURE_DS;
-
-            do_cpuid( 0x80000000, 0, regs );  /* get vendor cpuid level */
-            if (regs[0] >= 0x80000001)
-            {
-                do_cpuid( 0x80000001, 0, regs2 );  /* get vendor features */
-                if (regs2[3] & (1 << 20)) features |= CPU_FEATURE_NX;
-                if (regs2[3] & (1 << 27)) features |= CPU_FEATURE_TSC;
-            }
-            if (regs[0] >= 0x80000004) get_cpuid_name( cpu_name );
-        }
-        else
-        {
-            info->ProcessorLevel = (regs2[0] >> 8) & 0xf; /* family */
-
-            /* repack model and stepping to make a "revision" */
-            info->ProcessorRevision = ((regs2[0] >> 4 ) & 0xf) << 8;  /* model    */
-            info->ProcessorRevision |= regs2[0] & 0xf;                /* stepping */
-        }
+        do_cpuid( 0x80000002, 0, (unsigned int *)p );
+        p += sizeof(regs);
+        do_cpuid( 0x80000003, 0, (unsigned int *)p );
+        p += sizeof(regs);
+        do_cpuid( 0x80000004, 0, (unsigned int *)p );
+        p += sizeof(regs);
+        *p = 0;
     }
-    info->ProcessorFeatureBits = cpu_features.ProcessorFeatureBits = features;
+}
+
+static ULONGLONG get_cpu_features(void)
+{
+    const BOOLEAN *pf = user_shared_data->ProcessorFeatures;
+    ULONGLONG features;
+
+    /* feature bits are derived from KF_* flags and Geoff Chappell's documentation */
+
+    if (native_machine == IMAGE_FILE_MACHINE_AMD64)
+    {
+        features = 0x20013dfe; /* tsc | vme | cmov | pge | pse | mtrr | cx8 | mmx | pat | fxsr | sep | sse | sse2 | nx */
+        if (pf[PF_RDRAND_INSTRUCTION_AVAILABLE]) features |= 0x100000000; /* rdrand */
+        if (pf[PF_XSAVE_ENABLED])                features |= 0x00800000;  /* xstate */
+        if (pf[PF_COMPARE_EXCHANGE128])          features |= 0x00100000;  /* cx16 */
+        if (pf[PF_SSE3_INSTRUCTIONS_AVAILABLE])  features |= 0x00080000;  /* sse3 */
+        if (pf[PF_RDTSCP_INSTRUCTION_AVAILABLE]) features |= 0x400000000; /* rdtscp */
+        if (pf[PF_RDWRFSGSBASE_AVAILABLE])       features |= 0x10000000;  /* fsgsbase */
+
+        if (!strcmp( cpu_vendor, "AuthenticAMD" ))      features |= 0x00200000;  /* amd */
+        else if (!strcmp( cpu_vendor, "GenuineIntel" )) features |= 0x01000000;  /* intel */
+    }
+    else
+    {
+        features = 0x00000275; /* vme | pge | pse | mtrr */
+        if (pf[PF_RDTSC_INSTRUCTION_AVAILABLE])   features |= 0x00000002;  /* tsc */
+        if (pf[PF_COMPARE_EXCHANGE_DOUBLE])       features |= 0x00000080;  /* cx8 */
+        if (pf[PF_MMX_INSTRUCTIONS_AVAILABLE])    features |= 0x00000100;  /* mmx */
+        if (pf[PF_XMMI_INSTRUCTIONS_AVAILABLE])   features |= 0x00042800;  /* sse | fxsr | clfsh */
+        if (pf[PF_XMMI64_INSTRUCTIONS_AVAILABLE]) features |= 0x00010000;  /* sse2 */
+        if (pf[PF_SSE3_INSTRUCTIONS_AVAILABLE])   features |= 0x00080000;  /* sse3 */
+        if (pf[PF_RDRAND_INSTRUCTION_AVAILABLE])  features |= 0x02000000;  /* rdrand */
+        if (pf[PF_NX_ENABLED])                    features |= 0x20000000;  /* nx */
+        if (pf[PF_RDTSCP_INSTRUCTION_AVAILABLE])  features |= 0x100000000; /* rdtscp */
+        if (pf[PF_3DNOW_INSTRUCTIONS_AVAILABLE])  features |= 0x00004000;  /* 3dnow */
+        if (pf[PF_VIRT_FIRMWARE_ENABLED])         features |= 0x0c000000;  /* vmx */
+
+        if (!strcmp( cpu_vendor, "GenuineIntel" ))      features |= 0x008000000; /* intel */
+        else if (!strcmp( cpu_vendor, "AuthenticAMD" )) features |= 0x001000000; /* amd */
+    }
+    return features;
 }
 
 static void init_xstate_features( XSTATE_CONFIGURATION *xstate )
@@ -545,7 +436,6 @@ static void init_xstate_features( XSTATE_CONFIGURATION *xstate )
     TRACE( "XSAVE details %#x, %#x, %#x, %#x.\n", regs[0], regs[1], regs[2], regs[3] );
     supported_mask = ((ULONG64)regs[3] << 32) | regs[0];
     supported_mask &= do_xgetbv(0) & supported_features;
-    if (!(supported_mask >> 2)) return;
 
     xstate->EnabledFeatures = (1 << XSTATE_LEGACY_FLOATING_POINT) | (1 << XSTATE_LEGACY_SSE) | supported_mask;
     xstate->EnabledVolatileFeatures = xstate->EnabledFeatures;
@@ -578,7 +468,8 @@ static void init_xstate_features( XSTATE_CONFIGURATION *xstate )
                xstate->Features[i].Offset, xstate->Features[i].Size, !!(regs[2] & 2) );
     }
 
-    xstate->Size = xstate->CompactionEnabled ? off : xstate->Features[i - 1].Offset + xstate->Features[i - 1].Size;
+    xstate->Size = xstate->CompactionEnabled ? off :
+           offsetof( XSAVE_FORMAT, XmmRegisters ) + xstate->Features[i - 1].Offset + xstate->Features[i - 1].Size;
     TRACE( "xstate size %x, compacted %d, optimized %d.\n",
            xstate->Size, xstate->CompactionEnabled, xstate->OptimizedSave );
 }
@@ -634,7 +525,7 @@ void init_shared_data_cpuinfo( KUSER_SHARED_DATA *data )
         features[PF_3DNOW_INSTRUCTIONS_AVAILABLE]   = !!(regs[3] & (1u << 31));
     }
 
-    if (features[PF_AVX_INSTRUCTIONS_AVAILABLE] && features[PF_XSAVE_ENABLED])
+    if (features[PF_XSAVE_ENABLED])
         init_xstate_features( &data->XState );
 }
 
@@ -653,9 +544,8 @@ static int has_feature( const char *line, const char *feat )
     return 0;
 }
 
-static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
+static void init_cpu_model(void)
 {
-    ULONGLONG features = 0;
     unsigned int implementer = 0x41, part = 0, variant = 0, revision = 0;
 #ifdef linux
     char line[512];
@@ -679,49 +569,12 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
             else if (!strcmp( line, "CPU part" )) part = strtoul( value, NULL, 0);
             else if (!strcmp( line, "CPU variant" )) variant = strtoul( value, NULL, 0);
             else if (!strcmp( line, "CPU revision" )) revision = strtoul( value, NULL, 0);
-            else if (!strcmp( line, "Features" ))
-            {
-#ifdef __arm__
-                if (has_feature(value, "vfpv3"))      features |= CPU_FEATURE_ARM_VFP_32;
-                if (has_feature(value, "neon"))       features |= CPU_FEATURE_ARM_NEON;
-#else
-                if (has_feature(value, "crc32"))      features |= CPU_FEATURE_ARM_V8_CRC32;
-                if (has_feature(value, "aes"))        features |= CPU_FEATURE_ARM_V8_CRYPTO;
-                if (has_feature(value, "atomics"))    features |= CPU_FEATURE_ARM_V81_ATOMIC;
-                if (has_feature(value, "asimddp"))    features |= CPU_FEATURE_ARM_V82_DP;
-                if (has_feature(value, "jscvt"))      features |= CPU_FEATURE_ARM_V83_JSCVT;
-                if (has_feature(value, "lrcpc"))      features |= CPU_FEATURE_ARM_V83_LRCPC;
-                if (has_feature(value, "sve"))        features |= CPU_FEATURE_ARM_SVE;
-                if (has_feature(value, "sve2"))       features |= CPU_FEATURE_ARM_SVE2;
-                if (has_feature(value, "sve2p1"))     features |= CPU_FEATURE_ARM_SVE2_1;
-                if (has_feature(value, "sveaes"))     features |= CPU_FEATURE_ARM_SVE_AES;
-                if (has_feature(value, "svepmull"))   features |= CPU_FEATURE_ARM_SVE_PMULL128;
-                if (has_feature(value, "svebitperm")) features |= CPU_FEATURE_ARM_SVE_BITPERM;
-                if (has_feature(value, "svebf16"))    features |= CPU_FEATURE_ARM_SVE_BF16;
-                if (has_feature(value, "sveebf16"))   features |= CPU_FEATURE_ARM_SVE_EBF16;
-                if (has_feature(value, "sveb16b16"))  features |= CPU_FEATURE_ARM_SVE_B16B16;
-                if (has_feature(value, "svesha3"))    features |= CPU_FEATURE_ARM_SVE_SHA3;
-                if (has_feature(value, "svesm4"))     features |= CPU_FEATURE_ARM_SVE_SM4;
-                if (has_feature(value, "svei8mm"))    features |= CPU_FEATURE_ARM_SVE_I8MM;
-                if (has_feature(value, "svef32mm"))   features |= CPU_FEATURE_ARM_SVE_F32MM;
-                if (has_feature(value, "svef64mm"))   features |= CPU_FEATURE_ARM_SVE_F64MM;
-#endif
-                continue;
-            }
         }
         fclose( f );
     }
-#else
-    FIXME("CPU Feature detection not implemented.\n");
 #endif
-#ifdef __arm__
-    info->ProcessorArchitecture = PROCESSOR_ARCHITECTURE_ARM;
-#else
-    info->ProcessorArchitecture = PROCESSOR_ARCHITECTURE_ARM64;
-#endif
-    info->ProcessorFeatureBits = cpu_features.ProcessorFeatureBits = features;
-    info->ProcessorLevel = part;
-    info->ProcessorRevision = (variant << 8) | revision;
+    cpu_level = part;
+    cpu_revision = (variant << 8) | revision;
     cpu_id = (implementer << 24) | (variant << 20) | (0x0f << 16) | (part << 4) | revision;
     switch (implementer)
     {
@@ -737,6 +590,11 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
     case 0x66: strcpy( cpu_vendor, "Faraday" ); break;
     case 0x69: strcpy( cpu_vendor, "Intel" ); break;
     }
+}
+
+static ULONGLONG get_cpu_features(void)
+{
+    return 0;  /* FIXME */
 }
 
 void init_shared_data_cpuinfo( KUSER_SHARED_DATA *data )
@@ -1549,10 +1407,7 @@ static void init_logical_proc_info(void)
 /******************************************************************
  *		init_cpu_info
  *
- * inits a couple of places with CPU related information:
- * - cpu_info in this file
- * - Peb->NumberOfProcessors
- * - SharedUserData->ProcessFeatures[] array
+ * Init a couple of places with CPU related information.
  */
 void init_cpu_info(void)
 {
@@ -1579,11 +1434,33 @@ void init_cpu_info(void)
     num = 1;
     FIXME("Detecting the number of processors is not supported.\n");
 #endif
-    peb->NumberOfProcessors = cpu_info.MaximumProcessors = num;
-    get_cpuinfo( &cpu_info );
-    TRACE( "<- CPU arch %d, level %d, rev %d, features 0x%x\n",
-           cpu_info.ProcessorArchitecture, cpu_info.ProcessorLevel,
-           cpu_info.ProcessorRevision, cpu_info.ProcessorFeatureBits );
+    peb->NumberOfProcessors = num;
+    init_cpu_model();
+}
+
+static SYSTEM_CPU_INFORMATION get_cpuinfo(void)
+{
+    SYSTEM_CPU_INFORMATION info =
+    {
+        .ProcessorLevel        = cpu_level,
+        .ProcessorRevision     = cpu_revision,
+        .MaximumProcessors     = peb->NumberOfProcessors,
+        .ProcessorFeatureBits  = get_cpu_features(),
+#ifdef __arm__
+        .ProcessorArchitecture = PROCESSOR_ARCHITECTURE_ARM,
+#elif defined __aarch64__
+        .ProcessorArchitecture = PROCESSOR_ARCHITECTURE_ARM64,
+#elif defined(__i386__)
+        .ProcessorArchitecture = PROCESSOR_ARCHITECTURE_INTEL,
+#elif defined(__x86_64__)
+        .ProcessorArchitecture = PROCESSOR_ARCHITECTURE_AMD64,
+#endif
+    };
+
+    TRACE( "CPU arch %d, level %d, rev %d, features 0x%x\n",
+           info.ProcessorArchitecture, info.ProcessorLevel,
+           info.ProcessorRevision, info.ProcessorFeatureBits );
+    return info;
 }
 
 static NTSTATUS create_cpuset_info(SYSTEM_CPU_SET_INFORMATION *info)
@@ -1909,7 +1786,7 @@ static DWORD get_core_id_regs_arm64( struct smbios_wine_id_reg_value_arm64 *regs
 
 #else
 
-static DWORD get_core_id_regs_arm64( struct smbios_wine_core_id_regs_arm64 *core_id_regs,
+static DWORD get_core_id_regs_arm64( struct smbios_wine_id_reg_value_arm64 *regs,
                                      WORD logical_thread_id )
 {
     FIXME("stub\n");
@@ -3129,7 +3006,11 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
     }
 
     case SystemCpuInformation:  /* 1 */
-        if (size >= (len = sizeof(cpu_info))) memcpy(info, &cpu_info, len);
+        if (size >= (len = sizeof(SYSTEM_CPU_INFORMATION)))
+        {
+            SYSTEM_CPU_INFORMATION cpu = get_cpuinfo();
+            memcpy( info, &cpu, len );
+        }
         else ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
 
@@ -3564,14 +3445,14 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
     }
 
     case SystemEmulationProcessorInformation:  /* 63 */
-        if (size >= (len = sizeof(cpu_info)))
+        if (size >= (len = sizeof(SYSTEM_CPU_INFORMATION)))
         {
-            SYSTEM_CPU_INFORMATION cpu = cpu_info;
+            SYSTEM_CPU_INFORMATION cpu = get_cpuinfo();
             if (is_win64)
             {
-                if (cpu_info.ProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
+                if (cpu.ProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
                     cpu.ProcessorArchitecture = PROCESSOR_ARCHITECTURE_INTEL;
-                else if (cpu_info.ProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64)
+                else if (cpu.ProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64)
                     cpu.ProcessorArchitecture = PROCESSOR_ARCHITECTURE_ARM;
             }
             memcpy(info, &cpu, len);
@@ -3813,8 +3694,12 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
     }
 
     case SystemProcessorFeaturesInformation:  /* 154 */
-        len = sizeof(cpu_features);
-        if (size >= len) memcpy( info, &cpu_features, len );
+        len = sizeof(SYSTEM_PROCESSOR_FEATURES_INFORMATION);
+        if (size >= len)
+        {
+            SYSTEM_PROCESSOR_FEATURES_INFORMATION features = { .ProcessorFeatureBits = get_cpu_features() };
+            memcpy( info, &features, len );
+        }
         else ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
 

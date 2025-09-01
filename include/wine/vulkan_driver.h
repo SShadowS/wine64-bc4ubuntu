@@ -21,6 +21,7 @@
 #define __WINE_VULKAN_DRIVER_H
 
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 #include <windef.h>
@@ -90,6 +91,7 @@ struct vulkan_physical_device
 {
     VULKAN_OBJECT_HEADER( VkPhysicalDevice, physical_device );
     struct vulkan_instance *instance;
+    bool has_swapchain_maintenance1;
 };
 
 static inline struct vulkan_physical_device *vulkan_physical_device_from_handle( VkPhysicalDevice handle )
@@ -173,14 +175,10 @@ struct vulkan_funcs
 };
 
 /* interface between win32u and the user drivers */
+struct client_surface;
 struct vulkan_driver_funcs
 {
-    VkResult (*p_vulkan_surface_create)(HWND, const struct vulkan_instance *, VkSurfaceKHR *, void **);
-    void (*p_vulkan_surface_destroy)(HWND, void *);
-    void (*p_vulkan_surface_detach)(HWND, void *);
-    void (*p_vulkan_surface_update)(HWND, void *);
-    void (*p_vulkan_surface_presented)(HWND, void *, VkResult);
-
+    VkResult (*p_vulkan_surface_create)(HWND, const struct vulkan_instance *, VkSurfaceKHR *, struct client_surface **);
     VkBool32 (*p_vkGetPhysicalDeviceWin32PresentationSupportKHR)(VkPhysicalDevice, uint32_t);
     const char *(*p_get_host_surface_extension)(void);
 };

@@ -94,6 +94,18 @@ nv12frame.bmp RCDATA nv12frame.bmp
 nv12frame-2d.bmp RCDATA nv12frame-2d.bmp
 
 /* Generated from running the tests on Windows */
+/* @makedep: nv12frame-crop.bmp */
+nv12frame-crop.bmp RCDATA nv12frame-crop.bmp
+
+/* Generated from running the tests on Windows */
+/* @makedep: nv12frame-crop-1d.bmp */
+nv12frame-crop-1d.bmp RCDATA nv12frame-crop-1d.bmp
+
+/* Generated from running the tests on Windows */
+/* @makedep: nv12frame-crop-2d.bmp */
+nv12frame-crop-2d.bmp RCDATA nv12frame-crop-2d.bmp
+
+/* Generated from running the tests on Windows */
 /* @makedep: nv12frame-grabber.bmp */
 nv12frame-grabber.bmp RCDATA nv12frame-grabber.bmp
 
@@ -160,10 +172,6 @@ rgb555frame.bmp RCDATA rgb555frame.bmp
 /* Generated from running the tests on Windows */
 /* @makedep: rgb555frame-flip.bmp */
 rgb555frame-flip.bmp RCDATA rgb555frame-flip.bmp
-
-/* Generated from running the tests on Windows */
-/* @makedep: iv50frame.bin */
-iv50frame.bin RCDATA iv50frame.bin
 
 /* Generated from running the tests on Windows */
 /* @makedep: rgb24frame.bmp */

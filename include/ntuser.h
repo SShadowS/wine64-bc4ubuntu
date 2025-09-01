@@ -51,7 +51,7 @@ struct user_entry
     ULONG64 offset;   /* shared user object offset */
     ULONG   tid;      /* owner thread id */
     ULONG   pid;      /* owner process id */
-    ULONG64 padding;
+    ULONG64 id;       /* shared user object id */
     union
     {
         struct
@@ -69,35 +69,40 @@ struct user_entry
    All of these functions must live inside user32.dll. Overwatch 2's
    KiUserCallbackDispatcher hook verifies this and prevents the callback from
    running if that check fails. */
+
+#define ALL_USER32_CALLBACKS \
+    USER32_CALLBACK_ENTRY(CallDispatchCallback) \
+    USER32_CALLBACK_ENTRY(CallEnumDisplayMonitor) \
+    USER32_CALLBACK_ENTRY(CallSendAsyncCallback) \
+    USER32_CALLBACK_ENTRY(CallWinEventHook) \
+    USER32_CALLBACK_ENTRY(CallWinProc) \
+    USER32_CALLBACK_ENTRY(CallWindowsHook) \
+    USER32_CALLBACK_ENTRY(CopyImage) \
+    USER32_CALLBACK_ENTRY(DrawNonClientButton) \
+    USER32_CALLBACK_ENTRY(DrawScrollBar) \
+    USER32_CALLBACK_ENTRY(DrawText) \
+    USER32_CALLBACK_ENTRY(FreeCachedClipboardData) \
+    USER32_CALLBACK_ENTRY(ImmProcessKey) \
+    USER32_CALLBACK_ENTRY(ImmTranslateMessage) \
+    USER32_CALLBACK_ENTRY(InitBuiltinClasses) \
+    USER32_CALLBACK_ENTRY(LoadDriver) \
+    USER32_CALLBACK_ENTRY(LoadImage) \
+    USER32_CALLBACK_ENTRY(LoadSysMenu) \
+    USER32_CALLBACK_ENTRY(PostDDEMessage) \
+    USER32_CALLBACK_ENTRY(RenderSynthesizedFormat) \
+    USER32_CALLBACK_ENTRY(UnpackDDEMessage) \
+    USER32_CALLBACK_ENTRY(DragDropEnter) \
+    USER32_CALLBACK_ENTRY(DragDropLeave) \
+    USER32_CALLBACK_ENTRY(DragDropDrag) \
+    USER32_CALLBACK_ENTRY(DragDropDrop) \
+    USER32_CALLBACK_ENTRY(DragDropPost)
+
 enum
 {
-    /* user32 callbacks */
-    NtUserCallDispatchCallback,
-    NtUserCallEnumDisplayMonitor,
-    NtUserCallSendAsyncCallback,
-    NtUserCallWinEventHook,
-    NtUserCallWinProc,
-    NtUserCallWindowsHook,
-    NtUserCopyImage,
-    NtUserDrawNonClientButton,
-    NtUserDrawScrollBar,
-    NtUserDrawText,
-    NtUserFreeCachedClipboardData,
-    NtUserImmProcessKey,
-    NtUserImmTranslateMessage,
-    NtUserInitBuiltinClasses,
-    NtUserLoadDriver,
-    NtUserLoadImage,
-    NtUserLoadSysMenu,
-    NtUserPostDDEMessage,
-    NtUserRenderSynthesizedFormat,
-    NtUserUnpackDDEMessage,
-    NtUserDragDropEnter,
-    NtUserDragDropLeave,
-    NtUserDragDropDrag,
-    NtUserDragDropDrop,
-    NtUserDragDropPost,
-    NtUserCallCount
+#define USER32_CALLBACK_ENTRY(name) NtUser##name,
+    ALL_USER32_CALLBACKS
+#undef USER32_CALLBACK_ENTRY
+    NtUserCallCount = 256
 };
 
 /* NtUserCallDispatchCallback params */
@@ -841,6 +846,7 @@ W32KAPI HCURSOR WINAPI NtUserGetCursor(void);
 W32KAPI HCURSOR WINAPI NtUserGetCursorFrameInfo( HCURSOR hCursor, DWORD istep, DWORD *rate_jiffies,
                                                  DWORD *num_steps );
 W32KAPI BOOL    WINAPI NtUserGetCursorInfo( CURSORINFO *info );
+W32KAPI BOOL    WINAPI NtUserGetCursorPos( POINT *pt );
 W32KAPI HDC     WINAPI NtUserGetDC( HWND hwnd );
 W32KAPI HDC     WINAPI NtUserGetDCEx( HWND hwnd, HRGN clip_rgn, DWORD flags );
 W32KAPI LONG    WINAPI NtUserGetDisplayConfigBufferSizes( UINT32 flags, UINT32 *num_path_info,
@@ -944,12 +950,14 @@ W32KAPI ATOM    WINAPI NtUserRegisterClassExWOW( const WNDCLASSEXW *wc, UNICODE_
 W32KAPI BOOL    WINAPI NtUserRegisterHotKey( HWND hwnd, INT id, UINT modifiers, UINT vk );
 W32KAPI BOOL    WINAPI NtUserRegisterRawInputDevices( const RAWINPUTDEVICE *devices, UINT device_count, UINT size );
 W32KAPI BOOL    WINAPI NtUserRegisterTouchPadCapable( BOOL capable );
+W32KAPI ATOM    WINAPI NtUserRegisterWindowMessage( UNICODE_STRING *name );
 W32KAPI BOOL    WINAPI NtUserReleaseCapture(void);
 W32KAPI INT     WINAPI NtUserReleaseDC( HWND hwnd, HDC hdc );
 W32KAPI BOOL    WINAPI NtUserRemoveClipboardFormatListener( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserRemoveMenu( HMENU menu, UINT id, UINT flags );
 W32KAPI HANDLE  WINAPI NtUserRemoveProp( HWND hwnd, const WCHAR *str );
 W32KAPI BOOL    WINAPI NtUserReplyMessage( LRESULT result );
+W32KAPI INT     WINAPI NtUserScheduleDispatchNotification( HWND hwnd );
 W32KAPI BOOL    WINAPI NtUserScrollDC( HDC hdc, INT dx, INT dy, const RECT *scroll, const RECT *clip,
                                        HRGN ret_update_rgn, RECT *update_rect );
 W32KAPI INT     WINAPI NtUserScrollWindowEx( HWND hwnd, INT dx, INT dy, const RECT *rect,
@@ -1093,7 +1101,6 @@ enum
     NtUserCallOneParam_CreateCursorIcon,
     NtUserCallOneParam_EnableDC,
     NtUserCallOneParam_EnableThunkLock,
-    NtUserCallOneParam_GetCursorPos,
     NtUserCallOneParam_GetIconParam,
     NtUserCallOneParam_GetMenuItemCount,
     NtUserCallOneParam_GetPrimaryMonitorRect,
@@ -1130,11 +1137,6 @@ struct thunk_lock_params
 static inline void NtUserEnableThunkLock( ntuser_callback thunk_lock_callback )
 {
     NtUserCallOneParam( (UINT_PTR)thunk_lock_callback, NtUserCallOneParam_EnableThunkLock );
-}
-
-static inline BOOL NtUserGetCursorPos( POINT *pt )
-{
-    return NtUserCallOneParam( (UINT_PTR)pt, NtUserCallOneParam_GetCursorPos );
 }
 
 static inline UINT_PTR NtUserGetIconParam( HICON icon )

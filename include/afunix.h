@@ -1,7 +1,5 @@
 /*
- * Shared Resource/DllGetVersion version information
- *
- * Copyright (C) 2004 Robert Shearman
+ * Copyright 2023 Ally Sommers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,8 +16,21 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-/* please keep in sync with shell32.rc values */
-#define WINE_FILEVERSION_MAJOR         6
-#define WINE_FILEVERSION_MINOR         0
-#define WINE_FILEVERSION_BUILD      2900
-#define WINE_FILEVERSION_PLATFORMID 6242
+#ifndef _WS2AFUNIX_
+#define _WS2AFUNIX_
+
+#ifdef USE_WS_PREFIX
+# define WS(x)    WS_##x
+#else
+# define WS(x)    x
+#endif
+
+#define UNIX_PATH_MAX 108
+
+typedef struct WS(sockaddr_un)
+{
+    ADDRESS_FAMILY sun_family;
+    char sun_path[UNIX_PATH_MAX];
+} SOCKADDR_UN, *PSOCKADDR_UN;
+
+#endif /* _WS2AFUNIX_ */

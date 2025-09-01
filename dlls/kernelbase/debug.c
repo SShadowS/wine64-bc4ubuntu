@@ -181,6 +181,7 @@ static LONG WINAPI debug_exception_handler( EXCEPTION_POINTERS *eptr )
  */
 void WINAPI DECLSPEC_HOTPATCH OutputDebugStringA( LPCSTR str )
 {
+    DWORD last_error = GetLastError();
     static HANDLE DBWinMutex = NULL;
     static BOOL mutex_inited = FALSE;
     BOOL caught_by_dbg = TRUE;
@@ -263,6 +264,7 @@ void WINAPI DECLSPEC_HOTPATCH OutputDebugStringA( LPCSTR str )
             CloseHandle( mapping );
         }
     }
+    SetLastError( last_error );
 }
 
 static LONG WINAPI debug_exception_handler_wide( EXCEPTION_POINTERS *eptr )
@@ -416,8 +418,34 @@ __ASM_GLOBAL_IMPORT(RaiseException)
  */
 void WINAPI DECLSPEC_HOTPATCH RaiseFailFastException( EXCEPTION_RECORD *record, CONTEXT *context, DWORD flags )
 {
-    FIXME( "(%p, %p, %ld) stub\n", record, context, flags );
-    TerminateProcess( GetCurrentProcess(), STATUS_FAIL_FAST_EXCEPTION );
+    EXCEPTION_RECORD rec;
+    CONTEXT ctx;
+
+    WARN( "(%p, %p, %lx)\n", record, context, flags );
+
+    if (flags & FAIL_FAST_NO_HARD_ERROR_DLG)
+        TerminateProcess( GetCurrentProcess(), STATUS_FAIL_FAST_EXCEPTION );
+
+    if (!context)
+    {
+        RtlCaptureContext( &ctx );
+        context = &ctx;
+    }
+    if (!record)
+    {
+        rec.ExceptionCode    = STATUS_FAIL_FAST_EXCEPTION;
+        rec.ExceptionFlags   = EXCEPTION_NONCONTINUABLE;
+        rec.ExceptionRecord  = NULL;
+        rec.ExceptionAddress = __builtin_return_address(0);
+        rec.NumberParameters = 0;
+        record = &rec;
+    }
+    else if (flags & FAIL_FAST_GENERATE_EXCEPTION_ADDRESS)
+    {
+        record->ExceptionAddress = __builtin_return_address(0);
+    }
+
+    for (;;) NtRaiseException( record, context, FALSE );
 }
 
 /***********************************************************************

@@ -65,9 +65,8 @@ typedef struct tagWND
     HICON              hIconSmall;    /* window's small icon */
     HICON              hIconSmall2;   /* window's secondary small icon, derived from hIcon */
     HIMC               imc;           /* window's input context */
-    UINT               dpi_context;   /* window DPI awareness context */
     struct window_surface *surface;   /* Window surface if any */
-    struct list        vulkan_surfaces; /* list of vulkan surfaces created for this window */
+    struct opengl_drawable *opengl_drawable; /* last GL client surface for this window */
     struct tagDIALOGINFO *dlgInfo;    /* Dialog additional info (dialogs only) */
     int                swap_interval; /* OpenGL surface swap interval */
     int                pixel_format;  /* Pixel format set by the graphics driver */
@@ -177,12 +176,14 @@ WNDPROC get_class_winproc( struct tagCLASS *class );
 ULONG_PTR get_class_long_ptr( HWND hwnd, INT offset, BOOL ansi );
 WORD get_class_word( HWND hwnd, INT offset );
 DLGPROC get_dialog_proc( DLGPROC proc, BOOL ansi );
-ATOM get_int_atom_value( UNICODE_STRING *name );
 WNDPROC get_winproc( WNDPROC proc, BOOL ansi );
 void get_winproc_params( struct win_proc_params *params, BOOL fixup_ansi_dst );
 struct dce *get_class_dce( struct tagCLASS *class );
 struct dce *set_class_dce( struct tagCLASS *class, struct dce *dce );
 BOOL needs_ime_window( HWND hwnd );
+extern atom_t wine_server_add_atom( void *req, UNICODE_STRING *str );
+extern BOOL is_desktop_class( UNICODE_STRING *name );
+extern BOOL is_message_class( UNICODE_STRING *name );
 extern void register_builtin_classes(void);
 extern void register_desktop_class(void);
 
@@ -221,7 +222,6 @@ extern PFN_vkGetDeviceProcAddr p_vkGetDeviceProcAddr;
 extern PFN_vkGetInstanceProcAddr p_vkGetInstanceProcAddr;
 
 extern BOOL vulkan_init(void);
-extern void vulkan_detach_surfaces( struct list *surfaces );
 
 /* window.c */
 HANDLE alloc_user_handle( void *ptr, unsigned short type );

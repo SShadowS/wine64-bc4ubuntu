@@ -1714,8 +1714,8 @@
 @ stub cacoshl
 @ stub cacosl
 @ cdecl calloc(long long) msvcr120.calloc
-@ stub carg
-@ stub cargf
+@ cdecl carg(int128) msvcr120.carg
+@ cdecl cargf(int64) msvcr120.cargf
 @ stub cargl
 @ stub casin
 @ stub casinf
@@ -1740,7 +1740,7 @@
 @ stub ccosl
 @ cdecl ceil(double) msvcr120.ceil
 @ cdecl -arch=!i386 ceilf(float) msvcr120.ceilf
-@ stub cexp
+@ cdecl -norelay cexp(int128) msvcr120.cexp
 @ stub cexpf
 @ stub cexpl
 @ cdecl cimag(int128) msvcr120.cimag

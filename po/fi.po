@@ -268,7 +268,7 @@ msgstr ""
 msgid "Not specified"
 msgstr "Ei määritelty"
 
-#: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:38
+#: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:35
 #: dlls/shell32/shell32.rc:141 dlls/shell32/shell32.rc:243
 #: programs/regedit/regedit.rc:150 programs/winefile/winefile.rc:106
 msgid "Name"
@@ -323,10 +323,8 @@ msgid "Please wait until the current uninstall/modify process is complete."
 msgstr "Odota, että nykyinen poisto- tai muokkausprosessi päättyy."
 
 #: dlls/appwiz.cpl/appwiz.rc:55
-#, fuzzy
-#| msgid "Downloading..."
 msgid "Download failed."
-msgstr "Ladataan..."
+msgstr "Lataus epäonnistui."
 
 #: dlls/avifil32/avifil32.rc:42
 msgid "Compress options"
@@ -380,6 +378,19 @@ msgstr "Winen AVI-tiedostojen oletuskäsittelijä"
 msgid "uncompressed"
 msgstr "pakkaamaton"
 
+#: dlls/bluetoothapis/bluetoothapis.rc:31
+msgid "Confirm pairing"
+msgstr "Vahvista pari"
+
+#: dlls/bluetoothapis/bluetoothapis.rc:32
+msgid "Pair with '%1!s!' using the following PIN/passkey value: %2!lu!?"
+msgstr ""
+
+#: dlls/bluetoothapis/bluetoothapis.rc:33
+msgid ""
+"Pair with unnamed device %1!s! using the following PIN/passkey value: %2!lu!?"
+msgstr ""
+
 #: dlls/browseui/browseui.rc:28
 msgid "Canceling..."
 msgstr "Perutaan..."
@@ -427,7 +438,7 @@ msgstr "Velho"
 msgid "< &Back"
 msgstr "< &Edellinen"
 
-#: dlls/comctl32/comctl32.rc:85 dlls/oledb32/version.rc:61
+#: dlls/comctl32/comctl32.rc:85 dlls/oledb32/version.rc:58
 msgid "&Next >"
 msgstr "&Seuraava >"
 
@@ -1345,33 +1356,24 @@ msgid "Default"
 msgstr "Oletus"
 
 #: dlls/compstui/compstui.rc:35
-#, fuzzy
-#| msgid "&Copy Background"
 msgid "&Copy count"
-msgstr "&Kopioi tausta"
+msgstr "&Kopioiden määrä"
 
 #: dlls/compstui/compstui.rc:36
-#, fuzzy
-#| msgid "Print to File"
 msgid "Print on Both Sides"
-msgstr "Tulosta tiedostoon"
+msgstr "Tulosta molemmille puolille"
 
 #: dlls/compstui/compstui.rc:32
-#, fuzzy
-#| msgid "C&olor:"
 msgid "C&olor"
-msgstr "&Väri:"
+msgstr "&Väri"
 
 #: dlls/compstui/compstui.rc:34
 msgid "Bla&ck && White"
 msgstr ""
 
 #: dlls/compstui/compstui.rc:37
-#, fuzzy
-#| msgctxt "hotkey"
-#| msgid "None"
 msgid "&None"
-msgstr "Ei valittu"
+msgstr "&Ei valittu"
 
 #: dlls/compstui/compstui.rc:38 dlls/compstui/compstui.rc:41
 msgid "Flip on Shor&t Edge"
@@ -1386,7 +1388,7 @@ msgid "&User name:"
 msgstr "&Käyttäjänimi:"
 
 #: dlls/credui/credui.rc:48 dlls/cryptui/cryptui.rc:402
-#: dlls/oledb32/version.rc:81
+#: dlls/oledb32/version.rc:78
 msgid "&Password:"
 msgstr "&Salasana:"
 
@@ -2719,7 +2721,7 @@ msgstr "Varmenne on kelvollinen."
 msgid "Field"
 msgstr "Kenttä"
 
-#: dlls/cryptui/cryptui.rc:48 dlls/oledb32/version.rc:39
+#: dlls/cryptui/cryptui.rc:48 dlls/oledb32/version.rc:36
 msgid "Value"
 msgstr "Arvo"
 
@@ -3321,7 +3323,7 @@ msgstr "Symbolit"
 msgid "OEM/DOS"
 msgstr "OEM/DOS"
 
-#: dlls/gdi32/gdi32.rc:45 dlls/oledb32/version.rc:100
+#: dlls/gdi32/gdi32.rc:45 dlls/oledb32/version.rc:97
 #: dlls/wldap32/wldap32.rc:112
 msgid "Other"
 msgstr "Muu"
@@ -3389,7 +3391,7 @@ msgid "&Stop"
 msgstr "&Pysäytä"
 
 #: dlls/hhctrl.ocx/hhctrl.rc:66 dlls/hhctrl.ocx/hhctrl.rc:83
-#: dlls/oledb32/version.rc:73 dlls/shdoclc/shdoclc.rc:59
+#: dlls/oledb32/version.rc:70 dlls/shdoclc/shdoclc.rc:59
 msgid "&Refresh"
 msgstr "P&äivitä"
 
@@ -3463,10 +3465,8 @@ msgid "Show &Tabs"
 msgstr "Nä&ytä välilehdet"
 
 #: dlls/hhctrl.ocx/hhctrl.rc:39
-#, fuzzy
-#| msgid "Select Source"
 msgid "Select Topic"
-msgstr "Valitse lähde"
+msgstr "Valitse aihe"
 
 #: dlls/hhctrl.ocx/hhctrl.rc:44
 msgid "Show"
@@ -3833,15 +3833,15 @@ msgstr "Poista käytöstä hidraw"
 msgid "DInput"
 msgstr "DInput"
 
-#: dlls/joy.cpl/joy.rc:62
+#: dlls/joy.cpl/joy.rc:62 dlls/joy.cpl/joy.rc:111
 msgid "Axes"
 msgstr "Akselit"
 
-#: dlls/joy.cpl/joy.rc:63
+#: dlls/joy.cpl/joy.rc:63 dlls/joy.cpl/joy.rc:112
 msgid "POVs"
 msgstr "POV:t"
 
-#: dlls/joy.cpl/joy.rc:64
+#: dlls/joy.cpl/joy.rc:64 dlls/joy.cpl/joy.rc:113
 msgid "Buttons"
 msgstr "Painikkeet"
 
@@ -3850,8 +3850,12 @@ msgid "Force Feedback Effect"
 msgstr "Voimapalautteen efekti"
 
 #: dlls/joy.cpl/joy.rc:67
+#, fuzzy
+#| msgid ""
+#| "Press any button in the controller to activate the chosen effect. The "
+#| "effect direction can be changed with the controller axis."
 msgid ""
-"Press any button in the controller to activate the chosen effect. The effect "
+"Hold any button in the controller to play the chosen effect. The effect "
 "direction can be changed with the controller axis."
 msgstr ""
 "Aktivoi valittu efekti painamalla mitä tahansa ohjaimen painiketta. Efektin "
@@ -3910,9 +3914,13 @@ msgstr ""
 "ole ohitettu DInput- tai Joystickit-välilehdellä."
 
 #: dlls/joy.cpl/joy.rc:98 dlls/joy.cpl/joy.rc:99 dlls/joy.cpl/joy.rc:100
-#: dlls/joy.cpl/joy.rc:101
+#: dlls/joy.cpl/joy.rc:101 dlls/joy.cpl/joy.rc:115
 msgid "Rumble"
 msgstr "Tärinä"
+
+#: dlls/joy.cpl/joy.rc:106
+msgid "Windows.Gaming.Input"
+msgstr ""
 
 #: dlls/joy.cpl/joy.rc:31
 msgid "Game Controllers"
@@ -4026,19 +4034,19 @@ msgstr "Ehdollinen kääntäminen on pois käytöstä"
 msgid "Expected '@'"
 msgstr "Odotettiin merkkiä '@'"
 
-#: dlls/jscript/jscript.rc:90
+#: dlls/jscript/jscript.rc:92
 msgid "Microsoft JScript compilation error"
 msgstr "Microsoft JScript -käännösvirhe"
 
-#: dlls/jscript/jscript.rc:91
+#: dlls/jscript/jscript.rc:93
 msgid "Microsoft JScript runtime error"
 msgstr "Microsoft JScript -suoritusvirhe"
 
-#: dlls/jscript/jscript.rc:92 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:94 dlls/vbscript/vbscript.rc:64
 msgid "Unknown runtime error"
 msgstr "Tuntematon ajonaikainen virhe"
 
-#: dlls/jscript/jscript.rc:56
+#: dlls/jscript/jscript.rc:57
 msgid "Number expected"
 msgstr "Odotettiin lukua"
 
@@ -4047,145 +4055,157 @@ msgid "Function expected"
 msgstr "Odotettiin funktiota"
 
 #: dlls/jscript/jscript.rc:55
+#, fuzzy
+#| msgid "'[object]' is not a date object"
+msgid "'[object]' is not a string object"
+msgstr "'[objekti]' ei ole päivämääräobjekti"
+
+#: dlls/jscript/jscript.rc:56
 msgid "'[object]' is not a date object"
 msgstr "'[objekti]' ei ole päivämääräobjekti"
 
-#: dlls/jscript/jscript.rc:57
+#: dlls/jscript/jscript.rc:58
 msgid "Object expected"
 msgstr "Odotettiin objektia"
 
-#: dlls/jscript/jscript.rc:58
+#: dlls/jscript/jscript.rc:59
 msgid "Illegal assignment"
 msgstr "Virheellinen sijoitus"
 
-#: dlls/jscript/jscript.rc:59
+#: dlls/jscript/jscript.rc:60
 msgid "'|' is undefined"
 msgstr "'|' on määrittelemätön"
 
-#: dlls/jscript/jscript.rc:60
+#: dlls/jscript/jscript.rc:61
 msgid "Boolean object expected"
 msgstr "Odotettiin totuusarvoa"
 
-#: dlls/jscript/jscript.rc:61
+#: dlls/jscript/jscript.rc:62
 msgid "Cannot delete '|'"
 msgstr "Ei voida poistaa '|':tä"
 
-#: dlls/jscript/jscript.rc:62
+#: dlls/jscript/jscript.rc:63
 msgid "VBArray object expected"
 msgstr "Odotettiin VBArray-objektia"
 
-#: dlls/jscript/jscript.rc:63
+#: dlls/jscript/jscript.rc:64
 msgid "JScript object expected"
 msgstr "Odotettiin JScript-objektia"
 
-#: dlls/jscript/jscript.rc:64
+#: dlls/jscript/jscript.rc:65
 msgid "Enumerator object expected"
 msgstr "Odotettiin Enumerator-objektia"
 
-#: dlls/jscript/jscript.rc:65
+#: dlls/jscript/jscript.rc:66
 msgid "Regular Expression object expected"
 msgstr "Odotettiin säännöllistä lauseketta"
 
-#: dlls/jscript/jscript.rc:66
+#: dlls/jscript/jscript.rc:67
 msgid "Syntax error in regular expression"
 msgstr "Syntaksivirhe säännöllisessä lausekkeessa"
 
-#: dlls/jscript/jscript.rc:67
+#: dlls/jscript/jscript.rc:68
 msgid "Unexpected quantifier"
 msgstr "Odottamaton määre"
 
-#: dlls/jscript/jscript.rc:68
+#: dlls/jscript/jscript.rc:69
 msgid "Exception thrown and not caught"
 msgstr "Poikkeusta ei otettu kiinni"
 
-#: dlls/jscript/jscript.rc:70
+#: dlls/jscript/jscript.rc:71
 msgid "URI to be encoded contains invalid characters"
 msgstr "Enkoodattava URI sisältää virheellisiä merkkejä"
 
-#: dlls/jscript/jscript.rc:69
+#: dlls/jscript/jscript.rc:70
 msgid "URI to be decoded is incorrect"
 msgstr "Dekoodattava URI on virheellinen"
 
-#: dlls/jscript/jscript.rc:71
+#: dlls/jscript/jscript.rc:72
 msgid "Number of fraction digits is out of range"
 msgstr "Desimaalien määrä ei kelpaa"
 
-#: dlls/jscript/jscript.rc:72
+#: dlls/jscript/jscript.rc:73
 msgid "Precision is out of range"
 msgstr "Tarkkuus ei kelpaa"
 
-#: dlls/jscript/jscript.rc:73
-msgid "Array length must be a finite positive integer"
-msgstr "Taulukon pituuden täytyy olla positiivinen kokonaisluku"
-
 #: dlls/jscript/jscript.rc:74
-msgid "Array object expected"
+#, fuzzy
+#| msgid "Array object expected"
+msgid "Array or arguments object expected"
 msgstr "Odotettiin taulukkoa"
 
 #: dlls/jscript/jscript.rc:75
+msgid "Array length must be a finite positive integer"
+msgstr "Taulukon pituuden täytyy olla positiivinen kokonaisluku"
+
+#: dlls/jscript/jscript.rc:76
+msgid "Array object expected"
+msgstr "Odotettiin taulukkoa"
+
+#: dlls/jscript/jscript.rc:77
 msgid ""
 "'writable' attribute on the property descriptor cannot be set to 'true' on "
 "this object"
 msgstr ""
 "Attribuutti 'writable' ei voi olla 'true' tämän objektin ominaisuuksissa"
 
-#: dlls/jscript/jscript.rc:76
+#: dlls/jscript/jscript.rc:78
 msgid "Cyclic __proto__ value"
 msgstr "Syklinen __proto__"
 
-#: dlls/jscript/jscript.rc:77
+#: dlls/jscript/jscript.rc:79
 msgid "Cannot create property for a non-extensible object"
 msgstr "Ominaisuutta ei voi määritellä, koska objekti ei ole laajennettava"
 
-#: dlls/jscript/jscript.rc:78
+#: dlls/jscript/jscript.rc:80
 msgid "Cannot define property '|': object is not extensible"
 msgstr "Ominaisuutta '|' ei voi määritellä: objekti ei ole laajennettava"
 
-#: dlls/jscript/jscript.rc:79
+#: dlls/jscript/jscript.rc:81
 msgid "Cannot redefine non-configurable property '|'"
 msgstr "Ei-konfiguroitavaa ominaisuutta '|' ei voi määritellä uudestaan"
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:82
 msgid "Cannot modify non-writable property '|'"
 msgstr "Kirjoitussuojattua ominaisuutta '|' ei voi muokata"
 
-#: dlls/jscript/jscript.rc:81
+#: dlls/jscript/jscript.rc:83
 msgid "'this' is not a DataView object"
 msgstr "'this' ei ole DataView-objekti"
 
-#: dlls/jscript/jscript.rc:82
+#: dlls/jscript/jscript.rc:84
 msgid "Required argument offset or value in DataView method is not specified"
 msgstr "DataView'n metodin vaatima argumentti (kohta tai arvo) puuttuu"
 
-#: dlls/jscript/jscript.rc:83
+#: dlls/jscript/jscript.rc:85
 msgid "DataView operation access beyond specified buffer length"
 msgstr "DataView-operaatio ylittää puskurin pituuden"
 
-#: dlls/jscript/jscript.rc:84
+#: dlls/jscript/jscript.rc:86
 msgid "DataView constructor argument offset is invalid"
 msgstr "DataView'n muodostimen kohta-argumentti (offset) ei kelpaa"
 
-#: dlls/jscript/jscript.rc:85
+#: dlls/jscript/jscript.rc:87
 msgid "'this' is not a | object"
 msgstr "'this' ei ole |-objekti"
 
-#: dlls/jscript/jscript.rc:86
+#: dlls/jscript/jscript.rc:88
 msgid "'key' is not an object"
 msgstr "'key' ei ole objekti"
 
-#: dlls/jscript/jscript.rc:87
+#: dlls/jscript/jscript.rc:89
 msgid "ArrayBuffer object expected"
 msgstr "Odotettiin ArrayBuffer-objektia"
 
-#: dlls/jscript/jscript.rc:88
+#: dlls/jscript/jscript.rc:90
 msgid "Property cannot have both accessors and a value"
 msgstr "Ominaisuudella ei voi olla sekä hakufunktiota että arvoa"
 
-#: include/wine/wine_common_ver.rc:138
+#: include/wine/wine_common_ver.rc:123
 msgid "Wine kernel DLL"
 msgstr "Winen ydin-DLL"
 
-#: include/wine/wine_common_ver.rc:143 dlls/winemac.drv/winemac.rc:32
+#: include/wine/wine_common_ver.rc:128 dlls/winemac.drv/winemac.rc:32
 #: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:143
 msgid "Wine"
 msgstr "Wine"
@@ -7962,7 +7982,7 @@ msgid "Vector property is required.\n"
 msgstr "Vektoriominaisuus vaaditaan.\n"
 
 #: dlls/mferror/mferror.mc:389
-msgid "Operation was cancelled.\n"
+msgid "Operation was canceled.\n"
 msgstr "Toimenpide keskeytettiin.\n"
 
 #: dlls/mferror/mferror.mc:396
@@ -9162,12 +9182,12 @@ msgstr "poissa ruudulta"
 
 #: dlls/oleacc/oleacc.rc:115
 msgctxt "object state"
-msgid "sizeable"
+msgid "sizable"
 msgstr "koko muutettava"
 
 #: dlls/oleacc/oleacc.rc:116
 msgctxt "object state"
-msgid "moveable"
+msgid "movable"
 msgstr "siirrettävä"
 
 #: dlls/oleacc/oleacc.rc:117
@@ -9246,99 +9266,99 @@ msgstr "Päällä"
 msgid "Off"
 msgstr "Pois päältä"
 
-#: dlls/oledb32/version.rc:56
+#: dlls/oledb32/version.rc:53
 msgid "Provider"
 msgstr "Tarjoaja"
 
-#: dlls/oledb32/version.rc:59
+#: dlls/oledb32/version.rc:56
 msgid "Select the data you want to connect to:"
 msgstr "Valitse tietolähde, johon haluat yhdistää:"
 
-#: dlls/oledb32/version.rc:66
+#: dlls/oledb32/version.rc:63
 msgid "Connection"
 msgstr "Yhteys"
 
-#: dlls/oledb32/version.rc:69
+#: dlls/oledb32/version.rc:66
 msgid "Specify the following to connect to ODBC data:"
 msgstr "Määritä seuraavat, jotta voit yhdistää ODBC-tietolähteeseen:"
 
-#: dlls/oledb32/version.rc:70
+#: dlls/oledb32/version.rc:67
 msgid "1. Specify the source of data:"
 msgstr "1. Määritä tietolähde:"
 
-#: dlls/oledb32/version.rc:71
+#: dlls/oledb32/version.rc:68
 msgid "Use &data source name"
 msgstr "Käytä tietolähteen &nimeä"
 
-#: dlls/oledb32/version.rc:74
+#: dlls/oledb32/version.rc:71
 msgid "Use c&onnection string"
 msgstr "Syötä yhteysasetukset &merkkijonona"
 
-#: dlls/oledb32/version.rc:75
+#: dlls/oledb32/version.rc:72
 msgid "&Connection string:"
 msgstr "Yhteys&asetukset:"
 
-#: dlls/oledb32/version.rc:77
+#: dlls/oledb32/version.rc:74
 msgid "B&uild..."
 msgstr "&Luo..."
 
-#: dlls/oledb32/version.rc:78
+#: dlls/oledb32/version.rc:75
 msgid "2. Enter information to log on to the server"
 msgstr "2. Syötä palvelimen kirjautumistiedot"
 
-#: dlls/oledb32/version.rc:79
+#: dlls/oledb32/version.rc:76
 msgid "User &name:"
 msgstr "&Tunnus:"
 
-#: dlls/oledb32/version.rc:83
+#: dlls/oledb32/version.rc:80
 msgid "&Blank password"
 msgstr "&Ei salasanaa"
 
-#: dlls/oledb32/version.rc:84
+#: dlls/oledb32/version.rc:81
 msgid "Allow &saving password"
 msgstr "Sa&lli salasanan tallennus"
 
-#: dlls/oledb32/version.rc:85
+#: dlls/oledb32/version.rc:82
 msgid "3. Enter the &initial catalog to use:"
 msgstr "3. Syötä ensiksi käytettävä &katalogi:"
 
-#: dlls/oledb32/version.rc:87
+#: dlls/oledb32/version.rc:84
 msgid "&Test Connection"
 msgstr "Testaa y&hteyttä"
 
-#: dlls/oledb32/version.rc:92
+#: dlls/oledb32/version.rc:89
 msgid "Advanced"
 msgstr "Kehittynyt"
 
-#: dlls/oledb32/version.rc:95
+#: dlls/oledb32/version.rc:92
 msgid "Network settings"
 msgstr "Verkkoasetukset"
 
-#: dlls/oledb32/version.rc:96
+#: dlls/oledb32/version.rc:93
 msgid "&Impersonation level:"
 msgstr "&Tekeytymistaso:"
 
-#: dlls/oledb32/version.rc:98
+#: dlls/oledb32/version.rc:95
 msgid "P&rotection level:"
 msgstr "&Suojaustaso:"
 
-#: dlls/oledb32/version.rc:101
+#: dlls/oledb32/version.rc:98
 msgid "Connect:"
 msgstr "Yhdistä:"
 
-#: dlls/oledb32/version.rc:103
+#: dlls/oledb32/version.rc:100
 msgid "seconds."
 msgstr "sekuntia."
 
-#: dlls/oledb32/version.rc:104
+#: dlls/oledb32/version.rc:101
 msgid "A&ccess:"
 msgstr "&Käyttöoikeus:"
 
-#: dlls/oledb32/version.rc:110
+#: dlls/oledb32/version.rc:107
 msgid "All"
 msgstr "Kaikki"
 
-#: dlls/oledb32/version.rc:114
+#: dlls/oledb32/version.rc:111
 msgid ""
 "These are the initialization properties for this type of data. To edit a "
 "value, select a property, then choose Edit Value below."
@@ -9346,57 +9366,57 @@ msgstr ""
 "Nämä ovat tietotyypin alustusominaisuudet. Muokataksesi arvoa valitse ensin "
 "ominaisuus ja paina sitten Muokkaa arvoa -painiketta."
 
-#: dlls/oledb32/version.rc:115
+#: dlls/oledb32/version.rc:112
 msgid "&Edit Value..."
 msgstr "&Muokkaa arvoa..."
 
-#: dlls/oledb32/version.rc:49
+#: dlls/oledb32/version.rc:46
 msgid "Data Link Error"
 msgstr "Datayhteysvirhe"
 
-#: dlls/oledb32/version.rc:50
+#: dlls/oledb32/version.rc:47
 msgid "Please select a provider."
 msgstr "Valitse tarjoaja."
 
-#: dlls/oledb32/version.rc:51
+#: dlls/oledb32/version.rc:48
 msgid ""
 "Provider is no longer available. Ensure that the provider is installed "
 "properly."
 msgstr "Tarjoajaa ei ole enää saatavilla. Varmista, että se on asennettu."
 
-#: dlls/oledb32/version.rc:36
+#: dlls/oledb32/version.rc:33
 msgid "Data Link Properties"
 msgstr "Datayhteyden ominaisuudet"
 
-#: dlls/oledb32/version.rc:37
+#: dlls/oledb32/version.rc:34
 msgid "OLE DB Provider(s)"
 msgstr "OLE DB -tarjoaja(t)"
 
-#: dlls/oledb32/version.rc:41
+#: dlls/oledb32/version.rc:38
 msgid "Read"
 msgstr "Luku"
 
-#: dlls/oledb32/version.rc:42
+#: dlls/oledb32/version.rc:39
 msgid "ReadWrite"
 msgstr "Luku ja kirjoitus"
 
-#: dlls/oledb32/version.rc:43
+#: dlls/oledb32/version.rc:40
 msgid "Share Deny None"
 msgstr "Salli samaan aikaan käyttö"
 
-#: dlls/oledb32/version.rc:44
+#: dlls/oledb32/version.rc:41
 msgid "Share Deny Read"
 msgstr "Estä samaan aikaan lukeminen"
 
-#: dlls/oledb32/version.rc:45
+#: dlls/oledb32/version.rc:42
 msgid "Share Deny Write"
 msgstr "Estä samaan aikaan kirjoittaminen"
 
-#: dlls/oledb32/version.rc:46
+#: dlls/oledb32/version.rc:43
 msgid "Share Exclusive"
 msgstr "Estä kaikki samaan aikaan käyttö"
 
-#: dlls/oledb32/version.rc:47
+#: dlls/oledb32/version.rc:44
 msgid "Write"
 msgstr "Kirjoitus"
 
@@ -12498,53 +12518,51 @@ msgid "Install"
 msgstr "Asenna"
 
 #: dlls/urlmon/urlmon.rc:58
-#, fuzzy
-#| msgid "Local Port"
 msgid "Local intranet"
-msgstr "Paikallinen portti"
+msgstr "Paikallinen intranet"
 
 #: dlls/urlmon/urlmon.rc:60
-#, fuzzy
-#| msgid "Trusted Publishers"
 msgid "Trusted sites"
-msgstr "Luotetut julkaisijat"
+msgstr "Luotetut sivustot"
 
 #: dlls/urlmon/urlmon.rc:62
-#, fuzzy
-#| msgid "Ethernet"
 msgid "Internet"
-msgstr "Ethernet"
+msgstr "Internet"
 
 #: dlls/urlmon/urlmon.rc:64
 msgid "Restricted sites"
-msgstr ""
+msgstr "Rajoitetut sivustot"
 
 #: dlls/urlmon/urlmon.rc:57
-#, fuzzy
-#| msgid "My Computer"
 msgid "Your computer"
-msgstr "Oma tietokone"
+msgstr "Sinun tietokone"
 
 #: dlls/urlmon/urlmon.rc:59
 msgid ""
 "This zone contains all Web sites that are on your organization's intranet."
-msgstr ""
+msgstr "Tämä vyöhyke on tarkoitettu intranetin sivustoille."
 
 #: dlls/urlmon/urlmon.rc:61
 msgid ""
 "This zone contains Web sites that you trust not to damage your computer or "
 "data."
 msgstr ""
+"Tämä vyöhyke sisältää sivustoja, joiden et usko vahingoittavan tietokonetta "
+"tai tiedostoja."
 
 #: dlls/urlmon/urlmon.rc:63
 msgid "This zone contains all Web sites you haven't placed in other zones"
 msgstr ""
+"Tämä vyöhyke on Internet-sivustoille, jotka eivät kuulu luotettuun tai "
+"rajoitettuun vyöhykkeeseen."
 
 #: dlls/urlmon/urlmon.rc:65
 msgid ""
 "This zone contains Web sites that could potentially damage your computer or "
 "data."
 msgstr ""
+"Tämä vyöhyke sisältää sivustoja, jotka saattavat vahingoittaa tietokonetta "
+"tai tiedostoja."
 
 #: dlls/user32/user32.rc:30 dlls/user32/user32.rc:43
 #: programs/taskmgr/taskmgr.rc:138
@@ -14681,6 +14699,12 @@ msgstr "Rivin loppu"
 msgid "End of file"
 msgstr "Tiedoston loppu"
 
+#: programs/cmd/cmd.rc:410
+#, fuzzy
+#| msgid "%1!d! file(s) copied\n"
+msgid "%t%1!u! file(s) copied\n"
+msgstr "%1!d! tiedosto(a) kopioitu\n"
+
 #: programs/conhost/conhost.rc:54
 msgid "Cursor size"
 msgstr "Kursorin koko"
@@ -15296,18 +15320,16 @@ msgstr "&Avaa...\tCtrl+O"
 
 #: programs/notepad/notepad.rc:32 programs/wordpad/wordpad.rc:33
 msgid "&Save\tCtrl+S"
-msgstr "Ta&llenna\tCtrl+S"
+msgstr "&Tallenna\tCtrl+S"
 
 #: programs/notepad/notepad.rc:33
-#, fuzzy
-#| msgid "Save As..."
 msgid "Save &As..."
-msgstr "Tallenna nimellä..."
+msgstr "Tallenna &nimellä..."
 
 #: programs/notepad/notepad.rc:35 programs/regedit/regedit.rc:39
 #: programs/wordpad/wordpad.rc:36
 msgid "&Print...\tCtrl+P"
-msgstr "T&ulosta...\tCtrl+P"
+msgstr "Tul&osta...\tCtrl+P"
 
 #: programs/notepad/notepad.rc:36 programs/wordpad/wordpad.rc:38
 msgid "Page Se&tup..."
@@ -15315,7 +15337,7 @@ msgstr "&Sivun asetukset..."
 
 #: programs/notepad/notepad.rc:37
 msgid "P&rinter Setup..."
-msgstr "&Tulostimen asetukset..."
+msgstr "Tulosti&men asetukset..."
 
 #: programs/notepad/notepad.rc:42 programs/wordpad/wordpad.rc:44
 msgid "&Undo\tCtrl+Z"
@@ -15327,17 +15349,15 @@ msgstr "&Leikkaa\tCtrl+X"
 
 #: programs/notepad/notepad.rc:45 programs/wordpad/wordpad.rc:48
 msgid "&Copy\tCtrl+C"
-msgstr "&Kopioi\tCtrl+C"
+msgstr "K&opioi\tCtrl+C"
 
 #: programs/notepad/notepad.rc:46 programs/wordpad/wordpad.rc:49
 msgid "&Paste\tCtrl+V"
-msgstr "L&iitä\tCtrl+V"
+msgstr "Liit&ä\tCtrl+V"
 
 #: programs/notepad/notepad.rc:47
-#, fuzzy
-#| msgid "&Delete\tDel"
 msgid "De&lete\tDel"
-msgstr "P&oista\tDel"
+msgstr "&Poista\tDel"
 
 #: programs/notepad/notepad.rc:49 programs/regedit/regedit.rc:62
 #: programs/regedit/regedit.rc:109 programs/wordpad/wordpad.rc:53
@@ -15345,38 +15365,32 @@ msgid "&Find...\tCtrl+F"
 msgstr "&Etsi...\tCtrl+F"
 
 #: programs/notepad/notepad.rc:50
-#, fuzzy
-#| msgid "Find &next\tF3"
 msgid "Find &Next\tF3"
-msgstr "Hae &seuraava\tF3"
+msgstr "Etsi &seuraava\tF3"
 
 #: programs/notepad/notepad.rc:51 programs/wordpad/wordpad.rc:55
 msgid "&Replace...\tCtrl+H"
-msgstr "&Korvaa...\tCtrl+H"
+msgstr "Ko&rvaa...\tCtrl+H"
 
 #: programs/notepad/notepad.rc:52
 msgid "&Go To...\tCtrl+G"
-msgstr "&Siirry...\tCtrl+G"
+msgstr "S&iirry...\tCtrl+G"
 
 #: programs/notepad/notepad.rc:54
-#, fuzzy
-#| msgid "Select &all\tCtrl+A"
 msgid "Select &All\tCtrl+A"
-msgstr "&Valitse kaikki\tCtrl+A"
+msgstr "Valitse k&aikki\tCtrl+A"
 
 #: programs/notepad/notepad.rc:55
-#, fuzzy
-#| msgid "&Time/Date\tF5"
 msgid "Time/&Date\tF5"
-msgstr "&Aika/Päivämäärä\tF5"
+msgstr "Aika/Päi&vämäärä\tF5"
 
 #: programs/notepad/notepad.rc:57 programs/wordpad/wordpad.rc:82
 msgid "F&ormat"
-msgstr "&Muotoile"
+msgstr "M&uotoile"
 
 #: programs/notepad/notepad.rc:58
 msgid "&Word Wrap"
-msgstr ""
+msgstr "&Automaattinen rivitys"
 
 #: programs/notepad/notepad.rc:63 programs/oleview/oleview.rc:68
 #: programs/oleview/oleview.rc:90 programs/winefile/winefile.rc:67
@@ -16145,7 +16159,7 @@ msgid "reg: The operation completed successfully\n"
 msgstr "reg: Toiminnon suorittaminen onnistui\n"
 
 #: programs/reg/reg.rc:131
-msgid "reg: The registry operation was cancelled\n"
+msgid "reg: The registry operation was canceled\n"
 msgstr "reg: Rekisterin toimenpide peruttiin\n"
 
 #: programs/reg/reg.rc:174
@@ -17489,7 +17503,7 @@ msgstr ""
 "Lähetettiin lopetussignaali prosessille PID %1!u! (prosessin PID %2!u! "
 "lapsi).\n"
 
-#: include/wine/wine_common_ver.rc:138
+#: include/wine/wine_common_ver.rc:123
 msgid "Wine tasklist"
 msgstr "Winen tehtävälista"
 
@@ -18324,10 +18338,8 @@ msgid "Usage: timeout /T <timeout> [</NOBREAK>]\n"
 msgstr ""
 
 #: programs/timeout/timeout.rc:29
-#, fuzzy
-#| msgid "FINDSTR: Bad command line\n"
 msgid "TIMEOUT: Bad command line\n"
-msgstr "FINDSTR: Komentorivi ei kelpaa\n"
+msgstr "TIMEOUT: Komentorivi ei kelpaa\n"
 
 #: programs/timeout/timeout.rc:30
 msgid "waiting since %d sec. "
@@ -18338,10 +18350,8 @@ msgid "press CTRL+C..."
 msgstr ""
 
 #: programs/timeout/timeout.rc:32
-#, fuzzy
-#| msgid "Press any key to continue... "
 msgid "press a key to continue..."
-msgstr "Paina mitä tahansa näppäintä jatkaaksesi... "
+msgstr "Paina mitä tahansa näppäintä jatkaaksesi..."
 
 #: programs/timeout/timeout.rc:33
 msgid "ERROR: not possible to redirect input\n"

@@ -143,7 +143,7 @@ struct context_data
     union
     {
         struct { unsigned int eip, ebp, esp, eflags, cs, ss; } i386_regs;
-        struct { unsigned __int64 rip, rbp, rsp;
+        struct { unsigned __int64 rip, rsp;
                  unsigned int cs, ss, flags, __pad; } x86_64_regs;
         struct { unsigned int sp, lr, pc, cpsr; } arm_regs;
         struct { unsigned __int64 sp, pc, pstate; } arm64_regs;
@@ -151,7 +151,7 @@ struct context_data
     union
     {
         struct { unsigned int eax, ebx, ecx, edx, esi, edi; } i386_regs;
-        struct { unsigned __int64 rax,rbx, rcx, rdx, rsi, rdi,
+        struct { unsigned __int64 rax, rbx, rcx, rdx, rbp, rsi, rdi,
                                   r8, r9, r10, r11, r12, r13, r14, r15; } x86_64_regs;
         struct { unsigned int r[13]; } arm_regs;
         struct { unsigned __int64 x[31]; } arm64_regs;
@@ -507,10 +507,13 @@ enum apc_type
 struct user_apc
 {
     enum apc_type    type;     /* APC_USER */
-    int              __pad;
+    unsigned int     flags;    /* SERVER_USER_APC_* flags */
     client_ptr_t     func;     /* void (__stdcall *func)(ULONG_PTR,ULONG_PTR,ULONG_PTR); */
     apc_param_t      args[3];  /* arguments for user function */
 };
+
+#define SERVER_USER_APC_SPECIAL               0x01
+#define SERVER_USER_APC_CALLBACK_DATA_CONTEXT 0x02
 
 union apc_call
 {
@@ -982,6 +985,7 @@ typedef volatile struct
     struct shared_cursor cursor;           /* global cursor information */
     unsigned char        keystate[256];    /* asynchronous key state */
     unsigned __int64     monitor_serial;   /* winstation monitor update counter */
+    unsigned __int64     keystate_serial;  /* keystate update counter */
 } desktop_shm_t;
 
 typedef volatile struct
@@ -1007,13 +1011,20 @@ typedef volatile struct
     int                  cursor_count;     /* cursor show count */
     unsigned char        keystate[256];    /* key state */
     int                  keystate_lock;    /* keystate is locked */
+    unsigned __int64     keystate_serial;  /* keystate update counter at last sync */
 } input_shm_t;
+
+typedef volatile struct
+{
+    unsigned int         dpi_context;      /* DPI awareness context */
+} window_shm_t;
 
 typedef volatile union
 {
     desktop_shm_t        desktop;
     queue_shm_t          queue;
     input_shm_t          input;
+    window_shm_t         window;
 } object_shm_t;
 
 typedef volatile struct
@@ -1162,8 +1173,9 @@ struct obj_locator
     timeout_t    end_time;         /* process end time */
     unsigned int session_id;       /* process session id */
     int          exit_code;        /* process exit code */
-    int          priority;         /* priority class */
+    unsigned short priority;       /* priority class */
     unsigned short base_priority;  /* process base priority */
+    unsigned short disable_boost;  /* disable process priority boost */
     unsigned short machine;        /* process architecture */
     VARARG(image,pe_image_info);   /* image info for main exe */
 @END
@@ -1206,16 +1218,18 @@ struct obj_locator
 /* Set a process information */
 @REQ(set_process_info)
     obj_handle_t handle;       /* process handle */
+    affinity_t   affinity;     /* affinity mask */
     int          priority;     /* priority class */
     int          base_priority; /* process base priority */
-    affinity_t   affinity;     /* affinity mask */
+    int          disable_boost; /* disable process priority boost */
     obj_handle_t token;        /* primary token */
     int          mask;         /* setting mask (see below) */
 @END
 #define SET_PROCESS_INFO_PRIORITY      0x01
 #define SET_PROCESS_INFO_BASE_PRIORITY 0x02
-#define SET_PROCESS_INFO_AFFINITY      0x04
-#define SET_PROCESS_INFO_TOKEN         0x08
+#define SET_PROCESS_INFO_DISABLE_BOOST 0x04
+#define SET_PROCESS_INFO_AFFINITY      0x08
+#define SET_PROCESS_INFO_TOKEN         0x10
 
 
 /* Retrieve information about a thread */
@@ -1236,9 +1250,10 @@ struct obj_locator
     data_size_t  desc_len;      /* description length in bytes */
     VARARG(desc,unicode_str);   /* description string */
 @END
-#define GET_THREAD_INFO_FLAG_DBG_HIDDEN 0x01
-#define GET_THREAD_INFO_FLAG_TERMINATED 0x02
-#define GET_THREAD_INFO_FLAG_LAST       0x04
+#define GET_THREAD_INFO_FLAG_DBG_HIDDEN    0x01
+#define GET_THREAD_INFO_FLAG_TERMINATED    0x02
+#define GET_THREAD_INFO_FLAG_LAST          0x04
+#define GET_THREAD_INFO_FLAG_DISABLE_BOOST 0x08
 
 
 /* Retrieve information about thread times */
@@ -1260,6 +1275,7 @@ struct obj_locator
     affinity_t   affinity;     /* affinity mask */
     client_ptr_t entry_point;  /* thread entry point */
     obj_handle_t token;        /* impersonation token */
+    int          disable_boost;/* disable thread priority boost */
     unsigned int mask;         /* setting mask (see below) */
     VARARG(desc,unicode_str);  /* description string */
 @END
@@ -1270,6 +1286,7 @@ struct obj_locator
 #define SET_THREAD_INFO_ENTRYPOINT      0x10
 #define SET_THREAD_INFO_DESCRIPTION     0x20
 #define SET_THREAD_INFO_DBG_HIDDEN      0x40
+#define SET_THREAD_INFO_DISABLE_BOOST   0x80
 
 
 /* Suspend a thread */
@@ -1291,6 +1308,7 @@ struct obj_locator
 /* Queue an APC for a thread or process */
 @REQ(queue_apc)
     obj_handle_t handle;       /* thread or process handle */
+    obj_handle_t reserve_handle; /* APC object optional reserve handle */
     VARARG(call,apc_call);     /* call arguments */
 @REPLY
     obj_handle_t handle;       /* APC handle */
@@ -2227,6 +2245,23 @@ struct process_info
 @END
 
 
+/* Add a user atom */
+@REQ(add_user_atom)
+    VARARG(name,unicode_str);  /* atom name */
+@REPLY
+    atom_t        atom;        /* resulting atom */
+@END
+
+
+/* Get a user atom name */
+@REQ(get_user_atom_name)
+    atom_t       atom;         /* atom handle */
+@REPLY
+    data_size_t  total;        /* actual length of atom name */
+    VARARG(name,unicode_str);  /* atom name */
+@END
+
+
 /* Get a handle for the current thread message queue */
 @REQ(get_msg_queue_handle)
 @REPLY
@@ -2538,6 +2573,7 @@ enum message_type
     user_handle_t  parent;      /* parent window */
     user_handle_t  owner;       /* owner window */
     atom_t         atom;        /* class atom */
+    mod_handle_t   class_instance; /* class module instance */
     mod_handle_t   instance;    /* module instance */
     unsigned int   dpi_context; /* thread DPI context */
     unsigned int   style;       /* window style */
@@ -2549,7 +2585,6 @@ enum message_type
     user_handle_t  owner;       /* full handle of owner */
     int            extra;       /* number of extra bytes */
     client_ptr_t   class_ptr;   /* pointer to class in client address space */
-    unsigned int   dpi_context; /* window DPI context */
 @END
 
 
@@ -2581,40 +2616,34 @@ enum message_type
 /* Get information from a window handle */
 @REQ(get_window_info)
     user_handle_t  handle;      /* handle to the window */
+    int            offset;      /* offset of the info */
+    data_size_t    size;        /* size of the info value to read */
 @REPLY
     user_handle_t  last_active; /* last active popup */
     int            is_unicode;  /* ANSI or unicode */
-    unsigned int   dpi_context; /* window DPI context */
+    lparam_t       info;        /* current window info value */
+@END
+
+
+/* Initialize some window information */
+@REQ(init_window_info)
+    user_handle_t  handle;        /* handle to the window */
+    unsigned int   style;         /* window style */
+    unsigned int   ex_style;      /* window extended style */
+    short int      is_unicode;    /* ANSI or unicode */
+@REPLY
 @END
 
 
 /* Set some information in a window */
 @REQ(set_window_info)
-    unsigned short flags;         /* flags for fields to set (see below) */
-    short int      is_unicode;    /* ANSI or unicode */
     user_handle_t  handle;        /* handle to the window */
-    unsigned int   style;         /* window style */
-    unsigned int   ex_style;      /* window extended style */
-    data_size_t    extra_size;    /* size to set in extra bytes */
-    mod_handle_t   instance;      /* creator instance */
-    lparam_t       user_data;     /* user-specific data */
-    lparam_t       extra_value;   /* value to set in extra bytes or window id */
-    int            extra_offset;  /* offset to set in extra bytes */
+    int            offset;        /* offset of the info */
+    data_size_t    size;          /* size of the info value to write */
+    lparam_t       new_info;      /* new window info value */
 @REPLY
-    unsigned int   old_style;     /* old window style */
-    unsigned int   old_ex_style;  /* old window extended style */
-    mod_handle_t   old_instance;  /* old creator instance */
-    lparam_t       old_user_data; /* old user-specific data */
-    lparam_t       old_extra_value; /* old value in extra bytes */
-    lparam_t       old_id;        /* old window id */
+    lparam_t       old_info;      /* previous window info value */
 @END
-#define SET_WIN_STYLE     0x01
-#define SET_WIN_EXSTYLE   0x02
-#define SET_WIN_ID        0x04
-#define SET_WIN_INSTANCE  0x08
-#define SET_WIN_USERDATA  0x10
-#define SET_WIN_EXTRA     0x20
-#define SET_WIN_UNICODE   0x40
 
 
 /* Set the parent of a window */
@@ -2624,7 +2653,6 @@ enum message_type
 @REPLY
     user_handle_t  old_parent;  /* old parent window */
     user_handle_t  full_parent; /* full handle of new parent */
-    unsigned int   dpi_context; /* new DPI context */
 @END
 
 
@@ -3226,29 +3254,22 @@ enum caret_state
 
 /* Set some information in a class */
 @REQ(set_class_info)
-    user_handle_t  window;         /* handle to the window */
-    unsigned int   flags;          /* flags for info to set (see below) */
-    atom_t         atom;           /* class atom */
-    unsigned int   style;          /* class style */
-    int            win_extra;      /* number of window extra bytes */
-    mod_handle_t   instance;       /* module instance */
-    int            extra_offset;   /* offset to set in extra bytes */
-    data_size_t    extra_size;     /* size to set in extra bytes */
-    lparam_t       extra_value;    /* value to set in extra bytes */
+    user_handle_t  window;        /* handle to the window */
+    int            offset;        /* offset of the info */
+    data_size_t    size;          /* size of the info value to write */
+    lparam_t       new_info;      /* new class info value */
 @REPLY
-    atom_t         old_atom;       /* previous class atom */
-    atom_t         base_atom;      /* base class atom */
-    mod_handle_t   old_instance;   /* previous module instance */
-    lparam_t       old_extra_value; /* old value in extra bytes */
-    unsigned int   old_style;      /* previous class style */
-    int            old_extra;      /* previous number of class extra bytes */
-    int            old_win_extra;  /* previous number of window extra bytes */
+    lparam_t       old_info;      /* previous class info value */
 @END
-#define SET_CLASS_ATOM      0x0001
-#define SET_CLASS_STYLE     0x0002
-#define SET_CLASS_WINEXTRA  0x0004
-#define SET_CLASS_INSTANCE  0x0008
-#define SET_CLASS_EXTRA     0x0010
+
+/* Get some information in a class */
+@REQ(get_class_info)
+    user_handle_t  window;         /* handle to the window */
+    int            offset;         /* offset of the info */
+    data_size_t    size;           /* size of the info value to read */
+@REPLY
+    lparam_t       info;           /* current class info value */
+@END
 
 
 /* Open the clipboard */

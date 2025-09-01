@@ -163,7 +163,6 @@ extern BOOL X11DRV_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT botto
 extern BOOL X11DRV_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT fillType );
 extern BOOL X11DRV_FillPath( PHYSDEV dev );
 extern BOOL X11DRV_GetDeviceGammaRamp( PHYSDEV dev, LPVOID ramp );
-extern BOOL X11DRV_GetICMProfile( PHYSDEV dev, BOOL allow_default, LPDWORD size, LPWSTR filename );
 extern DWORD X11DRV_GetImage( PHYSDEV dev, BITMAPINFO *info,
                               struct gdi_image_bits *bits, struct bitblt_coords *src );
 extern COLORREF X11DRV_GetNearestColor( PHYSDEV dev, COLORREF color );
@@ -355,10 +354,11 @@ struct x11drv_escape_get_drawable
     RECT                     dc_rect;      /* DC rectangle relative to drawable */
 };
 
-extern BOOL needs_offscreen_rendering( HWND hwnd, BOOL known_child );
+extern BOOL needs_offscreen_rendering( HWND hwnd );
 extern void set_dc_drawable( HDC hdc, Drawable drawable, const RECT *rect, int mode );
 extern Drawable get_dc_drawable( HDC hdc, RECT *rect );
 extern HRGN get_dc_monitor_region( HWND hwnd, HDC hdc );
+extern Window x11drv_client_surface_create( HWND hwnd, const XVisualInfo *visual, Colormap colormap, struct client_surface **client );
 
 /**************************************************************************
  * X11 USER driver
@@ -454,6 +454,7 @@ extern BOOL keyboard_grabbed;
 extern unsigned int screen_bpp;
 extern BOOL usexrandr;
 extern BOOL usexvidmode;
+extern BOOL use_egl;
 extern BOOL use_take_focus;
 extern BOOL use_primary_selection;
 extern BOOL use_system_cursors;
@@ -681,11 +682,6 @@ extern void set_window_parent( struct x11drv_win_data *data, Window parent );
 extern Window X11DRV_get_whole_window( HWND hwnd );
 extern Window get_dummy_parent(void);
 
-extern void sync_gl_drawable( HWND hwnd, BOOL known_child );
-extern void set_gl_drawable_parent( HWND hwnd, HWND parent );
-extern void destroy_gl_drawable( HWND hwnd );
-extern void destroy_vk_surface( HWND hwnd );
-
 extern BOOL window_is_reparenting( HWND hwnd );
 extern BOOL window_should_take_focus( HWND hwnd, Time time );
 extern BOOL window_has_pending_wm_state( HWND hwnd, UINT state );
@@ -749,6 +745,7 @@ extern RECT get_work_area( const RECT *monitor_rect );
 extern void xinerama_get_fullscreen_monitors( const RECT *rect, unsigned int *generation, long *indices );
 extern void xinerama_init( unsigned int width, unsigned int height );
 extern void init_recursive_mutex( pthread_mutex_t *mutex );
+extern void init_icm_profile(void);
 
 #define DEPTH_COUNT 3
 extern const unsigned int *depths;

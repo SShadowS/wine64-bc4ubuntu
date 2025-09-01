@@ -478,8 +478,7 @@ C_ASSERT( sizeof(struct callback_stack_layout) == 0x1c );
 
 struct syscall_frame
 {
-    WORD                  syscall_flags;  /* 000 */
-    WORD                  restore_flags;  /* 002 */
+    UINT                  restore_flags;  /* 000 */
     UINT                  eflags;         /* 004 */
     UINT                  eip;            /* 008 */
     UINT                  esp;            /* 00c */
@@ -525,12 +524,6 @@ C_ASSERT( sizeof(struct x86_thread_data) <= sizeof(((struct ntdll_thread_data *)
 C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct x86_thread_data, gs ) == 0x1d8 );
 C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct x86_thread_data, frame_size ) == 0x1f4 );
 
-/* flags to control the behavior of the syscall dispatcher */
-#define SYSCALL_HAVE_XSAVE    1
-#define SYSCALL_HAVE_XSAVEC   2
-#define SYSCALL_HAVE_FXSAVE   4
-
-static unsigned int syscall_flags;
 static unsigned int frame_size;
 static unsigned int xstate_size = sizeof(XSAVE_AREA_HEADER);
 static UINT64 xstate_extended_features;
@@ -1515,12 +1508,14 @@ static void setup_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec )
 /***********************************************************************
  *           call_user_apc_dispatcher
  */
-NTSTATUS call_user_apc_dispatcher( CONTEXT *context, ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3,
+NTSTATUS call_user_apc_dispatcher( CONTEXT *context, unsigned int flags, ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3,
                                    PNTAPCFUNC func, NTSTATUS status )
 {
     struct syscall_frame *frame = get_syscall_frame();
     ULONG esp = context ? context->Esp : frame->esp;
     struct apc_stack_layout *stack = (struct apc_stack_layout *)esp - 1;
+
+    if (flags) FIXME( "flags %#x are not supported.\n", flags );
 
     if (!context)
     {
@@ -1617,8 +1612,6 @@ __ASM_GLOBAL_FUNC( call_user_mode_callback,
                    "leal 8(%ebp),%eax\n\t"
                    "movl %eax,0x38(%esp)\n\t"  /* frame->syscall_cfa */
                    "movl 0x218(%edx),%ecx\n\t" /* thread_data->syscall_frame */
-                   "movl (%ecx),%eax\n\t"      /* frame->syscall_flags */
-                   "movl %eax,(%esp)\n\t"
                    "movl %ecx,0x3c(%esp)\n\t"  /* frame->prev_frame */
                    "movl %esp,0x218(%edx)\n\t" /* thread_data->syscall_frame */
                    "testl $1,0x21c(%edx)\n\t"  /* thread_data->syscall_trace */
@@ -2477,10 +2470,6 @@ void signal_init_process(void)
 
     xstate_extended_features = user_shared_data->XState.EnabledFeatures & ~(UINT64)3;
 
-    if (user_shared_data->ProcessorFeatures[PF_XMMI_INSTRUCTIONS_AVAILABLE]) syscall_flags |= SYSCALL_HAVE_FXSAVE;
-    if (user_shared_data->ProcessorFeatures[PF_XSAVE_ENABLED]) syscall_flags |= SYSCALL_HAVE_XSAVE;
-    if (user_shared_data->XState.CompactionEnabled) syscall_flags |= SYSCALL_HAVE_XSAVEC;
-
     sig_act.sa_mask = server_block_set;
     sig_act.sa_flags = SA_SIGINFO | SA_RESTART | SA_ONSTACK;
 #ifdef __ANDROID__
@@ -2563,7 +2552,6 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, 
     *(--stack) = 0xdeadbabe;
     frame->esp = (DWORD)stack;
     frame->eip = (DWORD)pLdrInitializeThunk;
-    frame->syscall_flags = syscall_flags;
 
     pthread_sigmask( SIG_UNBLOCK, &server_block_set, NULL );
 }
@@ -2594,7 +2582,7 @@ __ASM_GLOBAL_FUNC( signal_start_thread,
                    "subl 0x1f4(%ecx),%eax\n\t"  /* x86_thread_data()->frame_size */
                    "andl $~63,%eax\n\t"
                    "movl %eax,0x218(%ecx)\n"    /* thread_data->syscall_frame */
-                   "1:\tmovl $0,(%eax)\n\t"     /* frame->syscall_flags/restore_flags */
+                   "1:\tmovl $0,(%eax)\n\t"     /* frame->restore_flags */
                    "movl %edx,0x38(%eax)\n\t"   /* frame->syscall_cfa */
                    "movl $0,0x3c(%eax)\n\t"     /* frame->prev_frame */
                    /* switch to kernel stack */
@@ -2613,7 +2601,7 @@ __ASM_GLOBAL_FUNC( signal_start_thread,
  */
 __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "movl %fs:0x218,%ecx\n\t"       /* thread_data->syscall_frame */
-                   "movw $0,0x02(%ecx)\n\t"        /* frame->restore_flags */
+                   "movl $0,(%ecx)\n\t"            /* frame->restore_flags */
                    "popl 0x08(%ecx)\n\t"           /* frame->eip */
                    __ASM_CFI(".cfi_adjust_cfa_offset -4\n\t")
                    __ASM_CFI_REG_IS_AT1(eip, ecx, 0x08)
@@ -2651,7 +2639,7 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "shrl $8,%ebx\n\t"
                    "andl $0x30,%ebx\n\t"           /* syscall table number */
                    "addl %fs:0x214,%ebx\n\t"       /* thread_data->syscall_table */
-                   "testl $3,(%ecx)\n\t"           /* frame->syscall_flags & (SYSCALL_HAVE_XSAVE | SYSCALL_HAVE_XSAVEC) */
+                   "cmpb $0,0x7ffe0285\n\t"        /* user_shared_data->ProcessorFeatures[PF_XSAVE_ENABLED] */
                    "jz 2f\n\t"
                    "movl 0x7ffe03d8,%eax\n\t"      /* user_shared_data->XState.EnabledFeatures */
                    "xorl %edx,%edx\n\t"
@@ -2663,7 +2651,7 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "movl %edi,0x24c(%ecx)\n\t"
                    "movl %edi,0x250(%ecx)\n\t"
                    "movl %edi,0x254(%ecx)\n\t"
-                   "testl $2,(%ecx)\n\t"           /* frame->syscall_flags & SYSCALL_HAVE_XSAVEC */
+                   "testl $2,0x7ffe03ec\n\t"       /* user_shared_data->XState.CompactionEnabled */
                    "jz 1f\n\t"
                    "movl %edi,0x258(%ecx)\n\t"
                    "movl %edi,0x25c(%ecx)\n\t"
@@ -2681,7 +2669,7 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "jmp 4f\n"
                    "1:\txsave 0x40(%ecx)\n\t"
                    "jmp 4f\n"
-                   "2:\ttestl $4,(%ecx)\n\t"       /* frame->syscall_flags & SYSCALL_HAVE_FXSAVE */
+                   "2:\tcmpb $0,0x7ffe027a\n\t"    /* user_shared_data->ProcessorFeatures[PF_XMMI_INSTRUCTIONS_AVAILABLE] */
                    "jz 3f\n\t"
                    "fxsave 0x40(%ecx)\n\t"
                    "jmp 4f\n"
@@ -2717,10 +2705,10 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "leal -0x34(%ebp),%esp\n"
 
                    __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") ":\t"
-                   "movl 0(%esp),%ecx\n\t"         /* frame->syscall_flags + (frame->restore_flags << 16) */
-                   "testl $0x68 << 16,%ecx\n\t"    /* CONTEXT_FLOATING_POINT | CONTEXT_EXTENDED_REGISTERS | CONTEXT_XSAVE */
+                   "movl 0(%esp),%ecx\n\t"         /* frame->restore_flags */
+                   "testl $0x68,%ecx\n\t"          /* CONTEXT_FLOATING_POINT | CONTEXT_EXTENDED_REGISTERS | CONTEXT_XSAVE */
                    "jz 3f\n\t"
-                   "testl $3,%ecx\n\t"             /* SYSCALL_HAVE_XSAVE | SYSCALL_HAVE_XSAVEC */
+                   "cmpb $0,0x7ffe0285\n\t"        /* user_shared_data->ProcessorFeatures[PF_XSAVE_ENABLED] */
                    "jz 1f\n\t"
                    "movl %eax,%esi\n\t"
                    "movl 0x7ffe03d8,%eax\n\t"      /* user_shared_data->XState.EnabledFeatures */
@@ -2728,7 +2716,7 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "xrstor 0x40(%esp)\n\t"
                    "movl %esi,%eax\n\t"
                    "jmp 3f\n"
-                   "1:\ttestl $4,%ecx\n\t"         /* SYSCALL_HAVE_FXSAVE */
+                   "1:\tcmpb $0,0x7ffe027a\n\t"    /* user_shared_data->ProcessorFeatures[PF_XMMI_INSTRUCTIONS_AVAILABLE] */
                    "jz 2f\n\t"
                    "fxrstor 0x40(%esp)\n\t"
                    "jmp 3f\n"
@@ -2740,7 +2728,7 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    /* push ebp-based kernel stack cfi */
                    __ASM_CFI("\t.cfi_remember_state\n")
                    __ASM_CFI_CFA_IS_AT2(esp, 0xb8, 0x00) /* frame->syscall_cfa */
-                   "testl $0x7 << 16,%ecx\n\t"     /* CONTEXT_CONTROL | CONTEXT_SEGMENTS | CONTEXT_INTEGER */
+                   "testl $0x7,%ecx\n\t"           /* CONTEXT_CONTROL | CONTEXT_SEGMENTS | CONTEXT_INTEGER */
                    "jnz 1f\n\t"
                    "movl 0x20(%esp),%ebx\n\t"
                    "movl 0x08(%esp),%ecx\n\t"      /* frame->eip */
@@ -2760,7 +2748,7 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    /* pop esp-based kernel stack cfi */
                    __ASM_CFI("\t.cfi_restore_state\n")
 
-                   "1:\ttestl $0x2 << 16,%ecx\n\t" /* CONTEXT_INTEGER */
+                   "1:\ttestl $0x2,%ecx\n\t"       /* CONTEXT_INTEGER */
                    "jz 1f\n\t"
                    "movl 0x1c(%esp),%eax\n\t"
                    "movl 0x24(%esp),%ecx\n\t"
@@ -2837,7 +2825,7 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher_return,
  */
 __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
                    "movl %fs:0x218,%ecx\n\t"   /* thread_data->syscall_frame */
-                   "movw $0,0x02(%ecx)\n\t"    /* frame->restore_flags */
+                   "movl $0,(%ecx)\n\t"        /* frame->restore_flags */
                    "popl 0x08(%ecx)\n\t"       /* frame->eip */
                    __ASM_CFI(".cfi_adjust_cfa_offset -4\n\t")
                    __ASM_CFI_REG_IS_AT1(eip, ecx, 0x08)
@@ -2874,7 +2862,7 @@ __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
                    __ASM_CFI(".cfi_offset %edi,-20\n\t")
                    "call *(%eax,%edx,4)\n\t"
                    "leal 16(%esp),%esp\n\t"
-                   "testw $0xffff,2(%esp)\n\t" /* frame->restore_flags */
+                   "testl $0xffff,(%esp)\n\t"  /* frame->restore_flags */
                    "jnz " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") "\n\t"
                    "movl 0x08(%esp),%ecx\n\t"  /* frame->eip */
                    /* switch to user stack */

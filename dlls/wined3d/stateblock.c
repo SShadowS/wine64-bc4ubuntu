@@ -2884,7 +2884,7 @@ static void sampler_desc_from_sampler_states(struct wined3d_sampler_desc *desc,
         desc->mip_base_level = min(max(sampler_states[WINED3D_SAMP_MAX_MIP_LEVEL], texture->lod), texture->level_count - 1);
 
     desc->max_anisotropy = sampler_states[WINED3D_SAMP_MAX_ANISOTROPY];
-    if ((sampler_states[WINED3D_SAMP_MAG_FILTER] != WINED3D_TEXF_ANISOTROPIC
+    if (!desc->max_anisotropy || (sampler_states[WINED3D_SAMP_MAG_FILTER] != WINED3D_TEXF_ANISOTROPIC
                 && sampler_states[WINED3D_SAMP_MIN_FILTER] != WINED3D_TEXF_ANISOTROPIC
                 && sampler_states[WINED3D_SAMP_MIP_FILTER] != WINED3D_TEXF_ANISOTROPIC)
             || (texture->flags & WINED3D_TEXTURE_COND_NP2))
@@ -4082,6 +4082,8 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
 
     bind_push_constant_buffer(device, WINED3D_PUSH_CONSTANTS_PS_FFP,
             WINED3D_SHADER_TYPE_PIXEL, WINED3D_FFP_CONSTANTS_EXTRA_REGISTER);
+    bind_push_constant_buffer(device, WINED3D_PUSH_CONSTANTS_VS_FFP,
+            WINED3D_SHADER_TYPE_VERTEX, WINED3D_FFP_CONSTANTS_EXTRA_REGISTER);
 
     assert(list_empty(&stateblock->changed.changed_lights));
     memset(&stateblock->changed, 0, sizeof(stateblock->changed));

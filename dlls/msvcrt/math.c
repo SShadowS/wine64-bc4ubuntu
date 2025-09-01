@@ -469,7 +469,7 @@ double CDECL MSVCRT_tanh( double x )
 }
 #endif
 
-#if (defined(__GNUC__) || defined(__clang__)) && defined(__i386__)
+#ifdef __i386__
 
 #define CREATE_FPU_FUNC1(name, call) \
     __ASM_GLOBAL_FUNC(name, \
@@ -583,7 +583,7 @@ __ASM_GLOBAL_FUNC(_ftol,
         __ASM_CFI(".cfi_same_value %ebp\n\t")
         "ret")
 
-#endif /* (defined(__GNUC__) || defined(__clang__)) && defined(__i386__) */
+#endif /* __i386__ */
 
 /*********************************************************************
  *		_fpclass (MSVCRT.@)
@@ -732,7 +732,6 @@ static void set_mxcsr( unsigned int val )
 static void _setfp_sse( unsigned int *cw, unsigned int cw_mask,
         unsigned int *sw, unsigned int sw_mask )
 {
-#if defined(__GNUC__) || defined(__clang__)
     unsigned int old_fpword, fpword = get_mxcsr();
     unsigned int flags;
 
@@ -816,18 +815,13 @@ static void _setfp_sse( unsigned int *cw, unsigned int cw_mask,
     }
 
     if (fpword != old_fpword) set_mxcsr( fpword );
-#else
-    FIXME("not implemented\n");
-    if (cw) *cw = 0;
-    if (sw) *sw = 0;
-#endif
 }
 #endif
 
 static void _setfp( unsigned int *cw, unsigned int cw_mask,
         unsigned int *sw, unsigned int sw_mask )
 {
-#if (defined(__GNUC__) || defined(__clang__)) && defined(__i386__)
+#ifdef __i386__
     unsigned long oldcw = 0, newcw = 0;
     unsigned long oldsw = 0, newsw = 0;
     unsigned int flags;
@@ -1546,7 +1540,7 @@ int CDECL _finite(double num)
  */
 void CDECL _fpreset(void)
 {
-#if (defined(__GNUC__) || defined(__clang__)) && defined(__i386__)
+#ifdef __i386__
     const unsigned int x86_cw = 0x27f;
     __asm__ __volatile__( "fninit; fldcw %0" : : "m" (x86_cw) );
     if (sse2_supported)
@@ -1622,23 +1616,6 @@ int CDECL _isnan(double num)
 #if _MSVCR_VER>=120
 
 /*********************************************************************
- *      rint (MSVCR120.@)
- */
-double CDECL MSVCRT_rint(double x)
-{
-    unsigned cw;
-    double y;
-
-    cw = _controlfp(0, 0);
-    if ((cw & _MCW_PC) != _PC_53)
-        _controlfp(_PC_53, _MCW_PC);
-    y = rint(x);
-    if ((cw & _MCW_PC) != _PC_53)
-        _controlfp(cw, _MCW_PC);
-    return y;
-}
-
-/*********************************************************************
  *		_nearbyint (MSVCR120.@)
  *
  * Based on musl: src/math/nearbyteint.c
@@ -1656,7 +1633,7 @@ double CDECL nearbyint(double x)
         cw |= _EM_INEXACT;
         _setfp(&cw, _EM_INEXACT, NULL, 0);
     }
-    x = MSVCRT_rint(x);
+    x = rint(x);
     if (update_cw || update_sw)
     {
         sw = 0;
@@ -2603,7 +2580,7 @@ __msvcrt_long CDECL lrint(double x)
 {
     double d;
 
-    d = MSVCRT_rint(x);
+    d = rint(x);
     if ((d < 0 && d != (double)(__msvcrt_long)d)
             || (d >= 0 && d != (double)(__msvcrt_ulong)d)) {
         *_errno() = EDOM;
@@ -2635,7 +2612,7 @@ __int64 CDECL llrint(double x)
 {
     double d;
 
-    d = MSVCRT_rint(x);
+    d = rint(x);
     if ((d < 0 && d != (double)(__int64)d)
             || (d >= 0 && d != (double)(unsigned __int64)d)) {
         *_errno() = EDOM;

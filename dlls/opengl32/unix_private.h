@@ -21,6 +21,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -31,6 +32,7 @@
 #include "ntgdi.h"
 
 #include "wine/opengl_driver.h"
+#include "unix_thunks.h"
 
 struct registry_entry
 {
@@ -51,6 +53,8 @@ static inline const struct opengl_funcs *get_dc_funcs( HDC hdc )
     return funcs;
 }
 
+#ifdef _WIN64
+
 static inline void *copy_wow64_ptr32s( UINT_PTR address, ULONG count )
 {
     ULONG *ptrs = (ULONG *)address;
@@ -66,5 +70,22 @@ static inline TEB *get_teb64( ULONG teb32 )
     TEB32 *teb32_ptr = ULongToPtr( teb32 );
     return (TEB *)((char *)teb32_ptr + teb32_ptr->WowTebOffset);
 }
+
+extern NTSTATUS return_wow64_string( const void *str, PTR32 *wow64_str );
+
+#endif
+
+extern pthread_mutex_t wgl_lock;
+
+extern NTSTATUS process_attach( void *args );
+extern NTSTATUS thread_attach( void *args );
+extern NTSTATUS process_detach( void *args );
+extern NTSTATUS get_pixel_formats( void *args );
+extern void set_context_attribute( TEB *teb, GLenum name, const void *value, size_t size );
+extern void set_current_fbo( TEB *teb, GLenum target, GLuint framebuffer );
+extern GLuint get_default_fbo( TEB *teb, GLenum target );
+extern void push_default_fbo( TEB *teb );
+extern void pop_default_fbo( TEB *teb );
+extern void resolve_default_fbo( TEB *teb, BOOL read );
 
 #endif /* __WINE_OPENGL32_UNIX_PRIVATE_H */

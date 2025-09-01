@@ -2345,7 +2345,6 @@ static HRESULT shader_set_function(struct wined3d_shader *shader, const struct w
         if (!(shader->frontend = shader_select_frontend(shader->source_type)))
         {
             FIXME("Unable to find frontend for shader.\n");
-            shader_cleanup(shader);
             return WINED3DERR_INVALIDCALL;
         }
 
@@ -2353,7 +2352,6 @@ static HRESULT shader_set_function(struct wined3d_shader *shader, const struct w
         if (!(fe_data = fe->shader_init(desc->byte_code, desc->byte_code_size, &shader->output_signature)))
         {
             WARN("Failed to initialise frontend data.\n");
-            shader_cleanup(shader);
             return WINED3DERR_INVALIDCALL;
         }
 
@@ -2366,10 +2364,7 @@ static HRESULT shader_set_function(struct wined3d_shader *shader, const struct w
         shader->byte_code_size = (ptr - desc->byte_code) * sizeof(*ptr);
 
         if (!(shader->byte_code = malloc(shader->byte_code_size)))
-        {
-            shader_cleanup(shader);
             return E_OUTOFMEMORY;
-        }
         memcpy(shader->byte_code, desc->byte_code, shader->byte_code_size);
 
         shader->function = shader->byte_code;
@@ -2380,24 +2375,17 @@ static HRESULT shader_set_function(struct wined3d_shader *shader, const struct w
         unsigned int max_version;
 
         if (!(shader->byte_code = malloc(desc->byte_code_size)))
-        {
-            shader_cleanup(shader);
             return E_OUTOFMEMORY;
-        }
         memcpy(shader->byte_code, desc->byte_code, desc->byte_code_size);
         shader->byte_code_size = desc->byte_code_size;
 
         max_version = shader_max_version_from_feature_level(shader->device->cs->c.state->feature_level);
         if (FAILED(hr = wined3d_shader_extract_from_dxbc(shader, max_version, &shader->source_type)))
-        {
-            shader_cleanup(shader);
             return hr;
-        }
 
         if (!(shader->frontend = shader_select_frontend(shader->source_type)))
         {
             FIXME("Unable to find frontend for shader.\n");
-            shader_cleanup(shader);
             return WINED3DERR_INVALIDCALL;
         }
     }
@@ -2558,8 +2546,12 @@ static void wined3d_shader_init_object(void *object)
         if (!ffp_hlsl_compile_vs(settings, &desc, device))
             return;
         free(settings);
-        shader_set_function(shader, &desc, WINED3D_SHADER_TYPE_VERTEX, NULL,
-                device->adapter->d3d_info.limits.vs_uniform_count);
+        if (FAILED(shader_set_function(shader, &desc, WINED3D_SHADER_TYPE_VERTEX, NULL,
+                device->adapter->d3d_info.limits.vs_uniform_count)))
+        {
+            shader_cleanup(shader);
+            return;
+        }
     }
 
     if (shader->is_ffp_ps)
@@ -2570,8 +2562,12 @@ static void wined3d_shader_init_object(void *object)
         if (!ffp_hlsl_compile_ps(settings, &desc))
             return;
         free(settings);
-        shader_set_function(shader, &desc, WINED3D_SHADER_TYPE_PIXEL, NULL,
-                device->adapter->d3d_info.limits.ps_uniform_count);
+        if (FAILED(shader_set_function(shader, &desc, WINED3D_SHADER_TYPE_PIXEL, NULL,
+                device->adapter->d3d_info.limits.ps_uniform_count)))
+        {
+            shader_cleanup(shader);
+            return;
+        }
     }
 
     device->shader_backend->shader_precompile(device->shader_priv, shader);
@@ -2867,7 +2863,6 @@ void find_gs_compile_args(const struct wined3d_state *state, const struct wined3
 void find_ps_compile_args(const struct wined3d_state *state, const struct wined3d_shader *shader,
         BOOL position_transformed, struct ps_compile_args *args, const struct wined3d_context *context)
 {
-    const struct wined3d_shader *vs = state->shader[WINED3D_SHADER_TYPE_VERTEX];
     const struct wined3d_d3d_info *d3d_info = context->d3d_info;
     struct wined3d_shader_resource_view *view;
     struct wined3d_texture *texture;
@@ -2889,55 +2884,8 @@ void find_ps_compile_args(const struct wined3d_state *state, const struct wined3
     {
         for (i = 0; i < shader->limits->sampler; ++i)
         {
-            uint32_t flags = state->extra_ps_args.texture_transform_flags[i];
-
-            if (flags & WINED3D_TTFF_PROJECTED)
-            {
-                uint32_t tex_transform = flags & ~WINED3D_TTFF_PROJECTED;
-
-                if (!vs || vs->is_ffp_vs)
-                {
-                    enum wined3d_shader_resource_type resource_type = shader->reg_maps.resource_info[i].type;
-                    unsigned int j;
-                    unsigned int index = state->extra_ps_args.texcoord_index[i];
-                    uint32_t max_valid = WINED3D_TTFF_COUNT4;
-
-                    for (j = 0; j < state->vertex_declaration->element_count; ++j)
-                    {
-                        struct wined3d_vertex_declaration_element *element =
-                                &state->vertex_declaration->elements[j];
-
-                        if (element->usage == WINED3D_DECL_USAGE_TEXCOORD
-                                && element->usage_idx == index)
-                        {
-                            max_valid = element->format->component_count;
-                            break;
-                        }
-                    }
-                    if (!tex_transform || tex_transform > max_valid)
-                    {
-                        WARN("Fixing up projected texture transform flags from %#x to %#x.\n",
-                                tex_transform, max_valid);
-                        tex_transform = max_valid;
-                    }
-                    if ((resource_type == WINED3D_SHADER_RESOURCE_TEXTURE_1D && tex_transform > WINED3D_TTFF_COUNT1)
-                            || (resource_type == WINED3D_SHADER_RESOURCE_TEXTURE_2D
-                            && tex_transform > WINED3D_TTFF_COUNT2)
-                            || (resource_type == WINED3D_SHADER_RESOURCE_TEXTURE_3D
-                            && tex_transform > WINED3D_TTFF_COUNT3))
-                        tex_transform |= WINED3D_PSARGS_PROJECTED;
-                    else
-                    {
-                        WARN("Application requested projected texture with unsuitable texture coordinates.\n");
-                        WARN("(texture unit %u, transform flags %#x, sampler type %u).\n",
-                                i, tex_transform, resource_type);
-                    }
-                }
-                else
-                    tex_transform = WINED3D_TTFF_COUNT4 | WINED3D_PSARGS_PROJECTED;
-
-                args->tex_transform |= tex_transform << i * WINED3D_PSARGS_TEXTRANSFORM_SHIFT;
-            }
+            if (state->extra_ps_args.texture_transform_flags[i] & WINED3D_TTFF_PROJECTED)
+                args->projected |= (1u << i);
         }
     }
     if (shader->reg_maps.shader_version.major == 1

@@ -1360,7 +1360,7 @@ static void window_set_config( struct x11drv_win_data *data, RECT rect, BOOL abo
     data->desired_state.rect = *new_rect;
     data->desired_state.above = above;
     if (!data->whole_window) return; /* no window, nothing to update */
-    if (EqualRect( old_rect, new_rect ) && (old_above || !above)) return; /* rects are the same, no need to be raised, nothing to update */
+    if (EqualRect( old_rect, new_rect ) && (old_above || !above || data->managed)) return; /* rects are the same, no need to be raised, nothing to update */
     if (window_needs_config_change_delay( data ))
     {
         TRACE( "window %p/%lx is updating _NET_WM_STATE/_MOTIF_WM_HINTS, delaying request\n", data->hwnd, data->whole_window );
@@ -1408,9 +1408,6 @@ static void window_set_config( struct x11drv_win_data *data, RECT rect, BOOL abo
     TRACE( "window %p/%lx, requesting config %s mask %#x above %u, serial %lu\n", data->hwnd, data->whole_window,
            wine_dbgstr_rect(new_rect), mask, above, data->configure_serial );
     XReconfigureWMWindow( data->display, data->whole_window, data->vis.screen, mask, &changes );
-
-    /* don't expect a ConfigureNotify while window is unmapped */
-    if (data->pending_state.wm_state == WithdrawnState) data->configure_serial = 0;
 }
 
 /***********************************************************************
@@ -1682,6 +1679,7 @@ static UINT window_update_client_config( struct x11drv_win_data *data )
     RECT rect, old_rect = data->rects.window, new_rect;
 
     if (!data->managed) return 0; /* unmanaged windows are managed by the Win32 side */
+    if (is_virtual_desktop()) return 0; /* ignore window manager config changes in virtual desktop mode */
     if (data->desired_state.wm_state != NormalState) return 0; /* ignore config changes on invisible/minimized windows */
 
     if (data->wm_state_serial) return 0; /* another WM_STATE update is pending, wait for it to complete */
@@ -2280,7 +2278,6 @@ void destroy_client_window( HWND hwnd, Window client_window )
  */
 Window create_client_window( HWND hwnd, const XVisualInfo *visual, Colormap colormap )
 {
-    Window dummy_parent = get_dummy_parent();
     struct x11drv_win_data *data = get_win_data( hwnd );
     XSetWindowAttributes attr;
     Window ret;
@@ -2314,7 +2311,7 @@ Window create_client_window( HWND hwnd, const XVisualInfo *visual, Colormap colo
 
     XSync( gdi_display, False ); /* make sure whole_window is known from gdi_display */
     ret = data->client_window = XCreateWindow( gdi_display,
-                                               data->whole_window ? data->whole_window : dummy_parent,
+                                               data->whole_window ? data->whole_window : get_dummy_parent(),
                                                x, y, cx, cy, 0, default_visual.depth, InputOutput,
                                                visual->visual, CWBitGravity | CWWinGravity |
                                                CWBackingStore | CWColormap | CWBorderPixel, &attr );
@@ -2553,7 +2550,6 @@ void X11DRV_DestroyWindow( HWND hwnd )
     XDeleteContext( gdi_display, (XID)hwnd, win_data_context );
     release_win_data( data );
     free( data );
-    destroy_gl_drawable( hwnd );
 }
 
 
@@ -2762,11 +2758,6 @@ static struct x11drv_win_data *X11DRV_create_win_data( HWND hwnd, const struct w
     if (parent != NtUserGetDesktopWindow() && !NtUserGetAncestor( parent, GA_PARENT )) return NULL;
 
     if (NtUserGetWindowThread( hwnd, NULL ) != GetCurrentThreadId()) return NULL;
-
-    /* Recreate the parent gl_drawable now that we know there are child windows
-     * that will need clipping support.
-     */
-    sync_gl_drawable( parent, TRUE );
 
     display = thread_init_display();
     init_clip_window();  /* make sure the clip window is initialized in this thread */
@@ -3082,12 +3073,6 @@ void X11DRV_SetParent( HWND hwnd, HWND parent, HWND old_parent )
     }
 done:
     release_win_data( data );
-    set_gl_drawable_parent( hwnd, parent );
-
-    /* Recreate the parent gl_drawable now that we know there are child windows
-     * that will need clipping support.
-     */
-    sync_gl_drawable( parent, TRUE );
 
     fetch_icon_data( hwnd, 0, 0 );
 }
@@ -3174,8 +3159,6 @@ void X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint, UIN
     UINT new_style = NtUserGetWindowLongW( hwnd, GWL_STYLE ), old_style;
     struct window_rects old_rects;
     BOOL was_fullscreen, activate = !(swp_flags & SWP_NOACTIVATE);
-
-    sync_gl_drawable( hwnd, FALSE );
 
     if (!(data = get_win_data( hwnd ))) return;
     if (is_window_managed( hwnd, swp_flags, fullscreen )) window_set_managed( data, TRUE );

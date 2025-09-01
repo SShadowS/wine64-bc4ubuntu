@@ -164,7 +164,7 @@ struct file_load_info
 static void key_dump( struct object *obj, int verbose );
 static unsigned int key_map_access( struct object *obj, unsigned int access );
 static struct security_descriptor *key_get_sd( struct object *obj );
-static WCHAR *key_get_full_name( struct object *obj, data_size_t *len );
+static WCHAR *key_get_full_name( struct object *obj, data_size_t max, data_size_t *len );
 static struct object *key_lookup_name( struct object *obj, struct unicode_str *name,
                                        unsigned int attr, struct object *root );
 static int key_link_name( struct object *obj, struct object_name *name, struct object *parent );
@@ -183,6 +183,7 @@ static const struct object_ops key_ops =
     NULL,                    /* satisfied */
     no_signal,               /* signal */
     no_get_fd,               /* get_fd */
+    default_get_sync,        /* get_sync */
     key_map_access,          /* map_access */
     key_get_sd,              /* get_sd */
     default_set_sd,          /* set_sd */
@@ -461,7 +462,7 @@ static struct security_descriptor *key_get_sd( struct object *obj )
     return key_default_sd;
 }
 
-static WCHAR *key_get_full_name( struct object *obj, data_size_t *ret_len )
+static WCHAR *key_get_full_name( struct object *obj, data_size_t max, data_size_t *ret_len )
 {
     struct key *key = (struct key *) obj;
 
@@ -470,7 +471,7 @@ static WCHAR *key_get_full_name( struct object *obj, data_size_t *ret_len )
         set_error( STATUS_KEY_DELETED );
         return NULL;
     }
-    return default_get_full_name( obj, ret_len );
+    return default_get_full_name( obj, max, ret_len );
 }
 
 static struct object *key_lookup_name( struct object *obj, struct unicode_str *name,
@@ -932,7 +933,7 @@ static void enum_key( struct key *key, int index, int info_class, struct enum_ke
     switch(info_class)
     {
     case KeyNameInformation:
-        if (!(fullname = key->obj.ops->get_full_name( &key->obj, &namelen ))) return;
+        if (!(fullname = key->obj.ops->get_full_name( &key->obj, ~0u, &namelen ))) return;
         /* fall through */
     case KeyBasicInformation:
         classlen = 0; /* only return the name */
@@ -2159,12 +2160,6 @@ void flush_registry(void)
     if (fchdir( server_dir_fd ) == -1) fatal_error( "chdir to server dir: %s\n", strerror( errno ));
 }
 
-/* determine if the thread is wow64 (32-bit client running on 64-bit prefix) */
-static int is_wow64_thread( struct thread *thread )
-{
-    return (is_machine_64bit( native_machine ) && !is_machine_64bit( thread->process->machine ));
-}
-
 
 /* create a registry key */
 DECL_HANDLER(create_key)
@@ -2178,7 +2173,7 @@ DECL_HANDLER(create_key)
 
     if (!objattr) return;
 
-    if (!is_wow64_thread( current )) access = (access & ~KEY_WOW64_32KEY) | KEY_WOW64_64KEY;
+    if (!is_wow64_process( current->process )) access = (access & ~KEY_WOW64_32KEY) | KEY_WOW64_64KEY;
 
     if (objattr->rootdir)
     {
@@ -2209,7 +2204,7 @@ DECL_HANDLER(open_key)
     unsigned int access = req->access;
     struct unicode_str name = get_req_unicode_str();
 
-    if (!is_wow64_thread( current )) access = (access & ~KEY_WOW64_32KEY) | KEY_WOW64_64KEY;
+    if (!is_wow64_process( current->process )) access = (access & ~KEY_WOW64_32KEY) | KEY_WOW64_64KEY;
 
     if (req->parent && !(parent = get_hkey_obj( req->parent, 0 ))) return;
 

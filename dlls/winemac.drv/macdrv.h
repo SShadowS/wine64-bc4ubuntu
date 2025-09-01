@@ -39,7 +39,6 @@
 #include "unixlib.h"
 
 
-extern BOOL skip_single_buffer_flushes;
 extern BOOL allow_vsync;
 extern BOOL allow_set_gamma;
 extern BOOL allow_software_rendering;
@@ -179,8 +178,7 @@ struct macdrv_win_data
 {
     HWND                hwnd;                   /* hwnd that this private data belongs to */
     macdrv_window       cocoa_window;
-    macdrv_view         cocoa_view;
-    macdrv_view         client_cocoa_view;
+    macdrv_view         client_view;
     struct window_rects rects;                  /* window rects in monitor DPI, relative to parent client area */
     int                 pixel_format;           /* pixel format for GL */
     HANDLE              drag_event;             /* event to signal that Cocoa-driven window dragging has ended */
@@ -191,6 +189,21 @@ struct macdrv_win_data
     unsigned int        per_pixel_alpha : 1;    /* is window using per-pixel alpha? */
     unsigned int        minimized : 1;          /* is window minimized? */
 };
+
+struct macdrv_client_surface
+{
+    struct client_surface client;
+    macdrv_view           cocoa_view;
+    macdrv_metal_device   metal_device;
+    macdrv_metal_view     metal_view;
+};
+
+static inline struct macdrv_client_surface *impl_from_client_surface(struct client_surface *client)
+{
+    return CONTAINING_RECORD(client, struct macdrv_client_surface, client);
+}
+
+extern struct macdrv_client_surface *macdrv_client_surface_create(HWND hwnd);
 
 extern struct macdrv_win_data *get_win_data(HWND hwnd);
 extern void release_win_data(struct macdrv_win_data *data);
@@ -242,7 +255,6 @@ extern void macdrv_lost_pasteboard_ownership(HWND hwnd);
 
 extern UINT macdrv_OpenGLInit(UINT version, const struct opengl_funcs *opengl_funcs, const struct opengl_driver_funcs **driver_funcs);
 extern UINT macdrv_VulkanInit(UINT version, void *vulkan_handle, const struct vulkan_driver_funcs **driver_funcs);
-extern void sync_gl_view(struct macdrv_win_data* data, const struct window_rects *old_rects);
 
 extern CGImageRef create_cgimage_from_icon_bitmaps(HDC hdc, HANDLE icon, HBITMAP hbmColor,
                                                    unsigned char *color_bits, int color_size, HBITMAP hbmMask,

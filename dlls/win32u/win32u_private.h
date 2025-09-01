@@ -90,7 +90,6 @@ extern BOOL grab_pointer;
 extern BOOL grab_fullscreen;
 extern HWND get_active_window(void);
 extern HWND get_capture(void);
-extern BOOL get_cursor_pos( POINT *pt );
 extern HWND get_focus(void);
 extern DWORD get_input_state(void);
 extern DWORD get_last_input_time(void);
@@ -190,6 +189,13 @@ extern void user_lock(void);
 extern void user_unlock(void);
 extern void user_check_not_lock(void);
 
+/* opengl.c */
+
+struct opengl_drawable;
+extern void set_dc_opengl_drawable( HDC hdc, struct opengl_drawable *new_drawable );
+
+/* d3dkmtc. */
+
 struct vulkan_gpu
 {
     struct list entry;
@@ -218,6 +224,10 @@ struct object_lock
 #else
 #define __SHARED_READ_FENCE __atomic_thread_fence( __ATOMIC_ACQUIRE )
 #endif
+
+extern const shared_object_t *find_shared_session_object( object_id_t id, mem_size_t offset );
+extern void shared_object_acquire_seqlock( const shared_object_t *object, UINT64 *seq );
+extern BOOL shared_object_release_seqlock( const shared_object_t *object, UINT64 seq );
 
 /* Get shared session object's data pointer, must be called in a loop while STATUS_PENDING
  * is returned, lock must be initialized with OBJECT_LOCK_INIT.
@@ -314,7 +324,9 @@ extern void reg_delete_value( HKEY hkey, const WCHAR *name );
 
 extern HKEY hkcu_key;
 
+/* driver.c */
 extern const struct user_driver_funcs *user_driver;
+extern struct client_surface *nulldrv_client_surface_create( HWND hwnd );
 
 extern ULONG_PTR zero_bits;
 

@@ -81,15 +81,16 @@ extern INT_PTR WINPROC_CallDlgProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 extern void winproc_init(void);
 extern LRESULT dispatch_win_proc_params( struct win_proc_params *params );
 
-extern ATOM get_class_info( HINSTANCE instance, const WCHAR *name, WNDCLASSEXW *info,
-                            UNICODE_STRING *name_str, BOOL ansi );
+extern void init_class_name( UNICODE_STRING *str, const WCHAR *name );
+extern void init_class_name_ansi( UNICODE_STRING *str, const char *name );
+extern void get_class_version( UNICODE_STRING *name, UNICODE_STRING *version, BOOL load );
 
 /* kernel callbacks */
 
 NTSTATUS WINAPI User32CallEnumDisplayMonitor( void *args, ULONG size );
 NTSTATUS WINAPI User32CallSendAsyncCallback( void *args, ULONG size );
 NTSTATUS WINAPI User32CallWinEventHook( void *args, ULONG size );
-NTSTATUS WINAPI User32CallWindowProc( void *args, ULONG size );
+NTSTATUS WINAPI User32CallWinProc( void *args, ULONG size );
 NTSTATUS WINAPI User32CallWindowsHook( void *args, ULONG size );
 NTSTATUS WINAPI User32InitBuiltinClasses( void *args, ULONG size );
 

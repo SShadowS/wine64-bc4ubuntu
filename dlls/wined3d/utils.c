@@ -4251,6 +4251,7 @@ static void init_vulkan_format_info(struct wined3d_adapter *adapter, struct wine
         enum wined3d_format_id id;
         VkFormat vk_format;
         const char *fixup;
+        bool legacy_fixup;
     }
     vulkan_formats[] =
     {
@@ -4272,7 +4273,7 @@ static void init_vulkan_format_info(struct wined3d_adapter *adapter, struct wine
         {WINED3DFMT_R11G11B10_FLOAT,            VK_FORMAT_B10G11R11_UFLOAT_PACK32, },
         {WINED3DFMT_R8G8_UNORM,                 VK_FORMAT_R8G8_UNORM,              },
         {WINED3DFMT_R8G8_UINT,                  VK_FORMAT_R8G8_UINT,               },
-        {WINED3DFMT_R8G8_SNORM,                 VK_FORMAT_R8G8_SNORM,              },
+        {WINED3DFMT_R8G8_SNORM,                 VK_FORMAT_R8G8_SNORM,              "XY11", true},
         {WINED3DFMT_R8G8_SINT,                  VK_FORMAT_R8G8_SINT,               },
         {WINED3DFMT_R8G8B8A8_UNORM,             VK_FORMAT_R8G8B8A8_UNORM,          },
         {WINED3DFMT_R8G8B8A8_UNORM_SRGB,        VK_FORMAT_R8G8B8A8_SRGB,           },
@@ -4282,7 +4283,7 @@ static void init_vulkan_format_info(struct wined3d_adapter *adapter, struct wine
         {WINED3DFMT_R16G16_FLOAT,               VK_FORMAT_R16G16_SFLOAT,           },
         {WINED3DFMT_R16G16_UNORM,               VK_FORMAT_R16G16_UNORM,            },
         {WINED3DFMT_R16G16_UINT,                VK_FORMAT_R16G16_UINT,             },
-        {WINED3DFMT_R16G16_SNORM,               VK_FORMAT_R16G16_SNORM,            },
+        {WINED3DFMT_R16G16_SNORM,               VK_FORMAT_R16G16_SNORM,            "XY11", true},
         {WINED3DFMT_R16G16_SINT,                VK_FORMAT_R16G16_SINT,             },
         {WINED3DFMT_D32_FLOAT,                  VK_FORMAT_D32_SFLOAT,              },
         {WINED3DFMT_R32_FLOAT,                  VK_FORMAT_R32_SFLOAT,              },
@@ -4332,13 +4333,14 @@ static void init_vulkan_format_info(struct wined3d_adapter *adapter, struct wine
         {WINED3DFMT_D24_UNORM_S8_UINT,          VK_FORMAT_D24_UNORM_S8_UINT,       },
         {WINED3DFMT_NV12_PLANAR,                VK_FORMAT_G8_B8R8_2PLANE_420_UNORM,},
     };
+    const struct wined3d_d3d_info *d3d_info = &adapter->d3d_info;
     VkFormat vk_format = VK_FORMAT_UNDEFINED;
     VkImageFormatProperties image_properties;
     VkFormatFeatureFlags texture_flags;
     VkFormatProperties properties;
     VkImageUsageFlags vk_usage;
+    const char *fixup = NULL;
     unsigned int caps;
-    const char *fixup;
     unsigned int i;
     uint32_t mask;
     VkResult vr;
@@ -4348,7 +4350,9 @@ static void init_vulkan_format_info(struct wined3d_adapter *adapter, struct wine
         if (vulkan_formats[i].id == format->f.id)
         {
             vk_format = vulkan_formats[i].vk_format;
-            fixup = vulkan_formats[i].fixup;
+            if (!vulkan_formats[i].legacy_fixup
+                    || (d3d_info->wined3d_creation_flags & WINED3D_LEGACY_UNBOUND_RESOURCE_COLOR))
+                fixup = vulkan_formats[i].fixup;
             break;
         }
     }
@@ -5675,20 +5679,28 @@ void get_modelview_matrix(const struct wined3d_stateblock_state *state, unsigned
 }
 
 /* Setup this textures matrix according to the texture flags. */
-static void compute_texture_matrix(const struct wined3d_matrix *matrix, uint32_t flags, BOOL calculated_coords,
-        enum wined3d_format_id format_id, struct wined3d_matrix *out_matrix)
+static void compute_texture_matrix(const struct wined3d_matrix *matrix, uint32_t flags,
+        unsigned int attrib_count, struct wined3d_matrix *out_matrix)
 {
+    unsigned int count = (flags & ~WINED3D_TTFF_PROJECTED);
     struct wined3d_matrix mat;
 
-    if (flags == WINED3D_TTFF_DISABLE || flags == WINED3D_TTFF_COUNT1)
+    if (count < 2 || count > 4)
     {
         get_identity_matrix(out_matrix);
-        return;
-    }
+        if (attrib_count < 4)
+            out_matrix->_44 = 0.0f;
 
-    if (flags == (WINED3D_TTFF_COUNT1 | WINED3D_TTFF_PROJECTED))
-    {
-        ERR("Invalid texture transform flags: WINED3D_TTFF_COUNT1 | WINED3D_TTFF_PROJECTED.\n");
+        if (flags & WINED3D_TTFF_PROJECTED)
+        {
+            /* As below: effectively copy the component to divide by to W. */
+            if (attrib_count == 1)
+                out_matrix->_14 = 1.0f;
+            else if (attrib_count == 2)
+                out_matrix->_24 = 1.0f;
+            else if (attrib_count == 3)
+                out_matrix->_34 = 1.0f;
+        }
         return;
     }
 
@@ -5710,46 +5722,74 @@ static void compute_texture_matrix(const struct wined3d_matrix *matrix, uint32_t
      * actually has a value of 1. The coefficients for other columns don't need
      * to be modified, since the corresponding texcoord components are zero. */
 
-    if (!(flags & WINED3D_TTFF_PROJECTED) && !calculated_coords)
+    if (attrib_count == 1)
     {
-        switch (format_id)
+        mat._41 = mat._21;
+        mat._42 = mat._22;
+        mat._43 = mat._23;
+        mat._44 = mat._24;
+    }
+    else if (attrib_count == 2)
+    {
+        mat._41 = mat._31;
+        mat._42 = mat._32;
+        mat._43 = mat._33;
+        mat._44 = mat._34;
+    }
+
+    /* When using the FFP, components greater than the count are set to zero. */
+
+    if (count < 4)
+    {
+        mat._14 = 0.0f;
+        mat._24 = 0.0f;
+        mat._34 = 0.0f;
+        mat._44 = 0.0f;
+    }
+
+    if (count < 3)
+    {
+        mat._13 = 0.0f;
+        mat._23 = 0.0f;
+        mat._33 = 0.0f;
+        mat._43 = 0.0f;
+    }
+
+    /* Projection is handled in two steps. In the vertex pipeline, the
+     * component to be divided by is copied to W. In the fragment pipeline,
+     * sampling the projected texture always divides by W. */
+
+    if (flags & WINED3D_TTFF_PROJECTED)
+    {
+        if (count == 2)
         {
-            case WINED3DFMT_R32_FLOAT:
-                mat._41 = mat._21;
-                mat._42 = mat._22;
-                mat._43 = mat._23;
-                mat._44 = mat._24;
-                break;
-
-            case WINED3DFMT_R32G32_FLOAT:
-                mat._41 = mat._31;
-                mat._42 = mat._32;
-                mat._43 = mat._33;
-                mat._44 = mat._34;
-                break;
-
-            case WINED3DFMT_R32G32B32_FLOAT:
-            case WINED3DFMT_R32G32B32A32_FLOAT:
-            case WINED3DFMT_UNKNOWN:
-                break;
-            default:
-                FIXME("Unexpected fixed function texture coord input\n");
+            mat._14 = mat._12;
+            mat._24 = mat._22;
+            mat._34 = mat._32;
+            mat._44 = mat._42;
+        }
+        else if (count == 3)
+        {
+            mat._14 = mat._13;
+            mat._24 = mat._23;
+            mat._34 = mat._33;
+            mat._44 = mat._43;
         }
     }
 
     *out_matrix = mat;
 }
 
-static enum wined3d_format_id get_texcoord_format(const struct wined3d_vertex_declaration *decl, unsigned int index)
+static unsigned int get_texcoord_attrib_count(const struct wined3d_vertex_declaration *decl, unsigned int index)
 {
     for (unsigned int i = 0; i < decl->element_count; ++i)
     {
         if (decl->elements[i].usage == WINED3D_DECL_USAGE_TEXCOORD
                 && decl->elements[i].usage_idx == index)
-            return decl->elements[i].format->id;
+            return decl->elements[i].format->component_count;
     }
 
-    return WINED3DFMT_UNKNOWN;
+    return 0;
 }
 
 void get_texture_matrix(const struct wined3d_stateblock_state *state,
@@ -5762,7 +5802,7 @@ void get_texture_matrix(const struct wined3d_stateblock_state *state,
 
     compute_texture_matrix(&state->transforms[WINED3D_TS_TEXTURE0 + tex],
             state->texture_states[tex][WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS],
-            generated, get_texcoord_format(state->vertex_declaration, coord_idx), mat);
+            generated ? 3 : get_texcoord_attrib_count(state->vertex_declaration, coord_idx), mat);
 }
 
 static BOOL wined3d_get_primary_display(WCHAR *display)
@@ -6200,7 +6240,6 @@ void wined3d_ffp_get_fs_settings(const struct wined3d_state *state,
         /* D3DTOP_LERP                      */  ARG1 | ARG2 | ARG0
     };
     unsigned int i;
-    DWORD ttff;
     DWORD cop, aop, carg0, carg1, carg2, aarg0, aarg1, aarg2;
     struct wined3d_texture *texture;
 
@@ -6218,7 +6257,7 @@ void wined3d_ffp_get_fs_settings(const struct wined3d_state *state,
             settings->op[i].color_fixup = COLOR_FIXUP_IDENTITY;
             settings->op[i].tmp_dst = 0;
             settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_1D;
-            settings->op[i].projected = WINED3D_PROJECTION_NONE;
+            settings->op[i].projected = 0;
             i++;
             break;
         }
@@ -6310,21 +6349,9 @@ void wined3d_ffp_get_fs_settings(const struct wined3d_state *state,
                aop = WINED3D_TOP_SELECT_ARG1;
         }
 
-        if (carg1 == WINED3DTA_TEXTURE || carg2 == WINED3DTA_TEXTURE || carg0 == WINED3DTA_TEXTURE
+        settings->op[i].projected = (carg1 == WINED3DTA_TEXTURE || carg2 == WINED3DTA_TEXTURE || carg0 == WINED3DTA_TEXTURE
                 || aarg1 == WINED3DTA_TEXTURE || aarg2 == WINED3DTA_TEXTURE || aarg0 == WINED3DTA_TEXTURE)
-        {
-            ttff = state->texture_states[i][WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS];
-            if (ttff == (WINED3D_TTFF_PROJECTED | WINED3D_TTFF_COUNT3))
-                settings->op[i].projected = WINED3D_PROJECTION_COUNT3;
-            else if (ttff & WINED3D_TTFF_PROJECTED)
-                settings->op[i].projected = WINED3D_PROJECTION_COUNT4;
-            else
-                settings->op[i].projected = WINED3D_PROJECTION_NONE;
-        }
-        else
-        {
-            settings->op[i].projected = WINED3D_PROJECTION_NONE;
-        }
+                && (state->texture_states[i][WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS] & WINED3D_TTFF_PROJECTED);
 
         settings->op[i].cop = cop;
         settings->op[i].aop = aop;

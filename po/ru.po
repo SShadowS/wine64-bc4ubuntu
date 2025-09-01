@@ -281,7 +281,7 @@ msgstr ""
 msgid "Not specified"
 msgstr "Отсутствует"
 
-#: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:38
+#: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:35
 #: dlls/shell32/shell32.rc:141 dlls/shell32/shell32.rc:243
 #: programs/regedit/regedit.rc:150 programs/winefile/winefile.rc:106
 msgid "Name"
@@ -393,6 +393,21 @@ msgstr "Обработчик по умолчанию avi-файлов в Wine"
 msgid "uncompressed"
 msgstr "без сжатия"
 
+#: dlls/bluetoothapis/bluetoothapis.rc:31
+#, fuzzy
+#| msgid "&Confirm password:"
+msgid "Confirm pairing"
+msgstr "П&одтверждение:"
+
+#: dlls/bluetoothapis/bluetoothapis.rc:32
+msgid "Pair with '%1!s!' using the following PIN/passkey value: %2!lu!?"
+msgstr ""
+
+#: dlls/bluetoothapis/bluetoothapis.rc:33
+msgid ""
+"Pair with unnamed device %1!s! using the following PIN/passkey value: %2!lu!?"
+msgstr ""
+
 #: dlls/browseui/browseui.rc:28
 msgid "Canceling..."
 msgstr "Отмена..."
@@ -440,7 +455,7 @@ msgstr "Мастер"
 msgid "< &Back"
 msgstr "< &Назад"
 
-#: dlls/comctl32/comctl32.rc:85 dlls/oledb32/version.rc:61
+#: dlls/comctl32/comctl32.rc:85 dlls/oledb32/version.rc:58
 msgid "&Next >"
 msgstr "&Далее >"
 
@@ -1399,7 +1414,7 @@ msgid "&User name:"
 msgstr "По&льзователь:"
 
 #: dlls/credui/credui.rc:48 dlls/cryptui/cryptui.rc:402
-#: dlls/oledb32/version.rc:81
+#: dlls/oledb32/version.rc:78
 msgid "&Password:"
 msgstr "&Пароль:"
 
@@ -2736,7 +2751,7 @@ msgstr "Сертификат годен."
 msgid "Field"
 msgstr "Поле"
 
-#: dlls/cryptui/cryptui.rc:48 dlls/oledb32/version.rc:39
+#: dlls/cryptui/cryptui.rc:48 dlls/oledb32/version.rc:36
 msgid "Value"
 msgstr "Значение"
 
@@ -3343,7 +3358,7 @@ msgstr "Символьный"
 msgid "OEM/DOS"
 msgstr "OEM/DOS"
 
-#: dlls/gdi32/gdi32.rc:45 dlls/oledb32/version.rc:100
+#: dlls/gdi32/gdi32.rc:45 dlls/oledb32/version.rc:97
 #: dlls/wldap32/wldap32.rc:112
 msgid "Other"
 msgstr "Другой"
@@ -3411,7 +3426,7 @@ msgid "&Stop"
 msgstr "Останов&ить"
 
 #: dlls/hhctrl.ocx/hhctrl.rc:66 dlls/hhctrl.ocx/hhctrl.rc:83
-#: dlls/oledb32/version.rc:73 dlls/shdoclc/shdoclc.rc:59
+#: dlls/oledb32/version.rc:70 dlls/shdoclc/shdoclc.rc:59
 msgid "&Refresh"
 msgstr "О&бновить"
 
@@ -3863,15 +3878,15 @@ msgstr "Отключить hidraw"
 msgid "DInput"
 msgstr "DInput"
 
-#: dlls/joy.cpl/joy.rc:62
+#: dlls/joy.cpl/joy.rc:62 dlls/joy.cpl/joy.rc:111
 msgid "Axes"
 msgstr "Оси"
 
-#: dlls/joy.cpl/joy.rc:63
+#: dlls/joy.cpl/joy.rc:63 dlls/joy.cpl/joy.rc:112
 msgid "POVs"
 msgstr ""
 
-#: dlls/joy.cpl/joy.rc:64
+#: dlls/joy.cpl/joy.rc:64 dlls/joy.cpl/joy.rc:113
 msgid "Buttons"
 msgstr "Кнопки"
 
@@ -3880,8 +3895,12 @@ msgid "Force Feedback Effect"
 msgstr "Эффект отдачи"
 
 #: dlls/joy.cpl/joy.rc:67
+#, fuzzy
+#| msgid ""
+#| "Press any button in the controller to activate the chosen effect. The "
+#| "effect direction can be changed with the controller axis."
 msgid ""
-"Press any button in the controller to activate the chosen effect. The effect "
+"Hold any button in the controller to play the chosen effect. The effect "
 "direction can be changed with the controller axis."
 msgstr ""
 "Нажмите любую кнопку на контроллере, чтобы активировать выбранный эффект. "
@@ -3940,8 +3959,12 @@ msgid ""
 msgstr ""
 
 #: dlls/joy.cpl/joy.rc:98 dlls/joy.cpl/joy.rc:99 dlls/joy.cpl/joy.rc:100
-#: dlls/joy.cpl/joy.rc:101
+#: dlls/joy.cpl/joy.rc:101 dlls/joy.cpl/joy.rc:115
 msgid "Rumble"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:106
+msgid "Windows.Gaming.Input"
 msgstr ""
 
 #: dlls/joy.cpl/joy.rc:31
@@ -4058,19 +4081,19 @@ msgstr "Условная компиляция отключена"
 msgid "Expected '@'"
 msgstr "Ожидается «@»"
 
-#: dlls/jscript/jscript.rc:90
+#: dlls/jscript/jscript.rc:92
 msgid "Microsoft JScript compilation error"
 msgstr "Ошибка компиляции Microsoft JScript"
 
-#: dlls/jscript/jscript.rc:91
+#: dlls/jscript/jscript.rc:93
 msgid "Microsoft JScript runtime error"
 msgstr "Ошибка выполнения Microsoft JScript"
 
-#: dlls/jscript/jscript.rc:92 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:94 dlls/vbscript/vbscript.rc:64
 msgid "Unknown runtime error"
 msgstr "Неизвестная ошибка времени выполнения"
 
-#: dlls/jscript/jscript.rc:56
+#: dlls/jscript/jscript.rc:57
 msgid "Number expected"
 msgstr "Ожидается число"
 
@@ -4079,158 +4102,170 @@ msgid "Function expected"
 msgstr "Ожидается функция"
 
 #: dlls/jscript/jscript.rc:55
+#, fuzzy
+#| msgid "'[object]' is not a date object"
+msgid "'[object]' is not a string object"
+msgstr "«[object]» не объект типа «date»"
+
+#: dlls/jscript/jscript.rc:56
 msgid "'[object]' is not a date object"
 msgstr "«[object]» не объект типа «date»"
 
-#: dlls/jscript/jscript.rc:57
+#: dlls/jscript/jscript.rc:58
 msgid "Object expected"
 msgstr "Ожидается объект"
 
-#: dlls/jscript/jscript.rc:58
+#: dlls/jscript/jscript.rc:59
 msgid "Illegal assignment"
 msgstr "Неверное присваивание"
 
-#: dlls/jscript/jscript.rc:59
+#: dlls/jscript/jscript.rc:60
 msgid "'|' is undefined"
 msgstr "«|» не определён"
 
-#: dlls/jscript/jscript.rc:60
+#: dlls/jscript/jscript.rc:61
 msgid "Boolean object expected"
 msgstr "Ожидается объект типа «bool»"
 
-#: dlls/jscript/jscript.rc:61
+#: dlls/jscript/jscript.rc:62
 msgid "Cannot delete '|'"
 msgstr "Невозможно удалить «|»"
 
-#: dlls/jscript/jscript.rc:62
+#: dlls/jscript/jscript.rc:63
 msgid "VBArray object expected"
 msgstr "Ожидается объект типа «VBArray»"
 
-#: dlls/jscript/jscript.rc:63
+#: dlls/jscript/jscript.rc:64
 msgid "JScript object expected"
 msgstr "Ожидается объект типа «JScript»"
 
-#: dlls/jscript/jscript.rc:64
+#: dlls/jscript/jscript.rc:65
 #, fuzzy
 #| msgid "Array object expected"
 msgid "Enumerator object expected"
 msgstr "Ожидается объект типа «Array»"
 
-#: dlls/jscript/jscript.rc:65
+#: dlls/jscript/jscript.rc:66
 #, fuzzy
 #| msgid "Boolean object expected"
 msgid "Regular Expression object expected"
 msgstr "Ожидается объект типа «bool»"
 
-#: dlls/jscript/jscript.rc:66
+#: dlls/jscript/jscript.rc:67
 msgid "Syntax error in regular expression"
 msgstr "Синтаксическая ошибка в регулярном выражении"
 
-#: dlls/jscript/jscript.rc:67
+#: dlls/jscript/jscript.rc:68
 #, fuzzy
 #| msgid "Expected identifier"
 msgid "Unexpected quantifier"
 msgstr "Ожидается идентификатор"
 
-#: dlls/jscript/jscript.rc:68
+#: dlls/jscript/jscript.rc:69
 msgid "Exception thrown and not caught"
 msgstr "Исключение создано, но не перехвачено"
 
-#: dlls/jscript/jscript.rc:70
+#: dlls/jscript/jscript.rc:71
 msgid "URI to be encoded contains invalid characters"
 msgstr "В кодируемом URI обнаружен неверный символ"
 
-#: dlls/jscript/jscript.rc:69
+#: dlls/jscript/jscript.rc:70
 msgid "URI to be decoded is incorrect"
 msgstr "Декодируемый URI неверен"
 
-#: dlls/jscript/jscript.rc:71
+#: dlls/jscript/jscript.rc:72
 msgid "Number of fraction digits is out of range"
 msgstr "Количество знаков после запятой вне диапазона"
 
-#: dlls/jscript/jscript.rc:72
+#: dlls/jscript/jscript.rc:73
 msgid "Precision is out of range"
 msgstr "Точность представления вне диапазона"
 
-#: dlls/jscript/jscript.rc:73
-msgid "Array length must be a finite positive integer"
-msgstr "Длиной массива должно быть конечное положительное число"
-
 #: dlls/jscript/jscript.rc:74
-msgid "Array object expected"
+#, fuzzy
+#| msgid "Array object expected"
+msgid "Array or arguments object expected"
 msgstr "Ожидается объект типа «Array»"
 
 #: dlls/jscript/jscript.rc:75
+msgid "Array length must be a finite positive integer"
+msgstr "Длиной массива должно быть конечное положительное число"
+
+#: dlls/jscript/jscript.rc:76
+msgid "Array object expected"
+msgstr "Ожидается объект типа «Array»"
+
+#: dlls/jscript/jscript.rc:77
 msgid ""
 "'writable' attribute on the property descriptor cannot be set to 'true' on "
 "this object"
 msgstr "Невозможно установить атрибут «writable» в «true» для этого объекта"
 
-#: dlls/jscript/jscript.rc:76
+#: dlls/jscript/jscript.rc:78
 msgid "Cyclic __proto__ value"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:77
+#: dlls/jscript/jscript.rc:79
 msgid "Cannot create property for a non-extensible object"
 msgstr "Невозможно создать для нерасширяемого объекта"
 
-#: dlls/jscript/jscript.rc:78
+#: dlls/jscript/jscript.rc:80
 msgid "Cannot define property '|': object is not extensible"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:79
+#: dlls/jscript/jscript.rc:81
 msgid "Cannot redefine non-configurable property '|'"
 msgstr "Невозможно переопределить ненастраиваемое свойство «|»"
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:82
 msgid "Cannot modify non-writable property '|'"
 msgstr "Невозможно изменить свойство «|»"
 
-#: dlls/jscript/jscript.rc:81
+#: dlls/jscript/jscript.rc:83
 #, fuzzy
 #| msgid "'this' is not a Map object"
 msgid "'this' is not a DataView object"
 msgstr "«this» не объект типа «Map»"
 
-#: dlls/jscript/jscript.rc:82
+#: dlls/jscript/jscript.rc:84
 msgid "Required argument offset or value in DataView method is not specified"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:83
+#: dlls/jscript/jscript.rc:85
 msgid "DataView operation access beyond specified buffer length"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:84
+#: dlls/jscript/jscript.rc:86
 msgid "DataView constructor argument offset is invalid"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:85
+#: dlls/jscript/jscript.rc:87
 #, fuzzy
 #| msgid "'this' is not a Map object"
 msgid "'this' is not a | object"
 msgstr "«this» не объект типа «Map»"
 
-#: dlls/jscript/jscript.rc:86
+#: dlls/jscript/jscript.rc:88
 #, fuzzy
 #| msgid "'this' is not a Map object"
 msgid "'key' is not an object"
 msgstr "«this» не объект типа «Map»"
 
-#: dlls/jscript/jscript.rc:87
+#: dlls/jscript/jscript.rc:89
 #, fuzzy
 #| msgid "Array object expected"
 msgid "ArrayBuffer object expected"
 msgstr "Ожидается объект типа «Array»"
 
-#: dlls/jscript/jscript.rc:88
+#: dlls/jscript/jscript.rc:90
 msgid "Property cannot have both accessors and a value"
 msgstr "Свойство не может одновременно иметь методы для доступа и значение"
 
-#: include/wine/wine_common_ver.rc:138
+#: include/wine/wine_common_ver.rc:123
 msgid "Wine kernel DLL"
 msgstr "Библиотека ядра Wine"
 
-#: include/wine/wine_common_ver.rc:143 dlls/winemac.drv/winemac.rc:32
+#: include/wine/wine_common_ver.rc:128 dlls/winemac.drv/winemac.rc:32
 #: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:143
 msgid "Wine"
 msgstr "Wine"
@@ -8037,7 +8072,7 @@ msgid "Vector property is required.\n"
 msgstr "Требуется свойство векторного типа.\n"
 
 #: dlls/mferror/mferror.mc:389
-msgid "Operation was cancelled.\n"
+msgid "Operation was canceled.\n"
 msgstr "Операция была отменена.\n"
 
 #: dlls/mferror/mferror.mc:396
@@ -9237,12 +9272,12 @@ msgstr "за экраном"
 
 #: dlls/oleacc/oleacc.rc:115
 msgctxt "object state"
-msgid "sizeable"
+msgid "sizable"
 msgstr "изменяемого размера"
 
 #: dlls/oleacc/oleacc.rc:116
 msgctxt "object state"
-msgid "moveable"
+msgid "movable"
 msgstr "перемещаемое"
 
 #: dlls/oleacc/oleacc.rc:117
@@ -9321,167 +9356,167 @@ msgstr "Включено"
 msgid "Off"
 msgstr "Выключено"
 
-#: dlls/oledb32/version.rc:56
+#: dlls/oledb32/version.rc:53
 msgid "Provider"
 msgstr "Провайдер"
 
-#: dlls/oledb32/version.rc:59
+#: dlls/oledb32/version.rc:56
 msgid "Select the data you want to connect to:"
 msgstr "Выберите формат для подключения:"
 
-#: dlls/oledb32/version.rc:66
+#: dlls/oledb32/version.rc:63
 msgid "Connection"
 msgstr "Подключение"
 
-#: dlls/oledb32/version.rc:69
+#: dlls/oledb32/version.rc:66
 #, fuzzy
 #| msgid "Select the data you want to connect to:"
 msgid "Specify the following to connect to ODBC data:"
 msgstr "Выберите формат для подключения:"
 
-#: dlls/oledb32/version.rc:70
+#: dlls/oledb32/version.rc:67
 msgid "1. Specify the source of data:"
 msgstr "1. Укажите источник данных:"
 
-#: dlls/oledb32/version.rc:71
+#: dlls/oledb32/version.rc:68
 #, fuzzy
 #| msgid "Please enter your name"
 msgid "Use &data source name"
 msgstr "Введите ваше имя"
 
-#: dlls/oledb32/version.rc:74
+#: dlls/oledb32/version.rc:71
 msgid "Use c&onnection string"
 msgstr "Использовать &строку подключения"
 
-#: dlls/oledb32/version.rc:75
+#: dlls/oledb32/version.rc:72
 msgid "&Connection string:"
 msgstr "Строка &подключения:"
 
-#: dlls/oledb32/version.rc:77
+#: dlls/oledb32/version.rc:74
 #, fuzzy
 #| msgid "A&dd..."
 msgid "B&uild..."
 msgstr "&Добавить..."
 
-#: dlls/oledb32/version.rc:78
+#: dlls/oledb32/version.rc:75
 msgid "2. Enter information to log on to the server"
 msgstr "2. Введите информация для доступа к серверу"
 
-#: dlls/oledb32/version.rc:79
+#: dlls/oledb32/version.rc:76
 msgid "User &name:"
 msgstr "По&льзователь:"
 
-#: dlls/oledb32/version.rc:83
+#: dlls/oledb32/version.rc:80
 msgid "&Blank password"
 msgstr "Пу&стой пароль"
 
-#: dlls/oledb32/version.rc:84
+#: dlls/oledb32/version.rc:81
 msgid "Allow &saving password"
 msgstr "Разрешить &сохранять пароль"
 
-#: dlls/oledb32/version.rc:85
+#: dlls/oledb32/version.rc:82
 msgid "3. Enter the &initial catalog to use:"
 msgstr "3. Укажите &начальный каталог:"
 
-#: dlls/oledb32/version.rc:87
+#: dlls/oledb32/version.rc:84
 msgid "&Test Connection"
 msgstr "&Проверка подключения"
 
-#: dlls/oledb32/version.rc:92
+#: dlls/oledb32/version.rc:89
 msgid "Advanced"
 msgstr "Мастер"
 
-#: dlls/oledb32/version.rc:95
+#: dlls/oledb32/version.rc:92
 msgid "Network settings"
 msgstr "Сетевые настройки"
 
-#: dlls/oledb32/version.rc:96
+#: dlls/oledb32/version.rc:93
 #, fuzzy
 #| msgid "Bad impersonation level.\n"
 msgid "&Impersonation level:"
 msgstr "Ошибочный уровень олицетворения.\n"
 
-#: dlls/oledb32/version.rc:98
+#: dlls/oledb32/version.rc:95
 msgid "P&rotection level:"
 msgstr ""
 
-#: dlls/oledb32/version.rc:101
+#: dlls/oledb32/version.rc:98
 #, fuzzy
 #| msgid "Connected"
 msgid "Connect:"
 msgstr "Подключено"
 
-#: dlls/oledb32/version.rc:103
+#: dlls/oledb32/version.rc:100
 msgid "seconds."
 msgstr "сек."
 
-#: dlls/oledb32/version.rc:104
+#: dlls/oledb32/version.rc:101
 msgid "A&ccess:"
 msgstr "До&ступ:"
 
-#: dlls/oledb32/version.rc:110
+#: dlls/oledb32/version.rc:107
 msgid "All"
 msgstr "Все"
 
-#: dlls/oledb32/version.rc:114
+#: dlls/oledb32/version.rc:111
 msgid ""
 "These are the initialization properties for this type of data. To edit a "
 "value, select a property, then choose Edit Value below."
 msgstr ""
 
-#: dlls/oledb32/version.rc:115
+#: dlls/oledb32/version.rc:112
 msgid "&Edit Value..."
 msgstr "&Изменить знаяение..."
 
-#: dlls/oledb32/version.rc:49
+#: dlls/oledb32/version.rc:46
 #, fuzzy
 #| msgid "Data Link Properties"
 msgid "Data Link Error"
 msgstr "Свойства подключения"
 
-#: dlls/oledb32/version.rc:50
+#: dlls/oledb32/version.rc:47
 msgid "Please select a provider."
 msgstr "Выберите провайдер."
 
-#: dlls/oledb32/version.rc:51
+#: dlls/oledb32/version.rc:48
 msgid ""
 "Provider is no longer available. Ensure that the provider is installed "
 "properly."
 msgstr ""
 
-#: dlls/oledb32/version.rc:36
+#: dlls/oledb32/version.rc:33
 msgid "Data Link Properties"
 msgstr "Свойства подключения"
 
-#: dlls/oledb32/version.rc:37
+#: dlls/oledb32/version.rc:34
 msgid "OLE DB Provider(s)"
 msgstr "Провайдеры OLE DB"
 
-#: dlls/oledb32/version.rc:41
+#: dlls/oledb32/version.rc:38
 msgid "Read"
 msgstr "Чтение"
 
-#: dlls/oledb32/version.rc:42
+#: dlls/oledb32/version.rc:39
 msgid "ReadWrite"
 msgstr "Чтение и запись"
 
-#: dlls/oledb32/version.rc:43
+#: dlls/oledb32/version.rc:40
 msgid "Share Deny None"
 msgstr ""
 
-#: dlls/oledb32/version.rc:44
+#: dlls/oledb32/version.rc:41
 msgid "Share Deny Read"
 msgstr ""
 
-#: dlls/oledb32/version.rc:45
+#: dlls/oledb32/version.rc:42
 msgid "Share Deny Write"
 msgstr ""
 
-#: dlls/oledb32/version.rc:46
+#: dlls/oledb32/version.rc:43
 msgid "Share Exclusive"
 msgstr ""
 
-#: dlls/oledb32/version.rc:47
+#: dlls/oledb32/version.rc:44
 msgid "Write"
 msgstr "Запись"
 
@@ -15010,6 +15045,12 @@ msgstr "Конец строки"
 msgid "End of file"
 msgstr "Конец файла"
 
+#: programs/cmd/cmd.rc:410
+#, fuzzy
+#| msgid "%1!d! file(s) copied\n"
+msgid "%t%1!u! file(s) copied\n"
+msgstr "Скопировано %1!d! файл(ов)\n"
+
 #: programs/conhost/conhost.rc:54
 msgid "Cursor size"
 msgstr "Размер курсора"
@@ -16488,7 +16529,7 @@ msgid "reg: The operation completed successfully\n"
 msgstr "reg: операция успешно завершена\n"
 
 #: programs/reg/reg.rc:131
-msgid "reg: The registry operation was cancelled\n"
+msgid "reg: The registry operation was canceled\n"
 msgstr "reg: операция с реестром была отменена\n"
 
 #: programs/reg/reg.rc:174
@@ -17701,7 +17742,7 @@ msgid ""
 "Sent termination signal to process with PID %1!u!, child of PID %2!u!.\n"
 msgstr ""
 
-#: include/wine/wine_common_ver.rc:138
+#: include/wine/wine_common_ver.rc:123
 #, fuzzy
 #| msgid "page tab list"
 msgid "Wine tasklist"

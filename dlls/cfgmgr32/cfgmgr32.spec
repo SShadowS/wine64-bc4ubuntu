@@ -188,3 +188,13 @@
 @ stub CM_Unregister_Device_Interface_ExA
 @ stub CM_Unregister_Device_Interface_ExW
 @ stdcall CM_Unregister_Notification(ptr)
+@ stdcall DevCloseObjectQuery(ptr)
+@ stdcall DevCreateObjectQuery(long long long ptr long ptr ptr ptr ptr)
+@ stdcall DevCreateObjectQueryEx(long long long ptr long ptr long ptr ptr ptr ptr)
+@ stdcall DevFindProperty(ptr long wstr long ptr)
+@ stdcall DevFreeObjectProperties(long ptr)
+@ stdcall DevFreeObjects(long ptr)
+@ stdcall DevGetObjectProperties(long ptr long long ptr ptr ptr)
+@ stdcall DevGetObjectPropertiesEx(long ptr long long ptr long ptr ptr ptr)
+@ stdcall DevGetObjects(long long long ptr long ptr ptr ptr)
+@ stdcall DevGetObjectsEx(long long long ptr long ptr long ptr ptr ptr)

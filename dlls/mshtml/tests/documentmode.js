@@ -486,10 +486,10 @@ sync_test("builtin_obj", function() {
         enumerator.moveNext();
         ok(enumerator.atEnd(), "enumerator not at end");
     }else {
-        elem = f.call.call(f, document, "div");
+        elem1 = f.call.call(f, document, "div");
         f = f.bind(document);
-        elem = f.apply(null, ["style"]);
-        document.body.appendChild(elem);
+        elem1 = f.apply(null, ["style"]);
+        document.body.appendChild(elem1);
 
         try {
             var enumerator = new Enumerator(document.getElementsByTagName("style"));
@@ -502,6 +502,116 @@ sync_test("builtin_obj", function() {
         f.call = function() { };
         ok(f.apply === 0, "changed f.apply = ", f.apply);
         ok(f.call instanceof Function, "changed f.call not instance of Function");
+
+        e = Array.isArray(document.body.childNodes);
+        ok(e === false, "isArray(childNodes) returned " + e);
+        e = Array.prototype.toString.call(Number);
+        ok(e === "[object Function]", "Array.toString(Number) = " + e);
+    }
+
+    function test_toString(msg, constr, err) {
+        var e = 0;
+        if(typeof(err) === "string") {
+            e = constr.prototype.toString.call(document.body);
+            ok(e === err, msg + ".toString(body) = " + e);
+            return;
+        }
+        try {
+            constr.prototype.toString.call(document.body);
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === err - 0x80000000, "[" + msg + ".toString(body)] e = " + e);
+    }
+
+    test_toString("Array", Array, v < 9 ? 0xa13a7 : "[object HTMLBodyElement]");
+    test_toString("Boolean", Boolean, 0xa1392);
+    test_toString("Date", Date, 0xa138e);
+    test_toString("RegExp", RegExp, 0xa1398);
+    test_toString("Number", Number, 0xa1389);
+    test_toString("String", String, 0xa138d);
+
+    if(v >= 9) {
+        var obj = { length: 2 };
+        obj[0] = "foo";
+        obj[1] = "bar";
+        e = Array.prototype.toString.call(obj);
+        ok(e === "[object Object]", "Array.toString(array-like object) = " + e);
+
+        obj = Object.create(null);
+        obj.length = 2;
+        obj[0] = "foo";
+        obj[1] = "bar";
+        e = Array.prototype.toString.call(obj);
+        ok(e === "[object Object]", "Array.toString(array-like object with no prototype) = " + e);
+
+        e = 0;
+        try {
+            Array.prototype.toString.call(null);
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === 0xa138f - 0x80000000, "Array.toString(null) e = " + e);
+    }
+
+    (function(a, b, c) {
+        ok(a === document.body.childNodes[0], "a = " + a);
+        ok(b === document.body.childNodes[1], "b = " + b);
+        ok(c === document.body.childNodes[2], "c = " + c);
+    }).apply(null, document.body.childNodes);
+
+    elem1[0] = "a";
+    elem1[1] = "b";
+    if(v < 9) {
+        try {
+            (function(a, b) {}).apply(null, elem1);
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === 0xa13a4 - 0x80000000, "[function.apply with elem without length] e = " + e);
+    }else {
+        (function(a, b) {
+            ok(a === undefined, "a = " + a);
+            ok(b === undefined, "b = " + b);
+        }).apply(null, elem1);
+    }
+
+    elem1.length = 2;
+    (function(a, b) {
+        ok(a === "a", "a = " + a);
+        ok(b === "b", "b = " + b);
+    }).apply(null, elem1);
+
+    elem1 = new Object;
+    elem1[0] = "c";
+    elem1[1] = "d";
+    if(v < 9) {
+        try {
+            (function(c, d) {}).apply(null, elem1);
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === 0xa13a4 - 0x80000000, "[function.apply with Object without length] e = " + e);
+    }else {
+        (function(c, d) {
+            ok(c === undefined, "c = " + c);
+            ok(d === undefined, "d = " + d);
+        }).apply(null, elem1);
+    }
+
+    elem1.length = 2;
+    if(v < 9) {
+        try {
+            (function(c, d) {}).apply(null, elem1);
+        }catch(ex) {
+            e = ex.number;
+        }
+        ok(e === 0xa13a4 - 0x80000000, "[function.apply with Object with length] e = " + e);
+    }else {
+        (function(c, d) {
+            ok(c === "c", "c = " + c);
+            ok(d === "d", "d = " + d);
+        }).apply(null, elem1);
     }
 });
 
@@ -580,13 +690,29 @@ sync_test("attr_props", function() {
 
     elem.innerHTML = '<span id="test"></span>';
     elem = elem.getElementsByTagName("span")[0];
-    attr = elem.attributes[0];
+    attr = elem.getAttributeNode("id");
+
+    if(v < 8)
+        ok(elem.attributes.length > 50, "attributes.length = " + elem.attributes.length);
+    else {
+        todo_wine_if(v === 8).
+        ok(elem.attributes.length === 1, "attributes.length = " + elem.attributes.length);
+        todo_wine_if(v === 8).
+        ok(elem.attributes[0] === attr, "attributes[0] != attr");
+    }
 
     function test_exposed(prop, expect) {
         if(expect)
             ok(prop in attr, prop + " not found in attribute.");
         else
             ok(!(prop in attr), prop + " found in attribute.");
+    }
+
+    function test_attr(expando, specified) {
+        var r = attr.expando;
+        ok(r === expando, attr.name + " attr.expando = " + r);
+        r = attr.specified;
+        ok(r === specified, attr.name + " attr.specified = " + r);
     }
 
     test_exposed("appendChild", true);
@@ -622,6 +748,35 @@ sync_test("attr_props", function() {
     test_exposed("specified", true);
     test_exposed("textContent", v >= 9);
     test_exposed("value", true);
+    test_attr(false, true);
+
+    elem.setAttribute("test", "wine");
+    elem.setAttribute("z-index", "foobar");
+    elem.setAttribute("innerText", "test");
+    elem.setAttribute("removeAttribute", "funcattr");
+
+    attr = elem.getAttributeNode("test");
+    test_attr(true, true);
+
+    attr = elem.getAttributeNode("z-index");
+    test_attr(true, true);
+
+    attr = elem.getAttributeNode("innerText");
+    if(v < 8)
+        ok(attr === null, "innerText attr != null");
+    else
+        todo_wine_if(v === 8).
+        ok(attr !== null, "innerText attr = null");
+
+    attr = elem.getAttributeNode("removeAttribute");
+    test_attr(true, true);
+
+    attr = elem.getAttributeNode("tabIndex");
+    if(v < 8)
+        test_attr(false, false);
+    else
+        todo_wine_if(v === 8).
+        ok(attr === null, "tabIndex attr not null.");
 });
 
 sync_test("doc_props", function() {
@@ -687,6 +842,82 @@ sync_test("docfrag_props", function() {
     test_exposed("dispatchEvent", v >= 9);
     test_exposed("createEvent", false);
     test_exposed("compareDocumentPosition", v >= 9);
+});
+
+sync_test("frame_props", function() {
+    var elem = document.createElement("frame");
+
+    function test_exposed(prop, expect, is_todo) {
+        var ok_ = is_todo ? todo_wine.ok : ok;
+        if(expect)
+            ok_(prop in elem, prop + " not found in element.");
+        else
+            ok_(!(prop in elem), prop + " found in element.");
+    }
+
+    var v = document.documentMode;
+
+    test_exposed("allowTransparency", v < 9, v >= 9);
+    test_exposed("border", true);
+    test_exposed("borderColor", true, true);
+    test_exposed("contentDocument", v >= 8, v < 8);
+    test_exposed("contentWindow", true);
+    test_exposed("dataFld", v < 11, v < 11);
+    test_exposed("dataFormatAs", v < 11, v < 11);
+    test_exposed("dataSrc", v < 11, v < 11);
+    test_exposed("frameBorder", true);
+    test_exposed("frameSpacing", true);
+    test_exposed("getSVGDocument", true, true);
+    test_exposed("height", true, true);
+    test_exposed("longDesc", true);
+    test_exposed("marginHeight", true);
+    test_exposed("marginWidth", true);
+    test_exposed("name", true);
+    test_exposed("noResize", true);
+    test_exposed("onload", true);
+    test_exposed("onreadystatechange", v < 11, v >= 11);
+    test_exposed("readyState", v < 11, v >= 11);
+    test_exposed("scrolling", true);
+    test_exposed("security", v >= 9, v >= 9);
+    test_exposed("src", true);
+    test_exposed("width", true, true);
+    test_exposed("ie8_frameBorder", false);
+    test_exposed("ie8_longDesc", false);
+    test_exposed("ie8_src", false);
+
+    elem = document.createElement("iframe");
+
+    test_exposed("align", true);
+    test_exposed("allowTransparency", v < 9, v >= 9);
+    test_exposed("border", true);
+    test_exposed("borderColor", false);
+    test_exposed("contentDocument", v >= 8, v < 8);
+    test_exposed("contentWindow", true);
+    test_exposed("dataFld", v < 11, v < 11);
+    test_exposed("dataFormatAs", v < 11, v < 11);
+    test_exposed("dataSrc", v < 11, v < 11);
+    test_exposed("frameBorder", true);
+    test_exposed("frameSpacing", true);
+    test_exposed("getSVGDocument", true, true);
+    test_exposed("height", true);
+    test_exposed("hspace", true);
+    test_exposed("longDesc", true);
+    test_exposed("marginHeight", true);
+    test_exposed("marginWidth", true);
+    test_exposed("name", true);
+    test_exposed("noResize", true);
+    test_exposed("onload", true);
+    test_exposed("onreadystatechange", v < 11, v >= 11);
+    test_exposed("readyState", v < 11, v >= 11);
+    test_exposed("sandbox", v >= 10, v >= 10);
+    test_exposed("scrolling", true);
+    test_exposed("security", v >= 9, v >= 9);
+    test_exposed("src", true);
+    test_exposed("vspace", true);
+    test_exposed("width", true);
+    test_exposed("ie8_frameBorder", false);
+    test_exposed("ie8_longDesc", false);
+    test_exposed("ie8_src", false);
 });
 
 sync_test("textnode_props", function() {
@@ -3847,6 +4078,7 @@ sync_test("prototype props", function() {
         test_own_props(constr.prototype, name, props, todos, flaky);
     }
 
+    check(Attr, [ "expando", "name", "ownerElement", "specified", "value" ]);
     check(CharacterData, [ "appendData", "data", "deleteData", "insertData", "length", "replaceData", "substringData" ]);
     check(Comment, [ "text" ]);
     check(CSSStyleDeclaration, [
@@ -3976,6 +4208,20 @@ sync_test("prototype props", function() {
         "defaultPrevented", "eventPhase", "initEvent", "isTrusted", "preventDefault", "srcElement",
         "stopImmediatePropagation", "stopPropagation", "target", "timeStamp", "type"
     ], [ "AT_TARGET", "BUBBLING_PHASE", "CAPTURING_PHASE" ]);
+    check(HTMLAnchorElement, [
+        "Methods", "charset", "coords", ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "hash", "host", "hostname", "href", "hreflang", "mimeType",
+        "name", "nameProp", "pathname", "port", "protocol", "protocolLong", "rel", "rev", "search", "shape", "target", ["text",10], "toString", "type", "urn"
+    ], [ "charset", "coords", ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "hreflang", "shape", ["text",10], "type" ]);
+    check(HTMLAreaElement, [ "alt", "coords", "hash", "host", "hostname", "href", "noHref", "pathname", "port", "protocol", "search", "shape", "target", "toString" ], null, [ "rel" ]);
+    check(HTMLButtonElement, [
+        ["autofocus",10], ["checkValidity",10], "createTextRange", ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10],
+        "form", ["formAction",10], ["formEnctype",10], ["formMethod",10], ["formNoValidate",10], ["formTarget",10], "name",
+        ["setCustomValidity",10], "status", "type", ["validationMessage",10], ["validity",10], "value", ["willValidate",10]
+    ], [
+        ["autofocus",10], ["checkValidity",10], ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], ["formAction",10],
+        ["formEnctype",10], ["formMethod",10], ["formNoValidate",10], ["formTarget",10], ["setCustomValidity",10],
+        ["validationMessage",10], ["validity",10], ["willValidate",10]
+    ]);
     if(v >= 11)
         check(HTMLDocument, []);
     check(HTMLElement, [
@@ -4002,11 +4248,106 @@ sync_test("prototype props", function() {
         "scrollIntoView", "setActive", "setCapture", "sourceIndex", ["spellcheck",10], "style", "swapNode", "tabIndex", ["tagUrn",9,9], "title",
         "uniqueID", "uniqueNumber"
     ], [ ["dataset",11], ["draggable",10], ["hidden",11], ["msGetInputContext",11], ["onmscontentzoom",10] ]);
+    check(HTMLEmbedElement, [
+        "getSVGDocument", "height", "hidden", ["msPlayToDisabled",11], ["msPlayToPreferredSourceUri",11], ["msPlayToPrimary",11],
+        "name", "palette", "pluginspage", ["readyState",11], "src", "units", "width"
+    ], [ "getSVGDocument", ["msPlayToDisabled",11], ["msPlayToPreferredSourceUri",11], ["msPlayToPrimary",11], ["readyState",11] ]);
+    check(HTMLFormElement, [
+        "acceptCharset", "action", ["autocomplete",10], ["checkValidity",10], "elements", "encoding", "enctype", "item",
+        "length", "method", "name", "namedItem", ["noValidate",10], "reset", "submit", "tags", "target", "urns"
+    ], [ "_newEnum", "acceptCharset", ["autocomplete",10], ["checkValidity",10], "enctype", "namedItem", ["noValidate",10], "urns" ]);
+    check(HTMLFrameElement, [
+        "border", "borderColor", "contentDocument", "contentWindow", ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "frameBorder", "frameSpacing",
+        "getSVGDocument", "height", "longDesc", "marginHeight", "marginWidth", "name", "noResize", "onload", "scrolling", "security", "src", "width"
+    ], [
+        "allowTransparency", "borderColor", ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "getSVGDocument", "height", "onload",
+        ["onreadystatechange",11], ["readyState",11], "security", "width"
+    ]);
+    check(HTMLHeadElement, [ "profile" ]);
+    check(HTMLHtmlElement, [ "version" ]);
+    check(HTMLIFrameElement, [
+        "align", "border", "contentDocument", "contentWindow", ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10],
+        "frameBorder", "frameSpacing", "getSVGDocument", "height", "hspace", "longDesc", "marginHeight", "marginWidth",
+        "name", "noResize", "onload", ["sandbox",10], "scrolling", "security", "src", "vspace", "width"
+    ], [
+        "allowTransparency", ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "getSVGDocument", "onload",
+        ["onreadystatechange",11], ["readyState",11], ["sandbox",10], "security"
+    ]);
+    check(HTMLImageElement, [
+        "align", "alt", "border", "complete", ["crossOrigin",11], ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "dynsrc", "fileCreatedDate",
+        "fileModifiedDate", ["fileSize",9,10], "fileUpdatedDate", "height", "href", "hspace", "isMap", "longDesc", "loop", "lowsrc", "mimeType",
+        ["msPlayToDisabled",10], ["msPlayToPreferredSourceUri",11], ["msPlayToPrimary",10], "name", "nameProp", "naturalHeight", "naturalWidth",
+        "protocol", "src", "start", "useMap", "vrml", "vspace", "width"
+    ], [
+        ["crossOrigin",11], ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "longDesc", ["msPlayToDisabled",10], ["msPlayToPreferredSourceUri",11],
+        ["msPlayToPrimary",10], "naturalHeight", "naturalWidth"
+    ]);
+    check(HTMLInputElement, [
+        "accept", "align", "alt", ["autocomplete",10], ["autofocus",10], "border", "checked", ["checkValidity",10], "complete", "createTextRange", ["dataFld",9,10],
+        ["dataFormatAs",9,10], ["dataSrc",9,10], "defaultChecked", "defaultValue", "dynsrc", ["files",10], "form", ["formAction",10], ["formEnctype",10], ["formMethod",10],
+        ["formNoValidate",10], ["formTarget",10], "height", "hspace", "indeterminate", ["list",10], "loop", "lowsrc", ["max",10], "maxLength", ["min",10], ["multiple",10],
+        "name", ["pattern",10], ["placeholder",10], "readOnly", ["required",10], "select", "selectionEnd", "selectionStart", ["setCustomValidity",10], "setSelectionRange",
+        "size", "src", "start", "status", ["step",10], ["stepDown",10], ["stepUp",10], "type", "useMap", ["validationMessage",10], ["validity",10], "value",
+        ["valueAsNumber",10], "vrml", "vspace", "width", ["willValidate",10]
+    ], [
+        "accept", ["autocomplete",10], ["autofocus",10], ["checkValidity",10], ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], ["files",10], ["formAction",10],
+        ["formEnctype",10], ["formMethod",10], ["formNoValidate",10], ["formTarget",10], ["list",10], ["max",10], ["min",10], ["multiple",10], ["pattern",10],
+        ["placeholder",10], ["readyState",11], ["required",10], ["setCustomValidity",10], ["step",10], ["stepDown",10], ["stepUp",10], "useMap", ["validationMessage",10],
+        ["validity",10], ["valueAsNumber",10], ["willValidate",10]
+    ]);
+    check(HTMLLabelElement, [ ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "form", "htmlFor" ], [ ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "form" ]);
+    check(HTMLLinkElement, [ "charset", "href", "hreflang", "media", "rel", "rev", "sheet", ["styleSheet",9,10], "target", "type" ],
+                           [ "charset", "hreflang", ["onreadystatechange",11], ["readyState",11], "sheet", ["styleSheet",11], "target" ]);
+    check(HTMLMetaElement, [ "charset", "content", "httpEquiv", "name", "scheme", "url" ], [ "scheme" ]);
+    check(HTMLObjectElement, [
+        "BaseHref", "align", "alt", "altHtml", "archive", "border", ["checkValidity",10], "classid", "code", "codeBase", "codeType", "contentDocument", "data",
+        ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "declare", "form", "getSVGDocument", "height", "hspace", ["msPlayToDisabled",11],
+        ["msPlayToPreferredSourceUri",11], ["msPlayToPrimary",11], "name", "namedRecordset", "object", ["readyState",11], "recordset", ["setCustomValidity",10],
+        "standby", "type", "useMap", ["validationMessage",10], ["validity",10], "vspace", "width", ["willValidate",10]
+    ], [
+        "alt", "archive", "border", ["checkValidity",10], "contentDocument", ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "declare", "getSVGDocument",
+        ["msPlayToDisabled",11], ["msPlayToPreferredSourceUri",11], ["msPlayToPrimary",11], ["onreadystatechange",11], ["readyState",11], ["setCustomValidity",10],
+        "standby", "useMap", ["validationMessage",10], ["validity",10], ["willValidate",10]
+    ]);
+    check(HTMLOptionElement, [ ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "defaultSelected", "form", "index", "label", "selected", "text", "value" ],
+                             [ ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "label" ]);
+    check(HTMLScriptElement, [ ["async",10], "charset", "defer", "event", "htmlFor", "src", "text", "type" ], [ ["async",10], "charset", ["readyState",11] ], [ "crossOrigin" ]);
+    check(HTMLSelectElement, [
+        "add", ["autofocus",10], ["checkValidity",10], ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "form", "item", "length",
+        "multiple", "name", "namedItem", "options", "remove", ["required",10], "selectedIndex", ["setCustomValidity",10], "size", "tags",
+        "type", "urns", ["validationMessage",10], ["validity",10], "value", ["willValidate",10]
+    ], [
+        ["autofocus",10], ["checkValidity",10], ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "namedItem", ["required",10],
+        ["setCustomValidity",10], "urns", ["validationMessage",10], ["validity",10], ["willValidate",10]
+    ]);
+    check(HTMLStyleElement, [ "media", "sheet", ["styleSheet",9,10], "type" ], [ ["onreadystatechange",11] ]);
     check(HTMLTableCellElement, [
         "abbr", "align", "axis", "background", "bgColor", "borderColor", "borderColorDark", "borderColorLight",
         "cellIndex", "ch", "chOff", "colSpan", "headers", "height", "noWrap", "rowSpan", "scope", "vAlign", "width"
     ], [ "abbr", "axis", "ch", "chOff", "headers", "scope" ]);
     check(HTMLTableDataCellElement, []);
+    check(HTMLTableElement, [
+        "align", "background", "bgColor", "border", "borderColor", "borderColorDark", "borderColorLight", "caption", "cellPadding", "cells", "cellSpacing", "cols",
+        "createCaption", "createTBody", "createTFoot", "createTHead", ["dataFld",9,10], ["dataFormatAs",9,10], ["dataPageSize",9,10], ["dataSrc",9,10], "deleteCaption",
+        "deleteRow", "deleteTFoot", "deleteTHead", ["firstPage",9,10], "frame", "height", "insertRow", ["lastPage",9,10], "moveRow", ["nextPage",9,10],
+        ["previousPage",9,10], ["refresh",9,10], "rows", "rules", "summary", "tBodies", "tFoot", "tHead", "width"
+    ], [
+        "createTBody", ["dataFld",9,10], ["dataFormatAs",9,10], ["dataPageSize",11], ["dataSrc",9,10], ["firstPage",11], ["lastPage",11], ["nextPage",11],
+        ["onreadystatechange",11], ["previousPage",11], ["readyState",11], ["refresh",11]
+    ]);
+    check(HTMLTableRowElement, [
+        "align", "bgColor", "borderColor", "borderColorDark", "borderColorLight", "cells", "ch", "chOff",
+        "deleteCell", "height", "insertCell", "rowIndex", "sectionRowIndex", "vAlign"
+    ], [ "ch", "chOff", "height" ]);
+    check(HTMLTextAreaElement, [
+        ["autofocus",10], ["checkValidity",10], "cols", "createTextRange", ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], "defaultValue", "form",
+        ["maxLength",10], "name", ["placeholder",10], "readOnly", ["required",10], "rows", "select", "selectionEnd", "selectionStart", ["setCustomValidity",10],
+        "setSelectionRange", "status", "type", ["validationMessage",10], ["validity",10], "value", ["willValidate",10], "wrap"
+    ], [
+        ["autofocus",10], ["checkValidity",10], ["dataFld",9,10], ["dataFormatAs",9,10], ["dataSrc",9,10], ["maxLength",10], ["placeholder",10], ["required",10],
+        "selectionEnd", "selectionStart", ["setCustomValidity",10], "setSelectionRange", ["validationMessage",10], ["validity",10], ["willValidate",10]
+    ]);
+    check(HTMLTitleElement, [ "text" ]);
     check(HTMLUnknownElement, [ "namedRecordset", "recordset" ]);
     check(KeyboardEvent, [
         "DOM_KEY_LOCATION_JOYSTICK", "DOM_KEY_LOCATION_LEFT", "DOM_KEY_LOCATION_MOBILE",
@@ -4037,6 +4378,8 @@ sync_test("prototype props", function() {
         "posHeight", "posLeft", "posRight", "posTop", "posWidth", "textDecorationBlink", "textDecorationLineThrough",
         "textDecorationNone", "textDecorationOverline", "textDecorationUnderline"
     ]);
+    check(NamedNodeMap, [ "getNamedItem", "getNamedItemNS", "item", "length", "removeNamedItem", "removeNamedItemNS",
+                          "setNamedItem", "setNamedItemNS" ]);
     check(Node, [
         "ATTRIBUTE_NODE", "CDATA_SECTION_NODE", "COMMENT_NODE", "DOCUMENT_FRAGMENT_NODE",  "DOCUMENT_NODE",
         "DOCUMENT_POSITION_CONTAINED_BY", "DOCUMENT_POSITION_CONTAINS", "DOCUMENT_POSITION_DISCONNECTED",

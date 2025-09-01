@@ -48,40 +48,21 @@ WINE_DEFAULT_DEBUG_CHANNEL(android);
 
 static const struct egl_platform *egl;
 static const struct opengl_funcs *funcs;
-static const int egl_client_version = 2;
-
-struct egl_pixel_format
-{
-    EGLConfig config;
-};
-
-struct android_context
-{
-    struct list entry;
-    EGLConfig  config;
-    EGLContext context;
-    EGLSurface surface;
-    HWND       hwnd;
-    BOOL       refresh;
-};
+static const struct client_surface_funcs android_client_surface_funcs;
+static const struct opengl_drawable_funcs android_drawable_funcs;
 
 struct gl_drawable
 {
-    struct list     entry;
-    HWND            hwnd;
-    HDC             hdc;
-    int             format;
+    struct opengl_drawable base;
     ANativeWindow  *window;
-    EGLSurface      surface;
-    EGLSurface      pbuffer;
-    int             swap_interval;
 };
 
-static void *opengl_handle;
-static struct list gl_contexts = LIST_INIT( gl_contexts );
-static struct list gl_drawables = LIST_INIT( gl_drawables );
+static struct gl_drawable *impl_from_opengl_drawable( struct opengl_drawable *base )
+{
+    return CONTAINING_RECORD( base, struct gl_drawable, base );
+}
 
-pthread_mutex_t drawable_mutex;
+static void *opengl_handle;
 
 static inline EGLConfig egl_config_for_format(int format)
 {
@@ -90,242 +71,79 @@ static inline EGLConfig egl_config_for_format(int format)
     return egl->configs[format - egl->config_count - 1];
 }
 
-static struct gl_drawable *create_gl_drawable( HWND hwnd, HDC hdc, int format )
+static struct gl_drawable *create_gl_drawable( HWND hwnd, int format, ANativeWindow *window )
 {
     static const int attribs[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
-    struct gl_drawable *gl = malloc( sizeof(*gl) );
+    struct client_surface *client;
+    struct gl_drawable *gl;
 
-    gl->hwnd   = hwnd;
-    gl->hdc    = hdc;
-    gl->format = format;
-    gl->window = create_ioctl_window( hwnd, TRUE, 1.0f );
-    gl->surface = 0;
-    gl->pbuffer = funcs->p_eglCreatePbufferSurface( egl->display, egl_config_for_format(gl->format), attribs );
-    pthread_mutex_lock( &drawable_mutex );
-    list_add_head( &gl_drawables, &gl->entry );
+    if (!(client = client_surface_create( sizeof(*client), &android_client_surface_funcs, hwnd ))) return NULL;
+    gl = opengl_drawable_create( sizeof(*gl), &android_drawable_funcs, format, client );
+    client_surface_release( client );
+    if (!gl) return NULL;
+
+    if (!window) gl->window = create_ioctl_window( hwnd, TRUE, 1.0f );
+    else gl->window = grab_ioctl_window( window );
+
+    if (!window) gl->base.surface = funcs->p_eglCreatePbufferSurface( egl->display, egl_config_for_format(gl->base.format), attribs );
+    else gl->base.surface = funcs->p_eglCreateWindowSurface( egl->display, egl_config_for_format(gl->base.format), gl->window, NULL );
+
+    TRACE( "Created drawable %s with client window %p\n", debugstr_opengl_drawable( &gl->base ), gl->window );
     return gl;
 }
 
-static struct gl_drawable *get_gl_drawable( HWND hwnd, HDC hdc )
+static void android_drawable_destroy( struct opengl_drawable *base )
 {
-    struct gl_drawable *gl;
-
-    pthread_mutex_lock( &drawable_mutex );
-    LIST_FOR_EACH_ENTRY( gl, &gl_drawables, struct gl_drawable, entry )
-    {
-        if (hwnd && gl->hwnd == hwnd) return gl;
-        if (hdc && gl->hdc == hdc) return gl;
-    }
-    pthread_mutex_unlock( &drawable_mutex );
-    return NULL;
-}
-
-static void release_gl_drawable( struct gl_drawable *gl )
-{
-    if (gl) pthread_mutex_unlock( &drawable_mutex );
-}
-
-void destroy_gl_drawable( HWND hwnd )
-{
-    struct gl_drawable *gl;
-
-    pthread_mutex_lock( &drawable_mutex );
-    LIST_FOR_EACH_ENTRY( gl, &gl_drawables, struct gl_drawable, entry )
-    {
-        if (gl->hwnd != hwnd) continue;
-        list_remove( &gl->entry );
-        if (gl->surface) funcs->p_eglDestroySurface( egl->display, gl->surface );
-        if (gl->pbuffer) funcs->p_eglDestroySurface( egl->display, gl->pbuffer );
-        release_ioctl_window( gl->window );
-        free( gl );
-        break;
-    }
-    pthread_mutex_unlock( &drawable_mutex );
-}
-
-static BOOL refresh_context( struct android_context *ctx )
-{
-    BOOL ret = InterlockedExchange( &ctx->refresh, FALSE );
-
-    if (ret)
-    {
-        TRACE( "refreshing hwnd %p context %p surface %p\n", ctx->hwnd, ctx->context, ctx->surface );
-        funcs->p_eglMakeCurrent( egl->display, ctx->surface, ctx->surface, ctx->context );
-        NtUserRedrawWindow( ctx->hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE );
-    }
-    return ret;
+    struct gl_drawable *gl = impl_from_opengl_drawable( base );
+    release_ioctl_window( gl->window );
 }
 
 void update_gl_drawable( HWND hwnd )
 {
-    struct gl_drawable *gl;
-    struct android_context *ctx;
+    struct gl_drawable *old, *new;
 
-    if ((gl = get_gl_drawable( hwnd, 0 )))
+    if (!(old = impl_from_opengl_drawable( get_window_opengl_drawable( hwnd ) ))) return;
+    if ((new = create_gl_drawable( hwnd, old->base.format, old->window )))
     {
-        if (!gl->surface &&
-            (gl->surface = funcs->p_eglCreateWindowSurface( egl->display, egl_config_for_format(gl->format),
-                                                            gl->window, NULL )))
-        {
-            LIST_FOR_EACH_ENTRY( ctx, &gl_contexts, struct android_context, entry )
-            {
-                if (ctx->hwnd != hwnd) continue;
-                TRACE( "hwnd %p refreshing %p %scurrent\n", hwnd, ctx, NtCurrentTeb()->glReserved2 == ctx ? "" : "not " );
-                ctx->surface = gl->surface;
-                if (NtCurrentTeb()->glReserved2 == ctx)
-                    funcs->p_eglMakeCurrent( egl->display, ctx->surface, ctx->surface, ctx->context );
-                else
-                    InterlockedExchange( &ctx->refresh, TRUE );
-            }
-        }
-        release_gl_drawable( gl );
-        NtUserRedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE );
+        set_window_opengl_drawable( hwnd, &new->base );
+        opengl_drawable_release( &new->base );
     }
+    opengl_drawable_release( &old->base );
+
+    NtUserRedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE );
 }
 
-static BOOL android_set_pixel_format( HWND hwnd, int old_format, int new_format, BOOL internal )
+static BOOL android_surface_create( HWND hwnd, int format, struct opengl_drawable **drawable )
 {
     struct gl_drawable *gl;
 
-    TRACE( "hwnd %p, old_format %d, new_format %d, internal %u\n", hwnd, old_format, new_format, internal );
+    TRACE( "hwnd %p, format %d, drawable %p\n", hwnd, format, drawable );
 
-    if ((gl = get_gl_drawable( hwnd, 0 )))
+    if (*drawable)
     {
-        if (internal)
-        {
-            EGLint pf;
-            funcs->p_eglGetConfigAttrib( egl->display, egl_config_for_format(new_format), EGL_NATIVE_VISUAL_ID, &pf );
-            gl->window->perform( gl->window, NATIVE_WINDOW_SET_BUFFERS_FORMAT, pf );
-            gl->format = new_format;
-        }
-    }
-    else gl = create_gl_drawable( hwnd, 0, new_format );
-    release_gl_drawable( gl );
+        EGLint pf;
 
-    return TRUE;
-}
+        FIXME( "Updating drawable %s, multiple surfaces not implemented\n", debugstr_opengl_drawable( *drawable ) );
 
-static BOOL android_context_create( HDC hdc, int format, void *share, const int *attribs, void **private )
-{
-    struct android_context *ctx, *shared_ctx = share;
-    int count = 0, egl_attribs[3];
-    BOOL opengl_es = FALSE;
+        gl = impl_from_opengl_drawable( *drawable );
+        funcs->p_eglGetConfigAttrib( egl->display, egl_config_for_format(format), EGL_NATIVE_VISUAL_ID, &pf );
+        gl->window->perform( gl->window, NATIVE_WINDOW_SET_BUFFERS_FORMAT, pf );
+        gl->base.format = format;
 
-    if (!attribs) opengl_es = TRUE;
-    while (attribs && *attribs && count < 2)
-    {
-        switch (*attribs)
-        {
-        case WGL_CONTEXT_PROFILE_MASK_ARB:
-            if (attribs[1] == WGL_CONTEXT_ES2_PROFILE_BIT_EXT)
-                opengl_es = TRUE;
-            break;
-        case WGL_CONTEXT_MAJOR_VERSION_ARB:
-            egl_attribs[count++] = EGL_CONTEXT_CLIENT_VERSION;
-            egl_attribs[count++] = attribs[1];
-            break;
-        default:
-            FIXME("Unhandled attributes: %#x %#x\n", attribs[0], attribs[1]);
-        }
-        attribs += 2;
-    }
-    if (!opengl_es)
-    {
-        WARN("Requested creation of an OpenGL (non ES) context, that's not supported.\n");
-        return FALSE;
-    }
-    if (!count)  /* FIXME: force version if not specified */
-    {
-        egl_attribs[count++] = EGL_CONTEXT_CLIENT_VERSION;
-        egl_attribs[count++] = egl_client_version;
-    }
-    egl_attribs[count] = EGL_NONE;
-    attribs = egl_attribs;
-
-    ctx = malloc( sizeof(*ctx) );
-
-    ctx->config  = egl_config_for_format(format);
-    ctx->surface = 0;
-    ctx->refresh = FALSE;
-    ctx->context = funcs->p_eglCreateContext( egl->display, ctx->config, shared_ctx ? shared_ctx->context : EGL_NO_CONTEXT, attribs );
-    TRACE( "%p fmt %d ctx %p\n", hdc, format, ctx->context );
-    list_add_head( &gl_contexts, &ctx->entry );
-
-    *private = ctx;
-    return TRUE;
-}
-
-static BOOL android_context_make_current( HDC draw_hdc, HDC read_hdc, void *private )
-{
-    struct android_context *ctx = private;
-    BOOL ret = FALSE;
-    struct gl_drawable *draw_gl, *read_gl = NULL;
-    EGLSurface draw_surface, read_surface;
-    HWND draw_hwnd;
-
-    TRACE( "%p %p %p\n", draw_hdc, read_hdc, ctx );
-
-    if (!private)
-    {
-        funcs->p_eglMakeCurrent( egl->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT );
-        NtCurrentTeb()->glReserved2 = NULL;
+        TRACE( "Updated drawable %s\n", debugstr_opengl_drawable( *drawable ) );
         return TRUE;
     }
 
-    draw_hwnd = NtUserWindowFromDC( draw_hdc );
-    if ((draw_gl = get_gl_drawable( draw_hwnd, draw_hdc )))
-    {
-        read_gl = get_gl_drawable( NtUserWindowFromDC( read_hdc ), read_hdc );
-        draw_surface = draw_gl->surface ? draw_gl->surface : draw_gl->pbuffer;
-        read_surface = read_gl->surface ? read_gl->surface : read_gl->pbuffer;
-        TRACE( "%p/%p context %p surface %p/%p\n",
-               draw_hdc, read_hdc, ctx->context, draw_surface, read_surface );
-        ret = funcs->p_eglMakeCurrent( egl->display, draw_surface, read_surface, ctx->context );
-        if (ret)
-        {
-            ctx->surface = draw_gl->surface;
-            ctx->hwnd    = draw_hwnd;
-            ctx->refresh = FALSE;
-            NtCurrentTeb()->glReserved2 = ctx;
-            goto done;
-        }
-    }
-    RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
-
-done:
-    release_gl_drawable( read_gl );
-    release_gl_drawable( draw_gl );
-    return ret;
-}
-
-/***********************************************************************
- *		android_wglCopyContext
- */
-static BOOL android_context_copy( void *src, void *dst, UINT mask )
-{
-    FIXME( "%p -> %p mask %#x unsupported\n", src, dst, mask );
-    return FALSE;
-}
-
-/***********************************************************************
- *		android_wglDeleteContext
- */
-static BOOL android_context_destroy( void *private )
-{
-    struct android_context *ctx = private;
-    pthread_mutex_lock( &drawable_mutex );
-    list_remove( &ctx->entry );
-    pthread_mutex_unlock( &drawable_mutex );
-    funcs->p_eglDestroyContext( egl->display, ctx->context );
-    free( ctx );
+    if (!(gl = create_gl_drawable( hwnd, format, NULL ))) return FALSE;
+    *drawable = &gl->base;
     return TRUE;
 }
 
-static EGLenum android_init_egl_platform( const struct egl_platform *platform, EGLNativeDisplayType *platform_display )
+static void android_init_egl_platform( struct egl_platform *platform )
 {
+    platform->type = EGL_PLATFORM_ANDROID_KHR;
+    platform->native_display = EGL_DEFAULT_DISPLAY;
     egl = platform;
-    *platform_display = EGL_DEFAULT_DISPLAY;
-    return EGL_PLATFORM_ANDROID_KHR;
 }
 
 static void *android_get_proc_address( const char *name )
@@ -335,55 +153,23 @@ static void *android_get_proc_address( const char *name )
     return funcs->p_eglGetProcAddress( name );
 }
 
-static BOOL android_context_share( void *org, void *dest )
+static BOOL android_drawable_swap( struct opengl_drawable *base )
 {
-    FIXME( "%p %p\n", org, dest );
-    return FALSE;
-}
+    struct gl_drawable *gl = impl_from_opengl_drawable( base );
 
-static void set_swap_interval( struct gl_drawable *gl, int interval )
-{
-    if (interval < 0) interval = -interval;
-    if (gl->swap_interval == interval) return;
-    funcs->p_eglSwapInterval( egl->display, interval );
-    gl->swap_interval = interval;
-}
+    TRACE( "drawable %s surface %p\n", debugstr_opengl_drawable( base ), gl->base.surface );
 
-static BOOL android_swap_buffers( void *private, HWND hwnd, HDC hdc, int interval )
-{
-    struct android_context *ctx = private;
-    struct gl_drawable *gl;
-
-    if (!ctx) return FALSE;
-
-    TRACE( "%p hwnd %p context %p surface %p\n", hdc, ctx->hwnd, ctx->context, ctx->surface );
-
-    if (refresh_context( ctx )) return TRUE;
-
-    if ((gl = get_gl_drawable( hwnd, hdc )))
-    {
-        set_swap_interval( gl, interval );
-        release_gl_drawable( gl );
-    }
-
-    if (ctx->surface) funcs->p_eglSwapBuffers( egl->display, ctx->surface );
+    funcs->p_eglSwapBuffers( egl->display, gl->base.surface );
     return TRUE;
 }
 
-static BOOL android_context_flush( void *private, HWND hwnd, HDC hdc, int interval, BOOL finish )
+static void android_drawable_flush( struct opengl_drawable *base, UINT flags )
 {
-    struct android_context *ctx = private;
-    struct gl_drawable *gl;
+    struct gl_drawable *gl = impl_from_opengl_drawable( base );
 
-    TRACE( "hwnd %p context %p\n", ctx->hwnd, ctx->context );
-    refresh_context( ctx );
+    TRACE( "drawable %s, surface %p, flags %#x\n", debugstr_opengl_drawable( base ), gl->base.surface, flags );
 
-    if ((gl = get_gl_drawable( hwnd, hdc )))
-    {
-        set_swap_interval( gl, interval );
-        release_gl_drawable( gl );
-    }
-    return FALSE;
+    if (flags & GL_FLUSH_INTERVAL) funcs->p_eglSwapInterval( egl->display, abs( base->interval ) );
 }
 
 static const char *android_init_wgl_extensions( struct opengl_funcs *funcs )
@@ -396,14 +182,39 @@ static struct opengl_driver_funcs android_driver_funcs =
     .p_init_egl_platform = android_init_egl_platform,
     .p_get_proc_address = android_get_proc_address,
     .p_init_wgl_extensions = android_init_wgl_extensions,
-    .p_set_pixel_format = android_set_pixel_format,
-    .p_swap_buffers = android_swap_buffers,
-    .p_context_create = android_context_create,
-    .p_context_destroy = android_context_destroy,
-    .p_context_copy = android_context_copy,
-    .p_context_share = android_context_share,
-    .p_context_flush = android_context_flush,
-    .p_context_make_current = android_context_make_current,
+    .p_surface_create = android_surface_create,
+};
+
+static void android_client_surface_destroy( struct client_surface *client )
+{
+    TRACE( "%s\n", debugstr_client_surface( client ) );
+}
+
+static void android_client_surface_detach( struct client_surface *client )
+{
+}
+
+static void android_client_surface_update( struct client_surface *client )
+{
+}
+
+static void android_client_surface_present( struct client_surface *client, HDC hdc )
+{
+}
+
+static const struct client_surface_funcs android_client_surface_funcs =
+{
+    .destroy = android_client_surface_destroy,
+    .detach = android_client_surface_detach,
+    .update = android_client_surface_update,
+    .present = android_client_surface_present,
+};
+
+static const struct opengl_drawable_funcs android_drawable_funcs =
+{
+    .destroy = android_drawable_destroy,
+    .flush = android_drawable_flush,
+    .swap = android_drawable_swap,
 };
 
 /**********************************************************************
@@ -426,6 +237,9 @@ UINT ANDROID_OpenGLInit( UINT version, const struct opengl_funcs *opengl_funcs, 
 
     android_driver_funcs.p_init_pixel_formats = (*driver_funcs)->p_init_pixel_formats;
     android_driver_funcs.p_describe_pixel_format = (*driver_funcs)->p_describe_pixel_format;
+    android_driver_funcs.p_context_create = (*driver_funcs)->p_context_create;
+    android_driver_funcs.p_context_destroy = (*driver_funcs)->p_context_destroy;
+    android_driver_funcs.p_make_current = (*driver_funcs)->p_make_current;
 
     *driver_funcs = &android_driver_funcs;
     return STATUS_SUCCESS;

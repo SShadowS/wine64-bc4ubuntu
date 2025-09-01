@@ -2047,8 +2047,8 @@
 @ stub cacoshl
 @ stub cacosl
 @ cdecl calloc(long long)
-@ stub carg
-@ stub cargf
+@ cdecl carg(int128)
+@ cdecl cargf(int64)
 @ stub cargl
 @ stub casin
 @ stub casinf
@@ -2073,7 +2073,7 @@
 @ stub ccosl
 @ cdecl ceil(double)
 @ cdecl -arch=!i386 ceilf(float)
-@ stub cexp
+@ cdecl -norelay cexp(int128)
 @ stub cexpf
 @ stub cexpl
 @ cdecl cimag(int128)
@@ -2334,9 +2334,9 @@
 @ cdecl remquol(double double ptr) remquo
 @ cdecl rename(str str)
 @ cdecl rewind(ptr)
-@ cdecl rint(double) MSVCRT_rint
+@ cdecl rint(double)
 @ cdecl rintf(float)
-@ cdecl rintl(double) MSVCRT_rint
+@ cdecl rintl(double) rint
 @ cdecl round(double)
 @ cdecl roundf(float)
 @ cdecl roundl(double) round

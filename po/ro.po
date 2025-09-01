@@ -266,7 +266,7 @@ msgstr ""
 msgid "Not specified"
 msgstr "Ne specificat"
 
-#: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:38
+#: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:35
 #: dlls/shell32/shell32.rc:141 dlls/shell32/shell32.rc:243
 #: programs/regedit/regedit.rc:150 programs/winefile/winefile.rc:106
 msgid "Name"
@@ -378,6 +378,21 @@ msgstr "Tratare implicită Wine pentru AVI"
 msgid "uncompressed"
 msgstr "necomprimat"
 
+#: dlls/bluetoothapis/bluetoothapis.rc:31
+#, fuzzy
+#| msgid "&Confirm password:"
+msgid "Confirm pairing"
+msgstr "&Confirmați parola:"
+
+#: dlls/bluetoothapis/bluetoothapis.rc:32
+msgid "Pair with '%1!s!' using the following PIN/passkey value: %2!lu!?"
+msgstr ""
+
+#: dlls/bluetoothapis/bluetoothapis.rc:33
+msgid ""
+"Pair with unnamed device %1!s! using the following PIN/passkey value: %2!lu!?"
+msgstr ""
+
 #: dlls/browseui/browseui.rc:28
 msgid "Canceling..."
 msgstr "Renunț..."
@@ -427,7 +442,7 @@ msgstr "Expert"
 msgid "< &Back"
 msgstr "< &Înapoi"
 
-#: dlls/comctl32/comctl32.rc:85 dlls/oledb32/version.rc:61
+#: dlls/comctl32/comctl32.rc:85 dlls/oledb32/version.rc:58
 msgid "&Next >"
 msgstr "&Următor >"
 
@@ -1395,7 +1410,7 @@ msgid "&User name:"
 msgstr "Nume &utilizator:"
 
 #: dlls/credui/credui.rc:48 dlls/cryptui/cryptui.rc:402
-#: dlls/oledb32/version.rc:81
+#: dlls/oledb32/version.rc:78
 msgid "&Password:"
 msgstr "&Parolă:"
 
@@ -2735,7 +2750,7 @@ msgstr "Acest certificat este valabil."
 msgid "Field"
 msgstr "Câmp"
 
-#: dlls/cryptui/cryptui.rc:48 dlls/oledb32/version.rc:39
+#: dlls/cryptui/cryptui.rc:48 dlls/oledb32/version.rc:36
 msgid "Value"
 msgstr "Valoare"
 
@@ -3352,7 +3367,7 @@ msgstr "Simbol"
 msgid "OEM/DOS"
 msgstr "OEM/DOS"
 
-#: dlls/gdi32/gdi32.rc:45 dlls/oledb32/version.rc:100
+#: dlls/gdi32/gdi32.rc:45 dlls/oledb32/version.rc:97
 #: dlls/wldap32/wldap32.rc:112
 msgid "Other"
 msgstr "Altul"
@@ -3420,7 +3435,7 @@ msgid "&Stop"
 msgstr "&Oprește"
 
 #: dlls/hhctrl.ocx/hhctrl.rc:66 dlls/hhctrl.ocx/hhctrl.rc:83
-#: dlls/oledb32/version.rc:73 dlls/shdoclc/shdoclc.rc:59
+#: dlls/oledb32/version.rc:70 dlls/shdoclc/shdoclc.rc:59
 msgid "&Refresh"
 msgstr "&Actualizează"
 
@@ -3876,15 +3891,15 @@ msgstr "&Dezactivat"
 msgid "DInput"
 msgstr ""
 
-#: dlls/joy.cpl/joy.rc:62
+#: dlls/joy.cpl/joy.rc:62 dlls/joy.cpl/joy.rc:111
 msgid "Axes"
 msgstr ""
 
-#: dlls/joy.cpl/joy.rc:63
+#: dlls/joy.cpl/joy.rc:63 dlls/joy.cpl/joy.rc:112
 msgid "POVs"
 msgstr ""
 
-#: dlls/joy.cpl/joy.rc:64
+#: dlls/joy.cpl/joy.rc:64 dlls/joy.cpl/joy.rc:113
 msgid "Buttons"
 msgstr "Butoane"
 
@@ -3894,7 +3909,7 @@ msgstr ""
 
 #: dlls/joy.cpl/joy.rc:67
 msgid ""
-"Press any button in the controller to activate the chosen effect. The effect "
+"Hold any button in the controller to play the chosen effect. The effect "
 "direction can be changed with the controller axis."
 msgstr ""
 
@@ -3951,8 +3966,12 @@ msgid ""
 msgstr ""
 
 #: dlls/joy.cpl/joy.rc:98 dlls/joy.cpl/joy.rc:99 dlls/joy.cpl/joy.rc:100
-#: dlls/joy.cpl/joy.rc:101
+#: dlls/joy.cpl/joy.rc:101 dlls/joy.cpl/joy.rc:115
 msgid "Rumble"
+msgstr ""
+
+#: dlls/joy.cpl/joy.rc:106
+msgid "Windows.Gaming.Input"
 msgstr ""
 
 #: dlls/joy.cpl/joy.rc:31
@@ -4073,21 +4092,21 @@ msgstr "Compilarea condițională este dezactivată"
 msgid "Expected '@'"
 msgstr "Se așteaptă „@”"
 
-#: dlls/jscript/jscript.rc:90
+#: dlls/jscript/jscript.rc:92
 msgid "Microsoft JScript compilation error"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:91
+#: dlls/jscript/jscript.rc:93
 msgid "Microsoft JScript runtime error"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:92 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:94 dlls/vbscript/vbscript.rc:64
 #, fuzzy
 #| msgid "Unknown error"
 msgid "Unknown runtime error"
 msgstr "Eroare necunoscută"
 
-#: dlls/jscript/jscript.rc:56
+#: dlls/jscript/jscript.rc:57
 msgid "Number expected"
 msgstr "Se așteaptă un număr"
 
@@ -4096,160 +4115,172 @@ msgid "Function expected"
 msgstr "Se așteaptă o funcție"
 
 #: dlls/jscript/jscript.rc:55
+#, fuzzy
+#| msgid "'[object]' is not a date object"
+msgid "'[object]' is not a string object"
+msgstr "„[obiect]” nu este un obiect de tip dată"
+
+#: dlls/jscript/jscript.rc:56
 msgid "'[object]' is not a date object"
 msgstr "„[obiect]” nu este un obiect de tip dată"
 
-#: dlls/jscript/jscript.rc:57
+#: dlls/jscript/jscript.rc:58
 msgid "Object expected"
 msgstr "Se așteaptă un obiect"
 
-#: dlls/jscript/jscript.rc:58
+#: dlls/jscript/jscript.rc:59
 msgid "Illegal assignment"
 msgstr "Atribuire ilegală"
 
-#: dlls/jscript/jscript.rc:59
+#: dlls/jscript/jscript.rc:60
 msgid "'|' is undefined"
 msgstr "„|” nu este definit"
 
-#: dlls/jscript/jscript.rc:60
+#: dlls/jscript/jscript.rc:61
 msgid "Boolean object expected"
 msgstr "Se așteaptă un obiect boolean"
 
-#: dlls/jscript/jscript.rc:61
+#: dlls/jscript/jscript.rc:62
 msgid "Cannot delete '|'"
 msgstr "Nu se poate șterge „|”"
 
-#: dlls/jscript/jscript.rc:62
+#: dlls/jscript/jscript.rc:63
 msgid "VBArray object expected"
 msgstr "Se așteaptă un obiect VBArray"
 
-#: dlls/jscript/jscript.rc:63
+#: dlls/jscript/jscript.rc:64
 msgid "JScript object expected"
 msgstr "Se așteaptă un obiect JScript"
 
-#: dlls/jscript/jscript.rc:64
+#: dlls/jscript/jscript.rc:65
 #, fuzzy
 #| msgid "Array object expected"
 msgid "Enumerator object expected"
 msgstr "Se așteaptă un obiect matrice"
 
-#: dlls/jscript/jscript.rc:65
+#: dlls/jscript/jscript.rc:66
 #, fuzzy
 #| msgid "Boolean object expected"
 msgid "Regular Expression object expected"
 msgstr "Se așteaptă un obiect boolean"
 
-#: dlls/jscript/jscript.rc:66
+#: dlls/jscript/jscript.rc:67
 msgid "Syntax error in regular expression"
 msgstr "Eroare de sintaxă în expresia regulată"
 
-#: dlls/jscript/jscript.rc:67
+#: dlls/jscript/jscript.rc:68
 #, fuzzy
 #| msgid "Expected identifier"
 msgid "Unexpected quantifier"
 msgstr "Se așteaptă un identificator"
 
-#: dlls/jscript/jscript.rc:68
+#: dlls/jscript/jscript.rc:69
 msgid "Exception thrown and not caught"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:70
+#: dlls/jscript/jscript.rc:71
 msgid "URI to be encoded contains invalid characters"
 msgstr "URI care trebuie codificat conține caractere nevalide"
 
-#: dlls/jscript/jscript.rc:69
+#: dlls/jscript/jscript.rc:70
 msgid "URI to be decoded is incorrect"
 msgstr "URI care trebuie decodat este incorect"
 
-#: dlls/jscript/jscript.rc:71
+#: dlls/jscript/jscript.rc:72
 msgid "Number of fraction digits is out of range"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:72
+#: dlls/jscript/jscript.rc:73
 #, fuzzy
 #| msgid "Print range"
 msgid "Precision is out of range"
 msgstr "Interval tipărire"
 
-#: dlls/jscript/jscript.rc:73
-msgid "Array length must be a finite positive integer"
-msgstr "Lungimea unei matrice trebuie să fie un număr întreg pozitiv"
-
 #: dlls/jscript/jscript.rc:74
-msgid "Array object expected"
+#, fuzzy
+#| msgid "Array object expected"
+msgid "Array or arguments object expected"
 msgstr "Se așteaptă un obiect matrice"
 
 #: dlls/jscript/jscript.rc:75
+msgid "Array length must be a finite positive integer"
+msgstr "Lungimea unei matrice trebuie să fie un număr întreg pozitiv"
+
+#: dlls/jscript/jscript.rc:76
+msgid "Array object expected"
+msgstr "Se așteaptă un obiect matrice"
+
+#: dlls/jscript/jscript.rc:77
 msgid ""
 "'writable' attribute on the property descriptor cannot be set to 'true' on "
 "this object"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:76
+#: dlls/jscript/jscript.rc:78
 msgid "Cyclic __proto__ value"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:77
+#: dlls/jscript/jscript.rc:79
 msgid "Cannot create property for a non-extensible object"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:78
+#: dlls/jscript/jscript.rc:80
 msgid "Cannot define property '|': object is not extensible"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:79
+#: dlls/jscript/jscript.rc:81
 msgid "Cannot redefine non-configurable property '|'"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:82
 msgid "Cannot modify non-writable property '|'"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:81
+#: dlls/jscript/jscript.rc:83
 #, fuzzy
 #| msgid "'[object]' is not a date object"
 msgid "'this' is not a DataView object"
 msgstr "„[obiect]” nu este un obiect de tip dată"
 
-#: dlls/jscript/jscript.rc:82
+#: dlls/jscript/jscript.rc:84
 msgid "Required argument offset or value in DataView method is not specified"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:83
+#: dlls/jscript/jscript.rc:85
 msgid "DataView operation access beyond specified buffer length"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:84
+#: dlls/jscript/jscript.rc:86
 msgid "DataView constructor argument offset is invalid"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:85
+#: dlls/jscript/jscript.rc:87
 #, fuzzy
 #| msgid "'[object]' is not a date object"
 msgid "'this' is not a | object"
 msgstr "„[obiect]” nu este un obiect de tip dată"
 
-#: dlls/jscript/jscript.rc:86
+#: dlls/jscript/jscript.rc:88
 #, fuzzy
 #| msgid "'[object]' is not a date object"
 msgid "'key' is not an object"
 msgstr "„[obiect]” nu este un obiect de tip dată"
 
-#: dlls/jscript/jscript.rc:87
+#: dlls/jscript/jscript.rc:89
 #, fuzzy
 #| msgid "Array object expected"
 msgid "ArrayBuffer object expected"
 msgstr "Se așteaptă un obiect matrice"
 
-#: dlls/jscript/jscript.rc:88
+#: dlls/jscript/jscript.rc:90
 msgid "Property cannot have both accessors and a value"
 msgstr ""
 
-#: include/wine/wine_common_ver.rc:138
+#: include/wine/wine_common_ver.rc:123
 msgid "Wine kernel DLL"
 msgstr ""
 
-#: include/wine/wine_common_ver.rc:143 dlls/winemac.drv/winemac.rc:32
+#: include/wine/wine_common_ver.rc:128 dlls/winemac.drv/winemac.rc:32
 #: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:143
 msgid "Wine"
 msgstr "Wine"
@@ -8306,7 +8337,7 @@ msgstr ""
 #: dlls/mferror/mferror.mc:389
 #, fuzzy
 #| msgid "Operation canceled by user.\n"
-msgid "Operation was cancelled.\n"
+msgid "Operation was canceled.\n"
 msgstr "Operația a fost anulată de utilizator.\n"
 
 #: dlls/mferror/mferror.mc:396
@@ -9609,12 +9640,12 @@ msgstr ""
 #, fuzzy
 #| msgid "&enable"
 msgctxt "object state"
-msgid "sizeable"
+msgid "sizable"
 msgstr "activ&ează"
 
 #: dlls/oleacc/oleacc.rc:116
 msgctxt "object state"
-msgid "moveable"
+msgid "movable"
 msgstr "mutabil"
 
 #: dlls/oleacc/oleacc.rc:117
@@ -9693,201 +9724,201 @@ msgstr "Activat"
 msgid "Off"
 msgstr "Dezactivat"
 
-#: dlls/oledb32/version.rc:56
+#: dlls/oledb32/version.rc:53
 #, fuzzy
 #| msgid "video"
 msgid "Provider"
 msgstr "video"
 
-#: dlls/oledb32/version.rc:59
+#: dlls/oledb32/version.rc:56
 #, fuzzy
 #| msgid "Select the format you want to use:"
 msgid "Select the data you want to connect to:"
 msgstr "Selectați formatul pe care doriți să îl utilizați:"
 
-#: dlls/oledb32/version.rc:66
+#: dlls/oledb32/version.rc:63
 #, fuzzy
 #| msgid "LAN Connection"
 msgid "Connection"
 msgstr "Conexiune LAN"
 
-#: dlls/oledb32/version.rc:69
+#: dlls/oledb32/version.rc:66
 #, fuzzy
 #| msgid "Select the format you want to use:"
 msgid "Specify the following to connect to ODBC data:"
 msgstr "Selectați formatul pe care doriți să îl utilizați:"
 
-#: dlls/oledb32/version.rc:70
+#: dlls/oledb32/version.rc:67
 msgid "1. Specify the source of data:"
 msgstr ""
 
-#: dlls/oledb32/version.rc:71
+#: dlls/oledb32/version.rc:68
 #, fuzzy
 #| msgid "Please enter your name"
 msgid "Use &data source name"
 msgstr "Scrieți-vă numele"
 
-#: dlls/oledb32/version.rc:74
+#: dlls/oledb32/version.rc:71
 #, fuzzy
 #| msgid "Reset Connections"
 msgid "Use c&onnection string"
 msgstr "Conexiuni întrerupte"
 
-#: dlls/oledb32/version.rc:75
+#: dlls/oledb32/version.rc:72
 #, fuzzy
 #| msgid "LAN Connection"
 msgid "&Connection string:"
 msgstr "Conexiune LAN"
 
-#: dlls/oledb32/version.rc:77
+#: dlls/oledb32/version.rc:74
 #, fuzzy
 #| msgid "A&dd..."
 msgid "B&uild..."
 msgstr "A&daugă..."
 
-#: dlls/oledb32/version.rc:78
+#: dlls/oledb32/version.rc:75
 msgid "2. Enter information to log on to the server"
 msgstr ""
 
-#: dlls/oledb32/version.rc:79
+#: dlls/oledb32/version.rc:76
 #, fuzzy
 #| msgid "&User name:"
 msgid "User &name:"
 msgstr "Nume &utilizator:"
 
-#: dlls/oledb32/version.rc:83
+#: dlls/oledb32/version.rc:80
 #, fuzzy
 #| msgid "&Blank page"
 msgid "&Blank password"
 msgstr "Pagină &goală"
 
-#: dlls/oledb32/version.rc:84
+#: dlls/oledb32/version.rc:81
 #, fuzzy
 #| msgid "Wrong password.\n"
 msgid "Allow &saving password"
 msgstr "Parolă greșită.\n"
 
-#: dlls/oledb32/version.rc:85
+#: dlls/oledb32/version.rc:82
 msgid "3. Enter the &initial catalog to use:"
 msgstr ""
 
-#: dlls/oledb32/version.rc:87
+#: dlls/oledb32/version.rc:84
 #, fuzzy
 #| msgid "Reset Connections"
 msgid "&Test Connection"
 msgstr "Conexiuni întrerupte"
 
-#: dlls/oledb32/version.rc:92
+#: dlls/oledb32/version.rc:89
 msgid "Advanced"
 msgstr "Avansat"
 
-#: dlls/oledb32/version.rc:95
+#: dlls/oledb32/version.rc:92
 #, fuzzy
 #| msgid "Network share"
 msgid "Network settings"
 msgstr "Resursă din rețea"
 
-#: dlls/oledb32/version.rc:96
+#: dlls/oledb32/version.rc:93
 msgid "&Impersonation level:"
 msgstr ""
 
-#: dlls/oledb32/version.rc:98
+#: dlls/oledb32/version.rc:95
 msgid "P&rotection level:"
 msgstr ""
 
-#: dlls/oledb32/version.rc:101
+#: dlls/oledb32/version.rc:98
 #, fuzzy
 #| msgid "Connected"
 msgid "Connect:"
 msgstr "Conectat"
 
-#: dlls/oledb32/version.rc:103
+#: dlls/oledb32/version.rc:100
 #, fuzzy
 #| msgid "&Seconds"
 msgid "seconds."
 msgstr "&Secunde"
 
-#: dlls/oledb32/version.rc:104
+#: dlls/oledb32/version.rc:101
 #, fuzzy
 #| msgid "Success"
 msgid "A&ccess:"
 msgstr "Succes"
 
-#: dlls/oledb32/version.rc:110
+#: dlls/oledb32/version.rc:107
 #, fuzzy
 #| msgid "&All"
 msgid "All"
 msgstr "To&ate"
 
-#: dlls/oledb32/version.rc:114
+#: dlls/oledb32/version.rc:111
 msgid ""
 "These are the initialization properties for this type of data. To edit a "
 "value, select a property, then choose Edit Value below."
 msgstr ""
 
-#: dlls/oledb32/version.rc:115
+#: dlls/oledb32/version.rc:112
 #, fuzzy
 #| msgid "&Edit..."
 msgid "&Edit Value..."
 msgstr "&Editează..."
 
-#: dlls/oledb32/version.rc:49
+#: dlls/oledb32/version.rc:46
 #, fuzzy
 #| msgid "Properties"
 msgid "Data Link Error"
 msgstr "Proprietăți"
 
-#: dlls/oledb32/version.rc:50
+#: dlls/oledb32/version.rc:47
 #, fuzzy
 #| msgid "Please select a file."
 msgid "Please select a provider."
 msgstr "Selectați un fișier."
 
-#: dlls/oledb32/version.rc:51
+#: dlls/oledb32/version.rc:48
 msgid ""
 "Provider is no longer available. Ensure that the provider is installed "
 "properly."
 msgstr ""
 
-#: dlls/oledb32/version.rc:36
+#: dlls/oledb32/version.rc:33
 #, fuzzy
 #| msgid "Properties"
 msgid "Data Link Properties"
 msgstr "Proprietăți"
 
-#: dlls/oledb32/version.rc:37
+#: dlls/oledb32/version.rc:34
 msgid "OLE DB Provider(s)"
 msgstr ""
 
-#: dlls/oledb32/version.rc:41
+#: dlls/oledb32/version.rc:38
 #, fuzzy
 #| msgid "Ready"
 msgid "Read"
 msgstr "Gata"
 
-#: dlls/oledb32/version.rc:42
+#: dlls/oledb32/version.rc:39
 #, fuzzy
 #| msgid "Readme:"
 msgid "ReadWrite"
 msgstr "Readme:"
 
-#: dlls/oledb32/version.rc:43
+#: dlls/oledb32/version.rc:40
 msgid "Share Deny None"
 msgstr ""
 
-#: dlls/oledb32/version.rc:44
+#: dlls/oledb32/version.rc:41
 msgid "Share Deny Read"
 msgstr ""
 
-#: dlls/oledb32/version.rc:45
+#: dlls/oledb32/version.rc:42
 msgid "Share Deny Write"
 msgstr ""
 
-#: dlls/oledb32/version.rc:46
+#: dlls/oledb32/version.rc:43
 msgid "Share Exclusive"
 msgstr ""
 
-#: dlls/oledb32/version.rc:47
+#: dlls/oledb32/version.rc:44
 #, fuzzy
 #| msgid "I/O Writes"
 msgid "Write"
@@ -15782,6 +15813,12 @@ msgstr "Sfârșit de fișier.\n"
 msgid "End of file"
 msgstr "Sfârșit de fișier.\n"
 
+#: programs/cmd/cmd.rc:410
+#, fuzzy
+#| msgid "%1!d! file(s) copied\n"
+msgid "%t%1!u! file(s) copied\n"
+msgstr "%1!d! fișier(e) copiat(e)\n"
+
 #: programs/conhost/conhost.rc:54
 msgid "Cursor size"
 msgstr "Dimensiune cursor"
@@ -17287,7 +17324,7 @@ msgstr "Operațiunea a fost finalizată cu succes\n"
 #: programs/reg/reg.rc:131
 #, fuzzy
 #| msgid "The registry operation was cancelled\n"
-msgid "reg: The registry operation was cancelled\n"
+msgid "reg: The registry operation was canceled\n"
 msgstr "Operația pe registru a fost anulată\n"
 
 #: programs/reg/reg.rc:174
@@ -18472,7 +18509,7 @@ msgid ""
 "Sent termination signal to process with PID %1!u!, child of PID %2!u!.\n"
 msgstr ""
 
-#: include/wine/wine_common_ver.rc:138
+#: include/wine/wine_common_ver.rc:123
 #, fuzzy
 #| msgid "page tab list"
 msgid "Wine tasklist"

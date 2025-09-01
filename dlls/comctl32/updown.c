@@ -518,6 +518,7 @@ static int UPDOWN_SetPos(UPDOWN_INFO *infoPtr, int pos)
         else
             ret = infoPtr->MaxVal;
     }
+    NotifyWinEvent( EVENT_OBJECT_VALUECHANGE, infoPtr->Self, OBJID_CLIENT, 0 );
     return ret;
 }
 
@@ -952,6 +953,11 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 	    }
 	    InvalidateRect (infoPtr->Self, NULL, FALSE);
 	    break;
+
+        case WM_GETOBJECT:
+            if ((LONG)lParam == OBJID_QUERYCLASSNAMEIDX)
+                return 0x10016;
+	    return DefWindowProcW (hwnd, message, wParam, lParam);
 
         case WM_STYLECHANGED:
             if (wParam == GWL_STYLE)

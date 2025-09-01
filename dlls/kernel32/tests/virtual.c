@@ -1629,7 +1629,7 @@ static void test_IsBadReadPtr(void)
 {
     BOOL ret;
     void *ptr = (void *)0xdeadbeef;
-    char stackvar;
+    char stackvar = 0;
 
     ret = IsBadReadPtr(NULL, 0);
     ok(ret == FALSE, "Expected IsBadReadPtr to return FALSE, got %d\n", ret);
@@ -3983,7 +3983,7 @@ static void *map_view_of_file(HANDLE handle, DWORD access)
     protect = file_access_to_prot( access );
     addr = NULL;
     status = pNtMapViewOfSection(handle, GetCurrentProcess(), &addr, 0, 0, &offset,
-                                 &count, 1 /* ViewShare */, 0, protect);
+                                 &count, ViewShare, 0, protect);
     if ((int)status < 0) addr = NULL;
     return addr;
 }

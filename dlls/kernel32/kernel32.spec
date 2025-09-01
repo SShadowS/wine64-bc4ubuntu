@@ -268,7 +268,7 @@
 @ stdcall CopyLZFile(long long) LZCopy
 @ stdcall CreateActCtxA(ptr)
 @ stdcall -import CreateActCtxW(ptr)
-# @ stub CreateBoundaryDescriptorA
+@ stdcall CreateBoundaryDescriptorA(str long)
 @ stdcall -import CreateBoundaryDescriptorW(wstr long)
 @ stdcall -import CreateConsoleScreenBuffer(long long ptr long ptr)
 @ stdcall -import CreateDirectoryA(str ptr)
@@ -957,7 +957,7 @@
 @ stub HeapSetFlags
 @ stdcall -import HeapSetInformation(ptr long ptr long)
 @ stdcall HeapSize(long long ptr) NTDLL.RtlSizeHeap
-@ stub HeapSummary
+@ stdcall -import HeapSummary(long long ptr)
 @ stdcall -import HeapUnlock(long)
 @ stub HeapUsage
 @ stdcall -import HeapValidate(long long ptr)
@@ -1213,6 +1213,7 @@
 @ stdcall -import QueryUnbiasedInterruptTime(ptr)
 @ stub QueryWin31IniFilesMappedToRegistry
 @ stdcall -import QueueUserAPC(ptr long long)
+@ stdcall -import QueueUserAPC2(ptr long long long)
 @ stdcall -import QueueUserWorkItem(ptr ptr long)
 @ stdcall -import RaiseException(long long long ptr)
 @ stdcall -import RaiseFailFastException(ptr ptr long)

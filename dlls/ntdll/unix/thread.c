@@ -351,12 +351,13 @@ static NTSTATUS context_to_server( struct context_data *to, USHORT to_machine, c
         if (flags & CONTEXT_I386_CONTROL)
         {
             to->flags |= SERVER_CTX_CONTROL;
-            to->ctl.x86_64_regs.rbp    = from->Ebp;
             to->ctl.x86_64_regs.rsp    = from->Esp;
             to->ctl.x86_64_regs.rip    = from->Eip;
             to->ctl.x86_64_regs.cs     = from->SegCs;
             to->ctl.x86_64_regs.ss     = from->SegSs;
             to->ctl.x86_64_regs.flags  = from->EFlags;
+
+            to->integer.x86_64_regs.rbp = from->Ebp;
         }
         if (flags & CONTEXT_I386_INTEGER)
         {
@@ -410,7 +411,6 @@ static NTSTATUS context_to_server( struct context_data *to, USHORT to_machine, c
         if (flags & CONTEXT_AMD64_CONTROL)
         {
             to->flags |= SERVER_CTX_CONTROL;
-            to->ctl.x86_64_regs.rbp   = from->Rbp;
             to->ctl.x86_64_regs.rip   = from->Rip;
             to->ctl.x86_64_regs.rsp   = from->Rsp;
             to->ctl.x86_64_regs.cs    = from->SegCs;
@@ -424,6 +424,7 @@ static NTSTATUS context_to_server( struct context_data *to, USHORT to_machine, c
             to->integer.x86_64_regs.rcx = from->Rcx;
             to->integer.x86_64_regs.rdx = from->Rdx;
             to->integer.x86_64_regs.rbx = from->Rbx;
+            to->integer.x86_64_regs.rbp = from->Rbp;
             to->integer.x86_64_regs.rsi = from->Rsi;
             to->integer.x86_64_regs.rdi = from->Rdi;
             to->integer.x86_64_regs.r8  = from->R8;
@@ -472,7 +473,6 @@ static NTSTATUS context_to_server( struct context_data *to, USHORT to_machine, c
         if (flags & CONTEXT_AMD64_CONTROL)
         {
             to->flags |= SERVER_CTX_CONTROL;
-            to->ctl.i386_regs.ebp    = from->Rbp;
             to->ctl.i386_regs.eip    = from->Rip;
             to->ctl.i386_regs.esp    = from->Rsp;
             to->ctl.i386_regs.cs     = from->SegCs;
@@ -488,6 +488,8 @@ static NTSTATUS context_to_server( struct context_data *to, USHORT to_machine, c
             to->integer.i386_regs.ebx = from->Rbx;
             to->integer.i386_regs.esi = from->Rsi;
             to->integer.i386_regs.edi = from->Rdi;
+
+            to->ctl.i386_regs.ebp = from->Rbp;
         }
         if (flags & CONTEXT_AMD64_SEGMENTS)
         {
@@ -758,7 +760,6 @@ static NTSTATUS context_from_server( void *dst, const struct context_data *from,
         if ((from->flags & SERVER_CTX_CONTROL) && (to_flags & CONTEXT_I386_CONTROL))
         {
             to->ContextFlags |= CONTEXT_I386_CONTROL;
-            to->Ebp    = from->ctl.x86_64_regs.rbp;
             to->Esp    = from->ctl.x86_64_regs.rsp;
             to->Eip    = from->ctl.x86_64_regs.rip;
             to->SegCs  = from->ctl.x86_64_regs.cs;
@@ -774,6 +775,10 @@ static NTSTATUS context_from_server( void *dst, const struct context_data *from,
             to->Edx = from->integer.x86_64_regs.rdx;
             to->Esi = from->integer.x86_64_regs.rsi;
             to->Edi = from->integer.x86_64_regs.rdi;
+        }
+        if ((from->flags & SERVER_CTX_INTEGER) && (to_flags & CONTEXT_I386_CONTROL))
+        {
+            to->Ebp = from->integer.x86_64_regs.rbp;
         }
         if ((from->flags & SERVER_CTX_SEGMENTS) && (to_flags & CONTEXT_I386_SEGMENTS))
         {
@@ -820,7 +825,6 @@ static NTSTATUS context_from_server( void *dst, const struct context_data *from,
         if ((from->flags & SERVER_CTX_CONTROL) && (to_flags & CONTEXT_AMD64_CONTROL))
         {
             to->ContextFlags |= CONTEXT_AMD64_CONTROL;
-            to->Rbp    = from->ctl.x86_64_regs.rbp;
             to->Rip    = from->ctl.x86_64_regs.rip;
             to->Rsp    = from->ctl.x86_64_regs.rsp;
             to->SegCs  = from->ctl.x86_64_regs.cs;
@@ -834,6 +838,7 @@ static NTSTATUS context_from_server( void *dst, const struct context_data *from,
             to->Rcx = from->integer.x86_64_regs.rcx;
             to->Rdx = from->integer.x86_64_regs.rdx;
             to->Rbx = from->integer.x86_64_regs.rbx;
+            to->Rbp = from->integer.x86_64_regs.rbp;
             to->Rsi = from->integer.x86_64_regs.rsi;
             to->Rdi = from->integer.x86_64_regs.rdi;
             to->R8  = from->integer.x86_64_regs.r8;
@@ -883,7 +888,6 @@ static NTSTATUS context_from_server( void *dst, const struct context_data *from,
         if ((from->flags & SERVER_CTX_CONTROL) && (to_flags & CONTEXT_AMD64_CONTROL))
         {
             to->ContextFlags |= CONTEXT_AMD64_CONTROL;
-            to->Rbp    = from->ctl.i386_regs.ebp;
             to->Rip    = from->ctl.i386_regs.eip;
             to->Rsp    = from->ctl.i386_regs.esp;
             to->SegCs  = from->ctl.i386_regs.cs;
@@ -899,6 +903,10 @@ static NTSTATUS context_from_server( void *dst, const struct context_data *from,
             to->Rbx = from->integer.i386_regs.ebx;
             to->Rsi = from->integer.i386_regs.esi;
             to->Rdi = from->integer.i386_regs.edi;
+        }
+        if ((from->flags & SERVER_CTX_CONTROL) && (to_flags & CONTEXT_AMD64_INTEGER))
+        {
+            to->Rbp = from->ctl.i386_regs.ebp;
         }
         if ((from->flags & SERVER_CTX_SEGMENTS) && (to_flags & CONTEXT_AMD64_SEGMENTS))
         {
@@ -1307,7 +1315,8 @@ NTSTATUS WINAPI NtCreateThreadEx( HANDLE *handle, ACCESS_MASK access, OBJECT_ATT
                                   ULONG flags, ULONG_PTR zero_bits, SIZE_T stack_commit,
                                   SIZE_T stack_reserve, PS_ATTRIBUTE_LIST *attr_list )
 {
-    static const ULONG supported_flags = THREAD_CREATE_FLAGS_CREATE_SUSPENDED | THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER;
+    static const ULONG supported_flags = THREAD_CREATE_FLAGS_CREATE_SUSPENDED | THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER |
+                                         THREAD_CREATE_FLAGS_BYPASS_PROCESS_FREEZE;
     sigset_t sigset;
     pthread_t pthread_id;
     pthread_attr_t pthread_attr;
@@ -1712,21 +1721,27 @@ NTSTATUS WINAPI NtTerminateThread( HANDLE handle, LONG exit_code )
 
 
 /******************************************************************************
- *              NtQueueApcThread  (NTDLL.@)
+ *              NtQueueApcThreadEx2  (NTDLL.@)
  */
-NTSTATUS WINAPI NtQueueApcThread( HANDLE handle, PNTAPCFUNC func, ULONG_PTR arg1,
-                                  ULONG_PTR arg2, ULONG_PTR arg3 )
+NTSTATUS WINAPI NtQueueApcThreadEx2( HANDLE handle, HANDLE reserve_handle, ULONG flags,
+                                     PNTAPCFUNC func, ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3 )
 {
     unsigned int ret;
     union apc_call call;
 
+    TRACE( "%p %p %#x %p %p %p %p.\n", handle, reserve_handle, flags, func, (void *)arg1, (void *)arg2, (void *)arg3 );
+
     SERVER_START_REQ( queue_apc )
     {
         req->handle = wine_server_obj_handle( handle );
+        req->reserve_handle = wine_server_obj_handle( reserve_handle );
         if (func)
         {
             call.type         = APC_USER;
             call.user.func    = wine_server_client_ptr( func );
+            call.user.flags = 0;
+            if (flags & QUEUE_USER_APC_FLAGS_SPECIAL_USER_APC) call.user.flags |= SERVER_USER_APC_SPECIAL;
+            if (flags & QUEUE_USER_APC_CALLBACK_DATA_CONTEXT) call.user.flags |= SERVER_USER_APC_CALLBACK_DATA_CONTEXT;
             call.user.args[0] = arg1;
             call.user.args[1] = arg2;
             call.user.args[2] = arg3;
@@ -1745,8 +1760,21 @@ NTSTATUS WINAPI NtQueueApcThread( HANDLE handle, PNTAPCFUNC func, ULONG_PTR arg1
 NTSTATUS WINAPI NtQueueApcThreadEx( HANDLE handle, HANDLE reserve_handle, PNTAPCFUNC func,
                                     ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3 )
 {
-    FIXME( "reserve handle should be used: %p\n", reserve_handle );
-    return NtQueueApcThread( handle, func, arg1, arg2, arg3 );
+    ULONG flags = 0;
+
+    flags = (ULONG_PTR)reserve_handle & (ULONG_PTR)3;
+    reserve_handle = (HANDLE)((ULONG_PTR)reserve_handle & ~(ULONG_PTR)3);
+    return NtQueueApcThreadEx2( handle, reserve_handle, flags, func, arg1, arg2, arg3 );
+}
+
+
+/******************************************************************************
+ *              NtQueueApcThread  (NTDLL.@)
+ */
+NTSTATUS WINAPI NtQueueApcThread( HANDLE handle, PNTAPCFUNC func, ULONG_PTR arg1,
+                                  ULONG_PTR arg2, ULONG_PTR arg3 )
+{
+    return NtQueueApcThreadEx2( handle, NULL, QUEUE_USER_APC_FLAGS_NONE, func, arg1, arg2, arg3 );
 }
 
 
@@ -2299,12 +2327,20 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
 
     case ThreadPriorityBoost:
     {
-        DWORD *value = data;
-
         if (length != sizeof(ULONG)) return STATUS_INFO_LENGTH_MISMATCH;
-        if (ret_len) *ret_len = sizeof(ULONG);
-        *value = 0;
-        return STATUS_SUCCESS;
+        SERVER_START_REQ( get_thread_info )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            status = wine_server_call( req );
+            if (status == STATUS_SUCCESS)
+            {
+                ULONG disable_boost = !!(reply->flags & GET_THREAD_INFO_FLAG_DISABLE_BOOST);
+                if (data) memcpy( data, &disable_boost, sizeof(disable_boost) );
+                if (ret_len) *ret_len = sizeof(disable_boost);
+            }
+        }
+        SERVER_END_REQ;
+        return status;
     }
 
     case ThreadIdealProcessorEx:
@@ -2545,8 +2581,19 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
     }
 
     case ThreadPriorityBoost:
-        WARN("Unimplemented class ThreadPriorityBoost.\n");
-        return STATUS_SUCCESS;
+    {
+        const DWORD *disable_boost = data;
+        if (length != sizeof(DWORD)) return STATUS_INVALID_PARAMETER;
+        SERVER_START_REQ( set_thread_info )
+        {
+            req->handle         = wine_server_obj_handle( handle );
+            req->disable_boost  = *disable_boost;
+            req->mask           = SET_THREAD_INFO_DISABLE_BOOST;
+            status = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        return status;
+    }
 
     case ThreadManageWritesToExecutableMemory:
     {
@@ -2589,13 +2636,23 @@ ULONG WINAPI NtGetCurrentProcessorNumber(void)
 #if defined(HAVE_SCHED_GETCPU)
     int res = sched_getcpu();
     if (res >= 0) return res;
-#elif defined(__APPLE__) && (defined(__x86_64__) || defined(__i386__))
-    struct {
-        unsigned long p1, p2;
-    } p;
-    __asm__ __volatile__("sidt %[p]" : [p] "=&m"(p));
-    processor = (ULONG)(p.p1 & 0xfff);
-    return processor;
+#elif defined(__APPLE__) && defined(MAC_OS_VERSION_11_0)
+    if (__builtin_available( macOS 11.0, * ))
+    {
+        size_t cpu_id;
+        pthread_cpu_number_np( &cpu_id );
+        return cpu_id;
+    }
+#endif
+#if defined(__APPLE__) && (defined(__x86_64__) || defined(__i386__))
+    {
+        struct {
+            unsigned long p1, p2;
+        } p;
+        __asm__ __volatile__("sidt %[p]" : [p] "=&m"(p));
+        processor = (ULONG)(p.p1 & 0xfff);
+        return processor;
+    }
 #endif
 
     if (peb->NumberOfProcessors > 1)

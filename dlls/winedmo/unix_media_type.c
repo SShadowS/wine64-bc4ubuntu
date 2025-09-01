@@ -67,7 +67,7 @@ static inline const char *debugstr_area( const MFVideoArea *area )
         }                                                                                         \
     } while (0)
 
-static WORD wave_format_tag_from_codec_id( enum AVCodecID id )
+static UINT wave_format_tag_from_codec_id( enum AVCodecID id )
 {
     const struct AVCodecTag *table[] = {avformat_get_riff_audio_tags(), avformat_get_mov_audio_tags(), 0};
     return av_codec_get_tag( table, id );
@@ -161,9 +161,8 @@ static NTSTATUS heaac_wave_format_from_codec_params( const AVCodecParameters *pa
 
 static NTSTATUS audio_format_from_codec_params( const AVCodecParameters *params, void *format, UINT32 *format_size )
 {
-    UINT wave_format_size = sizeof(WAVEFORMATEX);
+    UINT format_tag, wave_format_size = sizeof(WAVEFORMATEX);
     UINT64 channel_mask;
-    WORD format_tag;
     int channels;
 
     if (params->codec_id == AV_CODEC_ID_AAC) return heaac_wave_format_from_codec_params( params, format, format_size );
@@ -212,6 +211,7 @@ static GUID subtype_from_pixel_format( enum AVPixelFormat fmt )
     case AV_PIX_FMT_BGR24: return MFVideoFormat_RGB24;
     case AV_PIX_FMT_NV12: return MFVideoFormat_NV12;
     case AV_PIX_FMT_NV21: return MFVideoFormat_NV21;
+    case AV_PIX_FMT_P010: return MFVideoFormat_P010;
     case AV_PIX_FMT_RGB565: return MFVideoFormat_RGB565;
     case AV_PIX_FMT_RGB555: return MFVideoFormat_RGB555;
     case AV_PIX_FMT_RGB8: return MFVideoFormat_RGB8;

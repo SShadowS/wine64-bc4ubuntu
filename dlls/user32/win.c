@@ -29,6 +29,13 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 
+#define MAX_ATOM_LEN 255 /* from dlls/kernel32/atom.c */
+
+static const char *debugstr_us( const UNICODE_STRING *us )
+{
+    if (!us) return "<null>";
+    return debugstr_wn( us->Buffer, us->Length / sizeof(WCHAR) );
+}
 
 #ifdef __i386__
 /* Some apps pass a non-stdcall proc to EnumChildWindows,
@@ -275,14 +282,23 @@ static BOOL is_default_coord( int x )
  */
 HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module, BOOL unicode )
 {
-    UNICODE_STRING class, window_name = {0};
+    WCHAR nameW[MAX_ATOM_LEN + 1];
+    UNICODE_STRING class = RTL_CONSTANT_STRING(nameW), version, window_name = {0};
     HWND hwnd, top_child = 0;
     MDICREATESTRUCTW mdi_cs;
     WNDCLASSEXW info;
     WCHAR name_buf[8];
     HMENU menu;
 
-    if (!get_class_info( module, className, &info, &class, FALSE )) return FALSE;
+    init_class_name( &class, className );
+    get_class_version( &class, &version, TRUE );
+
+    if (!NtUserGetClassInfoEx( module, &class, &info, NULL, FALSE ))
+    {
+        TRACE( "%s %p -> not found\n", debugstr_us(&class), module );
+        SetLastError( ERROR_CLASS_DOES_NOT_EXIST );
+        return FALSE;
+    }
 
     TRACE("%s %s%s%s ex=%08lx style=%08lx %d,%d %dx%d parent=%p menu=%p inst=%p params=%p\n",
           unicode ? debugstr_w(cs->lpszName) : debugstr_a((LPCSTR)cs->lpszName),
@@ -495,19 +511,11 @@ BOOL WINAPI OpenIcon( HWND hwnd )
  */
 HWND WINAPI FindWindowExW( HWND parent, HWND child, const WCHAR *class, const WCHAR *title )
 {
-    UNICODE_STRING class_str, title_str;
+    WCHAR class_nameW[MAX_ATOM_LEN + 1];
+    UNICODE_STRING class_str = RTL_CONSTANT_STRING(class_nameW), title_str;
 
     if (title) RtlInitUnicodeString( &title_str, title );
-
-    if (class)
-    {
-        if (IS_INTRESOURCE(class))
-        {
-            class_str.Buffer = (WCHAR *)class;
-            class_str.Length = class_str.MaximumLength = 0;
-        }
-        else RtlInitUnicodeString( &class_str, class );
-    }
+    if (class) init_class_name( &class_str, class );
 
     return NtUserFindWindowEx( parent, child, class ? &class_str : NULL,
                                title ? &title_str : NULL, 0 );
@@ -529,9 +537,10 @@ HWND WINAPI FindWindowA( LPCSTR className, LPCSTR title )
 /***********************************************************************
  *		FindWindowExA (USER32.@)
  */
-HWND WINAPI FindWindowExA( HWND parent, HWND child, LPCSTR className, LPCSTR title )
+HWND WINAPI FindWindowExA( HWND parent, HWND child, const char *class, const char *title )
 {
-    LPWSTR titleW = NULL;
+    WCHAR *titleW = NULL, class_nameW[MAX_ATOM_LEN + 1];
+    UNICODE_STRING class_str = RTL_CONSTANT_STRING(class_nameW), title_str;
     HWND hwnd = 0;
 
     if (title)
@@ -539,19 +548,12 @@ HWND WINAPI FindWindowExA( HWND parent, HWND child, LPCSTR className, LPCSTR tit
         DWORD len = MultiByteToWideChar( CP_ACP, 0, title, -1, NULL, 0 );
         if (!(titleW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) return 0;
         MultiByteToWideChar( CP_ACP, 0, title, -1, titleW, len );
+        RtlInitUnicodeString( &title_str, titleW );
     }
+    if (class) init_class_name_ansi( &class_str, class );
 
-    if (!IS_INTRESOURCE(className))
-    {
-        WCHAR classW[256];
-        if (MultiByteToWideChar( CP_ACP, 0, className, -1, classW, ARRAY_SIZE( classW )))
-            hwnd = FindWindowExW( parent, child, classW, titleW );
-    }
-    else
-    {
-        hwnd = FindWindowExW( parent, child, (LPCWSTR)className, titleW );
-    }
-
+    hwnd = NtUserFindWindowEx( parent, child, class ? &class_str : NULL,
+                               title ? &title_str : NULL, 0 );
     HeapFree( GetProcessHeap(), 0, titleW );
     return hwnd;
 }

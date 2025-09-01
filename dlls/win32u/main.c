@@ -98,6 +98,11 @@ BOOL SYSCALL_API NtGdiBitBlt( HDC hdc_dst, INT x_dst, INT y_dst, INT width, INT 
     SYSCALL_FUNC( NtGdiBitBlt );
 }
 
+BOOL SYSCALL_API NtGdiCancelDC( HDC hdc )
+{
+    SYSCALL_FUNC( NtGdiCancelDC );
+}
+
 BOOL SYSCALL_API NtGdiCloseFigure( HDC hdc )
 {
     SYSCALL_FUNC( NtGdiCloseFigure );
@@ -657,6 +662,11 @@ DWORD SYSCALL_API NtGdiGetKerningPairs( HDC hdc, DWORD count, KERNINGPAIR *kern_
     SYSCALL_FUNC( NtGdiGetKerningPairs );
 }
 
+BOOL SYSCALL_API NtGdiGetMiterLimit( HDC hdc, FLOAT *limit )
+{
+    SYSCALL_FUNC( NtGdiGetMiterLimit );
+}
+
 COLORREF SYSCALL_API NtGdiGetNearestColor( HDC hdc, COLORREF color )
 {
     SYSCALL_FUNC( NtGdiGetNearestColor );
@@ -1001,6 +1011,11 @@ BOOL SYSCALL_API NtGdiSetMagicColors( HDC hdc, DWORD magic, ULONG index )
 INT SYSCALL_API NtGdiSetMetaRgn( HDC hdc )
 {
     SYSCALL_FUNC( NtGdiSetMetaRgn );
+}
+
+BOOL SYSCALL_API NtGdiSetMiterLimit( HDC hdc, DWORD limit, FLOAT *old_limit )
+{
+    SYSCALL_FUNC( NtGdiSetMiterLimit );
 }
 
 COLORREF SYSCALL_API NtGdiSetPixel( HDC hdc, INT x, INT y, COLORREF color )
@@ -1559,6 +1574,11 @@ BOOL SYSCALL_API NtUserGetCursorInfo( CURSORINFO *info )
     SYSCALL_FUNC( NtUserGetCursorInfo );
 }
 
+BOOL SYSCALL_API NtUserGetCursorPos( POINT *pt )
+{
+    SYSCALL_FUNC( NtUserGetCursorPos );
+}
+
 HDC SYSCALL_API NtUserGetDC( HWND hwnd )
 {
     SYSCALL_FUNC( NtUserGetDC );
@@ -2022,6 +2042,11 @@ BOOL SYSCALL_API NtUserRegisterTouchPadCapable( BOOL capable )
     SYSCALL_FUNC( NtUserRegisterTouchPadCapable );
 }
 
+ATOM SYSCALL_API NtUserRegisterWindowMessage( UNICODE_STRING *name )
+{
+    SYSCALL_FUNC( NtUserRegisterWindowMessage );
+}
+
 BOOL SYSCALL_API NtUserReleaseCapture(void)
 {
     SYSCALL_FUNC( NtUserReleaseCapture );
@@ -2050,6 +2075,11 @@ HANDLE SYSCALL_API NtUserRemoveProp( HWND hwnd, const WCHAR *str )
 BOOL SYSCALL_API NtUserReplyMessage( LRESULT result )
 {
     SYSCALL_FUNC( NtUserReplyMessage );
+}
+
+INT SYSCALL_API NtUserScheduleDispatchNotification( HWND hwnd )
+{
+    SYSCALL_FUNC( NtUserScheduleDispatchNotification );
 }
 
 BOOL SYSCALL_API NtUserScrollDC( HDC hdc, INT dx, INT dy, const RECT *scroll, const RECT *clip,
@@ -2460,10 +2490,8 @@ HWND SYSCALL_API NtUserWindowFromPoint( LONG x, LONG y )
     SYSCALL_FUNC( NtUserWindowFromPoint );
 }
 
-BOOL SYSCALL_API __wine_get_icm_profile( HDC hdc, BOOL allow_default, DWORD *size, WCHAR *filename )
-{
-    SYSCALL_FUNC( __wine_get_icm_profile );
-}
+#define SYSCALL_STUB(name) NTSTATUS SYSCALL_API name(void) { SYSCALL_FUNC( name ); }
+ALL_SYSCALL_STUBS
 
 #else /*  __arm64ec__ */
 
@@ -2478,20 +2506,6 @@ ALL_SYSCALLS
 
 #endif /*  __arm64ec__ */
 
-
-void __cdecl __wine_spec_unimplemented_stub( const char *module, const char *function )
-{
-    EXCEPTION_RECORD record;
-
-    record.ExceptionCode    = EXCEPTION_WINE_STUB;
-    record.ExceptionFlags   = EXCEPTION_NONCONTINUABLE;
-    record.ExceptionRecord  = NULL;
-    record.ExceptionAddress = __wine_spec_unimplemented_stub;
-    record.NumberParameters = 2;
-    record.ExceptionInformation[0] = (ULONG_PTR)module;
-    record.ExceptionInformation[1] = (ULONG_PTR)function;
-    for (;;) RtlRaiseException( &record );
-}
 
 void *dummy = NtQueryVirtualMemory;  /* forced import to avoid link error with winecrt0 */
 

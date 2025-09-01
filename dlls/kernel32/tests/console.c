@@ -35,6 +35,7 @@ static DWORD (WINAPI *pGetConsoleProcessList)(LPDWORD, DWORD);
 static HANDLE (WINAPI *pOpenConsoleW)(LPCWSTR,DWORD,BOOL,DWORD);
 static BOOL (WINAPI *pSetConsoleInputExeNameA)(LPCSTR);
 static BOOL (WINAPI *pVerifyConsoleIoHandle)(HANDLE handle);
+static NTSTATUS (WINAPI *pNtCompareObjects)(HANDLE,HANDLE);
 
 static BOOL skip_nt;
 
@@ -83,6 +84,8 @@ static void init_function_pointers(void)
     KERNEL32_GET_PROC(VerifyConsoleIoHandle);
 
 #undef KERNEL32_GET_PROC
+    pNtCompareObjects = (void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtCompareObjects");
+    if(!pNtCompareObjects) trace("GetProcAddress(hNtdll, 'NtCompareObjects') failed\n");
 }
 
 static HANDLE create_unbound_handle(BOOL output, BOOL test_status)
@@ -5640,7 +5643,7 @@ static void test_child_free_console(void)
     }
     AllocConsole(); /* need a new console so that the unbound handles point to something */
 
-    if (std && std != INVALID_HANDLE_VALUE && !NtCompareObjects(std_clone, GetStdHandle(STD_ERROR_HANDLE)))
+    if (std && std != INVALID_HANDLE_VALUE && pNtCompareObjects && !pNtCompareObjects(std_clone, GetStdHandle(STD_ERROR_HANDLE)))
         exit_code |= CFC_SAME_OBJECTS;
 
     CloseHandle(std_clone);
@@ -5675,7 +5678,7 @@ static void test_FreeConsoleStd(void)
         {DETACHED_PROCESS,      with_none,        0},
     };
 
-    if (!pVerifyConsoleIoHandle)
+    if (!pVerifyConsoleIoHandle || skip_nt)
     {
         win_skip("Can't run test\n");
         return;
@@ -5707,7 +5710,9 @@ static void test_FreeConsoleStd(void)
         status = WaitForSingleObject(info.hProcess, INFINITE);
         ok(status == WAIT_OBJECT_0, "Unexpected wait status\n");
         ret = GetExitCodeProcess(info.hProcess, &status);
-        ok(status == tests[i].expected_bits, "Expected %x but got %lx\n", tests[i].expected_bits, status);
+        ok(status == tests[i].expected_bits ||
+            broken(!pNtCompareObjects && status == (tests[i].expected_bits & ~CFC_SAME_OBJECTS)),
+            "Expected %x but got %lx\n", tests[i].expected_bits, status);
         switch (tests[i].with)
         {
         case with_global:

@@ -1505,37 +1505,12 @@ static NTSTATUS WINAPI wow64_NtUserDragDropPost( void *arg, ULONG size )
     return dispatch_callback( NtUserDragDropPost, params32, size );
 }
 
-ntuser_callback user_callbacks[] =
+ntuser_callback user_callbacks[NtUserCallCount] =
 {
-    /* user32 callbacks */
-    wow64_NtUserCallDispatchCallback,
-    wow64_NtUserCallEnumDisplayMonitor,
-    wow64_NtUserCallSendAsyncCallback,
-    wow64_NtUserCallWinEventHook,
-    wow64_NtUserCallWinProc,
-    wow64_NtUserCallWindowsHook,
-    wow64_NtUserCopyImage,
-    wow64_NtUserDrawNonClientButton,
-    wow64_NtUserDrawScrollBar,
-    wow64_NtUserDrawText,
-    wow64_NtUserFreeCachedClipboardData,
-    wow64_NtUserImmProcessKey,
-    wow64_NtUserImmTranslateMessage,
-    wow64_NtUserInitBuiltinClasses,
-    wow64_NtUserLoadDriver,
-    wow64_NtUserLoadImage,
-    wow64_NtUserLoadSysMenu,
-    wow64_NtUserPostDDEMessage,
-    wow64_NtUserRenderSynthesizedFormat,
-    wow64_NtUserUnpackDDEMessage,
-    wow64_NtUserDragDropEnter,
-    wow64_NtUserDragDropLeave,
-    wow64_NtUserDragDropDrag,
-    wow64_NtUserDragDropDrop,
-    wow64_NtUserDragDropPost,
+#define USER32_CALLBACK_ENTRY(name) wow64_NtUser##name,
+    ALL_USER32_CALLBACKS
+#undef USER32_CALLBACK_ENTRY
 };
-
-C_ASSERT( ARRAYSIZE(user_callbacks) == NtUserCallCount );
 
 NTSTATUS WINAPI wow64_NtUserActivateKeyboardLayout( UINT *args )
 {
@@ -2523,6 +2498,13 @@ NTSTATUS WINAPI wow64_NtUserGetCursorInfo( UINT *args )
     info32->hCursor = HandleToUlong( info.hCursor );
     info32->ptScreenPos = info.ptScreenPos;
     return TRUE;
+}
+
+NTSTATUS WINAPI wow64_NtUserGetCursorPos( UINT *args )
+{
+    POINT *pt = get_ptr( &args );
+
+    return NtUserGetCursorPos( pt );
 }
 
 NTSTATUS WINAPI wow64_NtUserGetDC( UINT *args )
@@ -4079,6 +4061,14 @@ NTSTATUS WINAPI wow64_NtUserRemoveClipboardFormatListener( UINT *args )
     return NtUserRemoveClipboardFormatListener( hwnd );
 }
 
+NTSTATUS WINAPI wow64_NtUserRegisterWindowMessage( UINT *args )
+{
+    UNICODE_STRING32 *name32 = get_ptr( &args );
+    UNICODE_STRING name;
+
+    return NtUserRegisterWindowMessage( unicode_str_32to64( &name, name32 ));
+}
+
 NTSTATUS WINAPI wow64_NtUserRemoveMenu( UINT *args )
 {
     HMENU handle = get_handle( &args );
@@ -4101,6 +4091,13 @@ NTSTATUS WINAPI wow64_NtUserReplyMessage( UINT *args )
     LRESULT result = get_ulong( &args );
 
     return NtUserReplyMessage( result );
+}
+
+NTSTATUS WINAPI wow64_NtUserScheduleDispatchNotification( UINT *args )
+{
+    HWND hwnd = get_handle( &args );
+
+    return NtUserScheduleDispatchNotification( hwnd );
 }
 
 NTSTATUS WINAPI wow64_NtUserScrollDC( UINT *args )

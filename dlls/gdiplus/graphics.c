@@ -616,21 +616,23 @@ static GpStatus alpha_blend_pixels_hrgn(GpGraphics *graphics, INT dst_x, INT dst
         if (!hrgn)
             return OutOfMemory;
 
-        stat = get_clip_hrgn(graphics, &visible_rgn);
-        if (stat != Ok)
-        {
-            DeleteObject(hrgn);
-            return stat;
-        }
-
-        if (visible_rgn)
-        {
-            CombineRgn(hrgn, hrgn, visible_rgn, RGN_AND);
-            DeleteObject(visible_rgn);
-        }
-
         if (hregion)
             CombineRgn(hrgn, hrgn, hregion, RGN_AND);
+        else
+        {
+            stat = get_clip_hrgn(graphics, &visible_rgn);
+            if (stat != Ok)
+            {
+                DeleteObject(hrgn);
+                return stat;
+            }
+
+            if (visible_rgn)
+            {
+                CombineRgn(hrgn, hrgn, visible_rgn, RGN_AND);
+                DeleteObject(visible_rgn);
+            }
+        }
 
         size = GetRegionData(hrgn, 0, NULL);
 
@@ -675,27 +677,30 @@ static GpStatus alpha_blend_pixels_hrgn(GpGraphics *graphics, INT dst_x, INT dst
         if (stat != Ok)
             return stat;
 
-        stat = get_clip_hrgn(graphics, &hrgn);
-
-        if (stat != Ok)
-        {
-            gdi_dc_release(graphics, hdc);
-            return stat;
-        }
-
         save = SaveDC(hdc);
 
-        ExtSelectClipRgn(hdc, hrgn, RGN_COPY);
-
         if (hregion)
-            ExtSelectClipRgn(hdc, hregion, RGN_AND);
+            ExtSelectClipRgn(hdc, hregion, RGN_COPY);
+        else
+        {
+            stat = get_clip_hrgn(graphics, &hrgn);
+
+            if (stat != Ok)
+            {
+                RestoreDC(hdc, save);
+                gdi_dc_release(graphics, hdc);
+                return stat;
+            }
+
+            ExtSelectClipRgn(hdc, hrgn, RGN_COPY);
+
+            DeleteObject(hrgn);
+        }
 
         stat = alpha_blend_hdc_pixels(graphics, dst_x, dst_y, src, src_width,
             src_height, src_stride, fmt);
 
         RestoreDC(hdc, save);
-
-        DeleteObject(hrgn);
 
         gdi_dc_release(graphics, hdc);
 
@@ -3446,7 +3451,7 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
             if (bitmap->format == PixelFormat16bppRGB555 ||
                 bitmap->format == PixelFormat24bppRGB)
                 dst_format = bitmap->format;
-            else if (bitmap->format & (PixelFormatAlpha|PixelFormatPAlpha))
+            else if (bitmap->image.flags & ImageFlagsHasAlpha)
                 dst_format = PixelFormat32bppPARGB;
             else
                 dst_format = PixelFormat32bppRGB;
@@ -3489,7 +3494,7 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
 
             gdi_transform_acquire(graphics);
 
-            if (bitmap->format & (PixelFormatAlpha|PixelFormatPAlpha))
+            if (bitmap->image.flags & ImageFlagsHasAlpha)
             {
                 gdi_alpha_blend(graphics, pti[0].x, pti[0].y, pti[1].x - pti[0].x, pti[2].y - pti[0].y,
                                 src_hdc, srcx, srcy, srcwidth, srcheight);
@@ -4831,6 +4836,11 @@ static GpStatus get_clipped_region_hrgn(GpGraphics* graphics, GpRegion* region, 
             status = GdipGetRegionHRgn(device_region, NULL, hrgn);
 
         GdipDeleteRegion(device_region);
+    }
+
+    if (status == Ok && graphics->gdi_clip)
+    {
+        CombineRgn(*hrgn, *hrgn, graphics->gdi_clip, RGN_AND);
     }
 
     return status;

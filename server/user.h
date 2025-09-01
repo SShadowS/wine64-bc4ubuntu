@@ -90,7 +90,7 @@ struct desktop
 
 /* user handles functions */
 
-extern user_handle_t alloc_user_handle( void *ptr, unsigned short type );
+extern user_handle_t alloc_user_handle( void *ptr, volatile void *shared, unsigned short type );
 extern void *get_user_object( user_handle_t handle, unsigned short type );
 extern void *get_user_object_handle( user_handle_t *handle, unsigned short type );
 extern user_handle_t get_user_full_handle( user_handle_t handle );
@@ -192,7 +192,7 @@ extern struct window_class *grab_class( struct process *process, atom_t atom,
                                         mod_handle_t instance, int *extra_bytes );
 extern void release_class( struct window_class *class );
 extern int is_desktop_class( struct window_class *class );
-extern int is_hwnd_message_class( struct window_class *class );
+extern int is_message_class( struct window_class *class );
 extern int get_class_style( struct window_class *class );
 extern atom_t get_class_atom( struct window_class *class );
 extern client_ptr_t get_class_client_ptr( struct window_class *class );
