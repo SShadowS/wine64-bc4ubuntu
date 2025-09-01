@@ -67,6 +67,39 @@
 #define IOCTL_HTTP_CANCEL_REQUEST CTL_CODE(FILE_DEVICE_HTTP, 15, METHOD_NEITHER, FILE_ANY_ACCESS)
 #endif
 
+/* Define authentication schemes */
+#ifndef HTTP_AUTH_SCHEME_BASIC
+#define HTTP_AUTH_SCHEME_BASIC      0x00000001
+#define HTTP_AUTH_SCHEME_DIGEST     0x00000002
+#define HTTP_AUTH_SCHEME_NTLM       0x00000004
+#define HTTP_AUTH_SCHEME_NEGOTIATE  0x00000008
+#endif
+
+/* Define authentication structure */
+typedef struct _HTTP_SERVER_AUTHENTICATION_INFO {
+    struct {
+        BOOL Present;
+    } Flags;
+    ULONG AuthSchemes;
+    BOOL ReceiveMutualAuth;
+    BOOL ReceiveContextHandle;
+    BOOL DisableNTLMCredentialCaching;
+    UCHAR ExFlags;
+    void *Reserved1;
+    void *Reserved2;
+} HTTP_SERVER_AUTHENTICATION_INFO;
+
+/* Forward declarations for authentication functions */
+struct url_group;
+static void url_group_acquire(struct url_group *group);
+static void url_group_release(struct url_group *group);
+static struct url_group *get_url_group_for_request(HTTP_REQUEST_ID id);
+static void inject_auth_header_if_needed(HTTP_RESPONSE *response, HTTP_REQUEST_ID id);
+static struct url_group *find_url_group_by_queue(HANDLE queue);
+static void add_request_mapping(HTTP_REQUEST_ID request_id, struct url_group *group);
+static void remove_request_mapping(HTTP_REQUEST_ID request_id);
+static void cleanup_stale_mappings(void);
+
 /* Define HTTP performance counter IDs */
 typedef enum _HTTP_PERFORMANCE_COUNTER_ID {
     HttpPerfCounterAllRequests,
@@ -338,9 +371,118 @@ ULONG WINAPI HttpQueryServiceConfiguration(HANDLE handle, HTTP_SERVICE_CONFIG_ID
                  void *query, ULONG query_len, void *buffer, ULONG buffer_len,
                  ULONG *data_len, OVERLAPPED *overlapped)
 {
-    FIXME( "(%p, %d, %p, %ld, %p, %ld, %p, %p): stub!\n", handle, type, query, query_len,
-            buffer, buffer_len, data_len, overlapped );
-    return ERROR_FILE_NOT_FOUND;
+    TRACE("handle %p, type %d, query %p, query_len %lu, buffer %p, buffer_len %lu, data_len %p, overlapped %p.\n",
+          handle, type, query, query_len, buffer, buffer_len, data_len, overlapped);
+
+    if (handle)
+    {
+        WARN("Handle parameter should be NULL\n");
+        return ERROR_INVALID_PARAMETER;
+    }
+
+    if (overlapped)
+    {
+        WARN("Overlapped I/O not supported\n");
+        return ERROR_INVALID_PARAMETER;
+    }
+
+    switch (type)
+    {
+        case HttpServiceConfigIPListenList:
+        {
+            /* Return an empty list for IP listen configuration */
+            /* Note: HTTP_SERVICE_CONFIG_IP_LISTEN types not yet defined in Wine headers */
+            ULONG required_size = sizeof(DWORD) + sizeof(void*); /* AddrCount + AddrList */
+
+            TRACE("Querying IP listen list\n");
+
+            /* Check buffer pointer first before using it */
+            if (!buffer && buffer_len > 0)
+                return ERROR_INVALID_PARAMETER;
+
+            /* Set required size if requested */
+            if (data_len)
+                *data_len = required_size;
+
+            /* Check buffer size */
+            if (buffer_len < required_size)
+                return ERROR_INSUFFICIENT_BUFFER;
+
+            /* Return empty list - no specific IP addresses configured */
+            if (buffer)
+            {
+                DWORD *addr_count = (DWORD*)buffer;
+                void **addr_list = (void**)((char*)buffer + sizeof(DWORD));
+                *addr_count = 0;
+                *addr_list = NULL;
+            }
+            
+            return ERROR_SUCCESS;
+        }
+
+        case HttpServiceConfigSSLCertInfo:
+        {
+            /* SSL certificate configuration */
+            TRACE("Querying SSL certificate info\n");
+            
+            /* For now, return no SSL certificates configured */
+            if (data_len)
+                *data_len = 0;
+                
+            return ERROR_FILE_NOT_FOUND;
+        }
+
+        case HttpServiceConfigUrlAclInfo:
+        {
+            /* URL ACL configuration */
+            TRACE("Querying URL ACL info\n");
+            
+            /* For now, return no URL ACLs configured */
+            if (data_len)
+                *data_len = 0;
+                
+            return ERROR_FILE_NOT_FOUND;
+        }
+
+        case HttpServiceConfigTimeout:
+        {
+            /* Timeout configuration */
+            /* Note: HTTP_SERVICE_CONFIG_TIMEOUT_PARAM not yet defined in Wine headers */
+            ULONG required_size = sizeof(USHORT) * 6; /* 6 timeout values */
+
+            TRACE("Querying timeout configuration\n");
+
+            /* Check buffer pointer first before using it */
+            if (!buffer && buffer_len > 0)
+                return ERROR_INVALID_PARAMETER;
+
+            /* Set required size if requested */
+            if (data_len)
+                *data_len = required_size;
+
+            /* Check buffer size */
+            if (buffer_len < required_size)
+                return ERROR_INSUFFICIENT_BUFFER;
+
+            /* Return default timeout values */
+            if (buffer)
+            {
+                USHORT *timeouts = (USHORT*)buffer;
+                timeouts[0] = 120;        /* EntityBody: 120 seconds */
+                timeouts[1] = 120;        /* DrainEntityBody: 120 seconds */
+                timeouts[2] = 120;        /* RequestQueue: 120 seconds */
+                timeouts[3] = 120;        /* IdleConnection: 120 seconds */
+                timeouts[4] = 120;        /* HeaderWait: 120 seconds */
+                timeouts[5] = 240;        /* MinSendRate: 240 bytes/second */
+            }
+
+            return ERROR_SUCCESS;
+        }
+
+        default:
+            FIXME("Unhandled configuration type %d\n", type);
+            return ERROR_INVALID_PARAMETER;
+    }
 }
 
 /***********************************************************************
@@ -400,6 +542,7 @@ static ULONG add_url(HANDLE queue, const WCHAR *urlW, HTTP_URL_CONTEXT context)
     struct http_add_url_params *params;
     ULONG ret = ERROR_SUCCESS;
     OVERLAPPED ovl;
+    HANDLE hEvent;
     int len;
 
     len = WideCharToMultiByte(CP_ACP, 0, urlW, -1, NULL, 0, NULL, NULL);
@@ -408,12 +551,19 @@ static ULONG add_url(HANDLE queue, const WCHAR *urlW, HTTP_URL_CONTEXT context)
     WideCharToMultiByte(CP_ACP, 0, urlW, -1, params->url, len, NULL, NULL);
     params->context = context;
 
-    ovl.hEvent = (HANDLE)((ULONG_PTR)CreateEventW(NULL, TRUE, FALSE, NULL) | 1);
+    /* Store original handle separately before setting alertable bit */
+    hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!hEvent)
+    {
+        free(params);
+        return ERROR_OUTOFMEMORY;
+    }
+    ovl.hEvent = (HANDLE)((ULONG_PTR)hEvent | 1);
 
     if (!DeviceIoControl(queue, IOCTL_HTTP_ADD_URL, params,
             sizeof(struct http_add_url_params) + len, NULL, 0, NULL, &ovl))
         ret = GetLastError();
-    CloseHandle(ovl.hEvent);
+    CloseHandle(hEvent);  /* Close the original handle, not the modified one */
     free(params);
     return ret;
 }
@@ -454,6 +604,7 @@ static ULONG remove_url(HANDLE queue, const WCHAR *urlW)
 {
     ULONG ret = ERROR_SUCCESS;
     OVERLAPPED ovl = {};
+    HANDLE hEvent;
     char *url;
     int len;
 
@@ -462,11 +613,18 @@ static ULONG remove_url(HANDLE queue, const WCHAR *urlW)
         return ERROR_OUTOFMEMORY;
     WideCharToMultiByte(CP_ACP, 0, urlW, -1, url, len, NULL, NULL);
 
-    ovl.hEvent = (HANDLE)((ULONG_PTR)CreateEventW(NULL, TRUE, FALSE, NULL) | 1);
+    /* Store original handle separately before setting alertable bit */
+    hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!hEvent)
+    {
+        free(url);
+        return ERROR_OUTOFMEMORY;
+    }
+    ovl.hEvent = (HANDLE)((ULONG_PTR)hEvent | 1);
 
     if (!DeviceIoControl(queue, IOCTL_HTTP_REMOVE_URL, url, len, NULL, 0, NULL, &ovl))
         ret = GetLastError();
-    CloseHandle(ovl.hEvent);
+    CloseHandle(hEvent);  /* Close the original handle, not the modified one */
     free(url);
     return ret;
 }
@@ -599,6 +757,24 @@ ULONG WINAPI HttpReceiveHttpRequest(HANDLE queue, HTTP_REQUEST_ID id, ULONG flag
         CloseHandle(sync_ovl.hEvent);
     }
 
+    /* If request was successfully received, establish mapping to URL group */
+    if (ret == ERROR_SUCCESS && request->s.RequestId != 0)
+    {
+        struct url_group *group = find_url_group_by_queue(queue);
+        if (group)
+        {
+            add_request_mapping(request->s.RequestId, group);
+            TRACE("Mapped request %s to URL group %p for queue %p\n", 
+                  wine_dbgstr_longlong(request->s.RequestId), group, queue);
+            url_group_release(group);  /* Release the reference from find_url_group_by_queue */
+        }
+        else
+        {
+            TRACE("WARNING: No URL group found for queue %p, request %s\n", 
+                  queue, wine_dbgstr_longlong(request->s.RequestId));
+        }
+    }
+
     return ret;
 }
 
@@ -666,6 +842,18 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
             "ret_size %p, reserved1 %p, reserved2 %#lx, ovl %p, log_data %p.\n",
             queue, wine_dbgstr_longlong(id), flags, response, cache_policy,
             ret_size, reserved1, reserved2, ovl, log_data);
+
+    /* Auto-inject authentication headers if needed */
+    inject_auth_header_if_needed(response, id);
+
+    /* Don't disconnect during NTLM authentication */
+    if (response->s.StatusCode == 401)
+    {
+        /* Check if NTLM authentication is enabled - this will be handled in inject_auth_header_if_needed */
+        /* For now, keep connection alive for all 401 responses */
+        TRACE("Keeping connection alive for authentication challenge\n");
+        flags &= ~HTTP_SEND_RESPONSE_FLAG_DISCONNECT;
+    }
 
     if (flags & ~(HTTP_SEND_RESPONSE_FLAG_DISCONNECT | HTTP_SEND_RESPONSE_FLAG_MORE_DATA | HTTP_SEND_RESPONSE_FLAG_BUFFER_DATA | HTTP_SEND_RESPONSE_FLAG_ENABLE_NAGLING | HTTP_SEND_RESPONSE_FLAG_PROCESS_RANGES | HTTP_SEND_RESPONSE_FLAG_OPAQUE))
         FIXME("Unhandled flags %#lx.\n", flags & ~(HTTP_SEND_RESPONSE_FLAG_DISCONNECT | HTTP_SEND_RESPONSE_FLAG_MORE_DATA | HTTP_SEND_RESPONSE_FLAG_BUFFER_DATA | HTTP_SEND_RESPONSE_FLAG_ENABLE_NAGLING | HTTP_SEND_RESPONSE_FLAG_PROCESS_RANGES | HTTP_SEND_RESPONSE_FLAG_OPAQUE));
@@ -768,6 +956,16 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
         ret = GetLastError();
 
     free(buffer);
+    
+    /* Clean up request mapping if this is the final response */
+    if (ret == ERROR_SUCCESS && 
+        (flags & HTTP_SEND_RESPONSE_FLAG_DISCONNECT || 
+         !(flags & HTTP_SEND_RESPONSE_FLAG_MORE_DATA)))
+    {
+        remove_request_mapping(id);
+        TRACE("Cleaned up mapping for completed request %s\n", wine_dbgstr_longlong(id));
+    }
+    
     return ret;
 }
 
@@ -886,6 +1084,16 @@ ULONG WINAPI HttpSendResponseEntityBody(HANDLE queue, HTTP_REQUEST_ID id,
         ret = GetLastError();
 
     free(buffer);
+    
+    /* Clean up request mapping if this is the final entity body */
+    if (ret == ERROR_SUCCESS && 
+        (flags & HTTP_SEND_RESPONSE_FLAG_DISCONNECT || 
+         !(flags & HTTP_SEND_RESPONSE_FLAG_MORE_DATA)))
+    {
+        remove_request_mapping(id);
+        TRACE("Cleaned up mapping for completed request %s (entity body)\n", wine_dbgstr_longlong(id));
+    }
+    
     return ret;
 }
 
@@ -903,9 +1111,32 @@ struct url_group
     struct list entry, session_entry;
     HANDLE queue;
     struct list urls;  /* List of url_group_url entries */
+    /* Authentication settings */
+    BOOL auth_enabled;
+    ULONG auth_schemes;
+    HTTP_SERVER_AUTHENTICATION_INFO auth_info;
 };
 
 static struct list url_groups = LIST_INIT(url_groups);
+
+/* Request to URL group mapping structure */
+struct request_url_group_mapping
+{
+    struct list entry;
+    HTTP_REQUEST_ID request_id;
+    struct url_group *group;
+    ULONGLONG timestamp;  /* For cleanup of stale entries */
+};
+
+static struct list request_mappings = LIST_INIT(request_mappings);
+static CRITICAL_SECTION request_mapping_cs;
+static CRITICAL_SECTION_DEBUG request_mapping_cs_debug =
+{
+    0, 0, &request_mapping_cs,
+    { &request_mapping_cs_debug.ProcessLocksList, &request_mapping_cs_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": request_mapping_cs") }
+};
+static CRITICAL_SECTION request_mapping_cs = { &request_mapping_cs_debug, -1, 0, 0, 0, 0 };
 
 static struct url_group *get_url_group(HTTP_URL_GROUP_ID id)
 {
@@ -918,6 +1149,7 @@ static struct url_group *get_url_group(HTTP_URL_GROUP_ID id)
     {
         if ((HTTP_URL_GROUP_ID)(ULONG_PTR)group == id)
         {
+            url_group_acquire(group);  /* Increment refcount before releasing lock */
             LeaveCriticalSection(&g_httpapi_cs);
             return group;
         }
@@ -926,11 +1158,11 @@ static struct url_group *get_url_group(HTTP_URL_GROUP_ID id)
     return NULL;
 }
 
-static struct url_group *url_group_addref(struct url_group *group)
+static void url_group_acquire(struct url_group *group)
 {
-    if (group)
-        InterlockedIncrement(&group->refcount);
-    return group;
+    if (!group)
+        return;
+    InterlockedIncrement(&group->refcount);
 }
 
 static void url_group_release(struct url_group *group)
@@ -963,13 +1195,150 @@ static void url_group_release(struct url_group *group)
     }
 }
 
+/* Find URL group by queue handle */
+static struct url_group *find_url_group_by_queue(HANDLE queue)
+{
+    struct url_group *group;
+    
+    EnterCriticalSection(&g_httpapi_cs);
+    LIST_FOR_EACH_ENTRY(group, &url_groups, struct url_group, entry)
+    {
+        if (group->queue == queue)
+        {
+            url_group_acquire(group);
+            LeaveCriticalSection(&g_httpapi_cs);
+            return group;
+        }
+    }
+    LeaveCriticalSection(&g_httpapi_cs);
+    return NULL;
+}
+
+/* Add mapping between request ID and URL group */
+static void add_request_mapping(HTTP_REQUEST_ID request_id, struct url_group *group)
+{
+    struct request_url_group_mapping *mapping;
+    
+    if (!group) return;
+    
+    mapping = calloc(1, sizeof(*mapping));
+    if (!mapping)
+    {
+        WARN("Failed to allocate request mapping\n");
+        return;
+    }
+    
+    mapping->request_id = request_id;
+    mapping->group = group;
+    mapping->timestamp = GetTickCount64();
+    url_group_acquire(group);  /* Take reference */
+    
+    EnterCriticalSection(&request_mapping_cs);
+    list_add_tail(&request_mappings, &mapping->entry);
+    LeaveCriticalSection(&request_mapping_cs);
+    
+    TRACE("Mapped request %s to URL group %p\n", 
+          wine_dbgstr_longlong(request_id), group);
+}
+
+/* Remove mapping for a request ID */
+static void remove_request_mapping(HTTP_REQUEST_ID request_id)
+{
+    struct request_url_group_mapping *mapping, *next;
+    
+    EnterCriticalSection(&request_mapping_cs);
+    LIST_FOR_EACH_ENTRY_SAFE(mapping, next, &request_mappings, 
+                            struct request_url_group_mapping, entry)
+    {
+        if (mapping->request_id == request_id)
+        {
+            list_remove(&mapping->entry);
+            url_group_release(mapping->group);
+            free(mapping);
+            TRACE("Removed mapping for request %s\n", 
+                  wine_dbgstr_longlong(request_id));
+            break;
+        }
+    }
+    LeaveCriticalSection(&request_mapping_cs);
+}
+
+/* Clean up stale mappings (older than 5 minutes) */
+static void cleanup_stale_mappings(void)
+{
+    struct request_url_group_mapping *mapping, *next;
+    ULONGLONG current_time = GetTickCount64();
+    const ULONGLONG STALE_TIMEOUT = 300000; /* 5 minutes */
+    
+    EnterCriticalSection(&request_mapping_cs);
+    LIST_FOR_EACH_ENTRY_SAFE(mapping, next, &request_mappings,
+                            struct request_url_group_mapping, entry)
+    {
+        if (current_time - mapping->timestamp > STALE_TIMEOUT)
+        {
+            TRACE("Removing stale mapping for request %s\n",
+                  wine_dbgstr_longlong(mapping->request_id));
+            list_remove(&mapping->entry);
+            url_group_release(mapping->group);
+            free(mapping);
+        }
+    }
+    LeaveCriticalSection(&request_mapping_cs);
+}
+
 struct server_session
 {
     struct list entry;
     struct list groups;
+    LONG refcount;
+    /* Authentication settings */
+    BOOL auth_enabled;
+    ULONG auth_schemes;
+    HTTP_SERVER_AUTHENTICATION_INFO auth_info;
 };
 
 static struct list server_sessions = LIST_INIT(server_sessions);
+
+static void server_session_acquire(struct server_session *session)
+{
+    if (!session)
+        return;
+    InterlockedIncrement(&session->refcount);
+}
+
+static void server_session_release(struct server_session *session)
+{
+    if (!session)
+        return;
+        
+    if (!InterlockedDecrement(&session->refcount))
+    {
+        struct url_group *group, *group_next;
+        struct list groups_to_release;
+        
+        list_init(&groups_to_release);
+        
+        EnterCriticalSection(&g_httpapi_cs);
+        
+        /* Move all groups to temporary list to avoid nested lock acquisition */
+        LIST_FOR_EACH_ENTRY_SAFE(group, group_next, &session->groups, struct url_group, session_entry)
+        {
+            list_remove(&group->session_entry);
+            list_add_tail(&groups_to_release, &group->session_entry);
+        }
+        
+        list_remove(&session->entry);
+        LeaveCriticalSection(&g_httpapi_cs);
+        
+        /* Now release groups without holding the global lock */
+        LIST_FOR_EACH_ENTRY_SAFE(group, group_next, &groups_to_release, struct url_group, session_entry)
+        {
+            url_group_release(group);
+        }
+        
+        free(session);
+    }
+}
 
 static struct server_session *get_server_session(HTTP_SERVER_SESSION_ID id)
 {
@@ -982,6 +1351,7 @@ static struct server_session *get_server_session(HTTP_SERVER_SESSION_ID id)
     {
         if ((HTTP_SERVER_SESSION_ID)(ULONG_PTR)session == id)
         {
+            server_session_acquire(session);  /* Increment refcount before releasing lock */
             LeaveCriticalSection(&g_httpapi_cs);
             return session;
         }
@@ -1010,6 +1380,8 @@ ULONG WINAPI HttpCreateServerSession(HTTPAPI_VERSION version, HTTP_SERVER_SESSIO
     if (!(session = malloc(sizeof(*session))))
         return ERROR_OUTOFMEMORY;
 
+    session->refcount = 1;  /* Initialize refcount */
+    
     EnterCriticalSection(&g_httpapi_cs);
     list_add_tail(&server_sessions, &session->entry);
     list_init(&session->groups);
@@ -1024,25 +1396,28 @@ ULONG WINAPI HttpCreateServerSession(HTTPAPI_VERSION version, HTTP_SERVER_SESSIO
  */
 ULONG WINAPI HttpCloseServerSession(HTTP_SERVER_SESSION_ID id)
 {
-    struct url_group *group, *group_next;
-    struct server_session *session;
+    struct server_session *session = NULL, *iter;
 
     TRACE("id %s.\n", wine_dbgstr_longlong(id));
 
-    if (!(session = get_server_session(id)))
+    /* Find and remove session from global list atomically */
+    EnterCriticalSection(&g_httpapi_cs);
+    LIST_FOR_EACH_ENTRY(iter, &server_sessions, struct server_session, entry)
+    {
+        if ((HTTP_SERVER_SESSION_ID)(ULONG_PTR)iter == id)
+        {
+            session = iter;
+            list_remove(&session->entry); /* Remove from global list to prevent reuse */
+            break;
+        }
+    }
+    LeaveCriticalSection(&g_httpapi_cs);
+
+    if (!session)
         return ERROR_INVALID_PARAMETER;
 
-    EnterCriticalSection(&g_httpapi_cs);
-    LIST_FOR_EACH_ENTRY_SAFE(group, group_next, &session->groups, struct url_group, session_entry)
-    {
-        LeaveCriticalSection(&g_httpapi_cs);
-        HttpCloseUrlGroup((ULONG_PTR)group);
-        EnterCriticalSection(&g_httpapi_cs);
-    }
-    list_remove(&session->entry);
-    LeaveCriticalSection(&g_httpapi_cs);
-    
-    free(session);
+    /* Release the original reference, which will trigger cleanup if it's the last one */
+    server_session_release(session);
     return ERROR_SUCCESS;
 }
 
@@ -1061,7 +1436,10 @@ ULONG WINAPI HttpCreateUrlGroup(HTTP_SERVER_SESSION_ID session_id, HTTP_URL_GROU
         return ERROR_INVALID_PARAMETER;
 
     if (!(group = calloc(1, sizeof(*group))))
+    {
+        server_session_release(session);  /* Release reference from get_server_session() */
         return ERROR_OUTOFMEMORY;
+    }
     
     group->refcount = 1;  /* Initialize refcount */
     
@@ -1073,6 +1451,7 @@ ULONG WINAPI HttpCreateUrlGroup(HTTP_SERVER_SESSION_ID session_id, HTTP_URL_GROU
 
     *group_id = (ULONG_PTR)group;
 
+    server_session_release(session);  /* Release reference from get_server_session() */
     return ERROR_SUCCESS;
 }
 
@@ -1105,7 +1484,7 @@ ULONG WINAPI HttpCloseUrlGroup(HTTP_URL_GROUP_ID id)
         LeaveCriticalSection(&g_httpapi_cs);
     }
 
-    url_group_release(group);  /* Use reference counting */
+    url_group_release(group);  /* Release reference from get_url_group() */
     return ERROR_SUCCESS;
 }
 
@@ -1129,63 +1508,143 @@ ULONG WINAPI HttpSetUrlGroupProperty(HTTP_URL_GROUP_ID id, HTTP_SERVER_PROPERTY 
     {
         case HttpServerAuthenticationProperty:
         {
-            /* Authentication property configuration. This would typically include
-             * authentication schemes, realm, domains, etc.
-             * For now, we accept the settings and return success. */
-            TRACE("Authentication property set, length %lu.\n", length);
+            const HTTP_SERVER_AUTHENTICATION_INFO *auth_info = value;
+            
+            if (length < sizeof(HTTP_SERVER_AUTHENTICATION_INFO))
+            {
+                url_group_release(group);
+                return ERROR_INSUFFICIENT_BUFFER;
+            }
+            
+            /* Store authentication settings for this URL group */
+            group->auth_enabled = auth_info->Flags.Present;
+            group->auth_schemes = auth_info->AuthSchemes;
+            memcpy(&group->auth_info, auth_info, sizeof(HTTP_SERVER_AUTHENTICATION_INFO));
+            
+            TRACE("URL group authentication set: enabled=%d, schemes=%#lx\n", group->auth_enabled, group->auth_schemes);
+            
+            if (group->auth_schemes & HTTP_AUTH_SCHEME_NTLM)
+                TRACE("  NTLM authentication enabled\n");
+            if (group->auth_schemes & HTTP_AUTH_SCHEME_NEGOTIATE)
+                TRACE("  Negotiate authentication enabled\n");
+            if (group->auth_schemes & HTTP_AUTH_SCHEME_BASIC)
+                TRACE("  Basic authentication enabled\n");
+            if (group->auth_schemes & HTTP_AUTH_SCHEME_DIGEST)
+                TRACE("  Digest authentication enabled\n");
+            
+            /* TODO: Store realm, domain, and other auth parameters */
+            if (auth_info->ReceiveMutualAuth)
+                FIXME("ReceiveMutualAuth not implemented\n");
+            
+            url_group_release(group);
             return ERROR_SUCCESS;
         }
         case HttpServerBindingProperty:
         {
             const HTTP_BINDING_INFO *info = value;
+            WCHAR **url_snapshot = NULL;
+            HTTP_URL_CONTEXT *context_snapshot = NULL;
+            DWORD url_count = 0, i;
             
             if (length < sizeof(HTTP_BINDING_INFO))
+            {
+                url_group_release(group);  /* Release reference from get_url_group() */
                 return ERROR_INSUFFICIENT_BUFFER;
+            }
 
             TRACE("Binding URL group %s to queue %p.\n", wine_dbgstr_longlong(id), info->RequestQueueHandle);
+            
+            /* Create a snapshot of URLs under lock to avoid race conditions */
+            EnterCriticalSection(&g_httpapi_cs);
             group->queue = info->RequestQueueHandle;
             
-            /* Add all URLs in this group to the queue */
-            EnterCriticalSection(&g_httpapi_cs);
             if (!list_empty(&group->urls))
             {
                 struct url_group_url *url_entry;
+                
+                /* Count URLs first */
                 LIST_FOR_EACH_ENTRY(url_entry, &group->urls, struct url_group_url, entry)
                 {
-                    ULONG ret;
-                    TRACE("Adding URL %s to newly bound queue\n", debugstr_w(url_entry->url));
+                    url_count++;
+                }
+                
+                /* Allocate snapshot arrays */
+                url_snapshot = calloc(url_count, sizeof(WCHAR*));
+                context_snapshot = calloc(url_count, sizeof(HTTP_URL_CONTEXT));
+                
+                if (!url_snapshot || !context_snapshot)
+                {
                     LeaveCriticalSection(&g_httpapi_cs);
-                    ret = add_url(group->queue, url_entry->url, url_entry->context);
-                    EnterCriticalSection(&g_httpapi_cs);
-                    if (ret)
+                    free(url_snapshot);
+                    free(context_snapshot);
+                    url_group_release(group);
+                    return ERROR_OUTOFMEMORY;
+                }
+                
+                /* Copy URLs and contexts */
+                i = 0;
+                LIST_FOR_EACH_ENTRY(url_entry, &group->urls, struct url_group_url, entry)
+                {
+                    url_snapshot[i] = wcsdup(url_entry->url);
+                    if (!url_snapshot[i])
                     {
-                        WARN("Failed to add URL %s to queue: %lu\n", debugstr_w(url_entry->url), ret);
-                        /* Don't fail the binding, continue with other URLs */
+                        /* Clean up on allocation failure */
+                        DWORD j;
+                        LeaveCriticalSection(&g_httpapi_cs);
+                        for (j = 0; j < i; j++)
+                            free(url_snapshot[j]);
+                        free(url_snapshot);
+                        free(context_snapshot);
+                        url_group_release(group);
+                        return ERROR_OUTOFMEMORY;
                     }
-                    else if (wcsstr(url_entry->url, L"BusinessCentral") || wcsstr(url_entry->url, L":7049"))
-                    {
-                        TRACE("*** BUSINESS CENTRAL SERVER READY: URL %s successfully bound via group to queue %p ***\n", 
-                              debugstr_w(url_entry->url), group->queue);
-                        TRACE("*** BC Server is now ready to accept HTTP requests ***\n");
-                    }
+                    context_snapshot[i] = url_entry->context;
+                    i++;
                 }
             }
             LeaveCriticalSection(&g_httpapi_cs);
+            
+            /* Now add URLs without holding the lock */
+            for (i = 0; i < url_count; i++)
+            {
+                ULONG ret = add_url(group->queue, url_snapshot[i], context_snapshot[i]);
+                if (ret)
+                {
+                    WARN("Failed to add URL %s to queue: %lu\n", debugstr_w(url_snapshot[i]), ret);
+                    /* Don't fail the binding, continue with other URLs */
+                }
+                else if (wcsstr(url_snapshot[i], L"BusinessCentral") || wcsstr(url_snapshot[i], L":7049"))
+                {
+                    TRACE("*** BUSINESS CENTRAL SERVER READY: URL %s successfully bound via group to queue %p ***\n", 
+                          debugstr_w(url_snapshot[i]), group->queue);
+                    TRACE("*** BC Server is now ready to accept HTTP requests ***\n");
+                }
+                free(url_snapshot[i]);
+            }
+            
+            free(url_snapshot);
+            free(context_snapshot);
+            url_group_release(group);  /* Release reference from get_url_group() */
             return ERROR_SUCCESS;
         }
         case HttpServerLoggingProperty:
             WARN("Ignoring logging property.\n");
+            url_group_release(group);  /* Release reference from get_url_group() */
             return ERROR_SUCCESS;
         case HttpServerQosProperty:
         {
             const HTTP_QOS_SETTING_INFO *qos_info = value;
             
             if (length < sizeof(HTTP_QOS_SETTING_INFO))
+            {
+                url_group_release(group);  /* Release reference from get_url_group() */
                 return ERROR_INSUFFICIENT_BUFFER;
+            }
                 
             TRACE("QoS property set, QosType %u.\n", qos_info->QosType);
             /* QoS settings are not implemented in Wine's HTTP.sys driver yet.
              * Return success to allow applications to continue. */
+            url_group_release(group);  /* Release reference from get_url_group() */
             return ERROR_SUCCESS;
         }
         case HttpServerTimeoutsProperty:
@@ -1195,10 +1654,12 @@ ULONG WINAPI HttpSetUrlGroupProperty(HTTP_URL_GROUP_ID id, HTTP_SERVER_PROPERTY 
              * IdleConnectionTimeout, HeaderWaitTimeout, MinSendRate.
              * For now, we just accept the settings and return success. */
             TRACE("Timeouts property set, length %lu.\n", length);
+            url_group_release(group);  /* Release reference from get_url_group() */
             return ERROR_SUCCESS;
         }
         default:
             FIXME("Unhandled property %u.\n", property);
+            url_group_release(group);  /* Release reference from get_url_group() */
             return ERROR_CALL_NOT_IMPLEMENTED;
     }
 }
@@ -1238,17 +1699,24 @@ ULONG WINAPI HttpAddUrlToUrlGroup(HTTP_URL_GROUP_ID id, const WCHAR *url,
         if (!wcscmp(url_entry->url, url))
         {
             LeaveCriticalSection(&g_httpapi_cs);
+            url_group_release(group);  /* Release reference from get_url_group() */
             return ERROR_ALREADY_EXISTS;
         }
     }
 
     /* Add new URL to the group */
     if (!(url_entry = calloc(1, sizeof(*url_entry))))
+    {
+        LeaveCriticalSection(&g_httpapi_cs);
+        url_group_release(group);  /* Release reference from get_url_group() */
         return ERROR_OUTOFMEMORY;
+    }
 
     if (!(url_entry->url = wcsdup(url)))
     {
         free(url_entry);
+        LeaveCriticalSection(&g_httpapi_cs);
+        url_group_release(group);  /* Release reference from get_url_group() */
         return ERROR_OUTOFMEMORY;
     }
     url_entry->context = context;
@@ -1266,6 +1734,7 @@ ULONG WINAPI HttpAddUrlToUrlGroup(HTTP_URL_GROUP_ID id, const WCHAR *url,
             list_remove(&url_entry->entry);
             free(url_entry->url);
             free(url_entry);
+            url_group_release(group);  /* Release reference from get_url_group() */
             return ret;
         }
         if (wcsstr(url, L"BusinessCentral") || wcsstr(url, L":7049"))
@@ -1277,6 +1746,7 @@ ULONG WINAPI HttpAddUrlToUrlGroup(HTTP_URL_GROUP_ID id, const WCHAR *url,
     }
     
     TRACE("URL %s added to group %s\n", debugstr_w(url), wine_dbgstr_longlong(id));
+    url_group_release(group);  /* Release reference from get_url_group() */
     return ERROR_SUCCESS;
 }
 
@@ -1312,7 +1782,10 @@ ULONG WINAPI HttpRemoveUrlFromUrlGroup(HTTP_URL_GROUP_ID id, const WCHAR *url, U
                 LeaveCriticalSection(&g_httpapi_cs);
                 ret = remove_url(group->queue, url);
                 if (ret && ret != ERROR_FILE_NOT_FOUND)
+                {
+                    url_group_release(group);  /* Release reference from get_url_group() */
                     return ret;
+                }
                 EnterCriticalSection(&g_httpapi_cs);
             }
             
@@ -1322,12 +1795,96 @@ ULONG WINAPI HttpRemoveUrlFromUrlGroup(HTTP_URL_GROUP_ID id, const WCHAR *url, U
             
             free(url_entry->url);
             free(url_entry);
+            url_group_release(group);  /* Release reference from get_url_group() */
             return ERROR_SUCCESS;
         }
     }
     LeaveCriticalSection(&g_httpapi_cs);
 
+    url_group_release(group);  /* Release reference from get_url_group() */
     return ERROR_FILE_NOT_FOUND;
+}
+
+/***********************************************************************
+ *        get_url_group_for_request
+ *
+ * Find the URL group associated with a request ID
+ */
+static struct url_group *get_url_group_for_request(HTTP_REQUEST_ID id)
+{
+    struct request_url_group_mapping *mapping;
+    struct url_group *group = NULL;
+    
+    /* First try to find the mapping */
+    EnterCriticalSection(&request_mapping_cs);
+    LIST_FOR_EACH_ENTRY(mapping, &request_mappings, struct request_url_group_mapping, entry)
+    {
+        if (mapping->request_id == id)
+        {
+            group = mapping->group;
+            url_group_acquire(group);  /* Take reference for caller */
+            LeaveCriticalSection(&request_mapping_cs);
+            TRACE("Found mapped URL group %p for request %s\n", group, wine_dbgstr_longlong(id));
+            return group;
+        }
+    }
+    LeaveCriticalSection(&request_mapping_cs);
+    
+    /* No mapping found - this shouldn't happen if tracking is working */
+    TRACE("WARNING: No URL group mapping found for request %s\n", wine_dbgstr_longlong(id));
+    
+    /* Fallback: try to find any group with auth enabled (for backwards compatibility) */
+    EnterCriticalSection(&g_httpapi_cs);
+    LIST_FOR_EACH_ENTRY(group, &url_groups, struct url_group, entry)
+    {
+        if (group->auth_enabled)
+        {
+            url_group_acquire(group);
+            LeaveCriticalSection(&g_httpapi_cs);
+            TRACE("Using fallback URL group with authentication for request %s\n", wine_dbgstr_longlong(id));
+            return group;
+        }
+    }
+    LeaveCriticalSection(&g_httpapi_cs);
+    
+    TRACE("No URL group found for request %s\n", wine_dbgstr_longlong(id));
+    return NULL;
+}
+
+/***********************************************************************
+ *        inject_auth_header_if_needed
+ *
+ * Auto-inject WWW-Authenticate header for 401 responses when auth is configured
+ */
+static void inject_auth_header_if_needed(HTTP_RESPONSE *response, HTTP_REQUEST_ID id)
+{
+    struct url_group *group;
+    
+    /* Only inject for 401 responses without existing WWW-Authenticate */
+    if (response->s.StatusCode != 401)
+        return;
+        
+    if (response->s.Headers.KnownHeaders[HttpHeaderWwwAuthenticate].pRawValue)
+        return;
+    
+    /* Get URL group to check auth settings */
+    group = get_url_group_for_request(id);
+    if (!group || !group->auth_enabled)
+    {
+        if (group) url_group_release(group);
+        return;
+    }
+    
+    /* Inject appropriate authentication header */
+    if (group->auth_schemes & HTTP_AUTH_SCHEME_NTLM)
+    {
+        TRACE("Auto-injecting WWW-Authenticate: NTLM for 401 response\n");
+        response->s.Headers.KnownHeaders[HttpHeaderWwwAuthenticate].pRawValue = "NTLM";
+        response->s.Headers.KnownHeaders[HttpHeaderWwwAuthenticate].RawValueLength = 4;
+    }
+    /* Add other schemes as needed */
+    
+    url_group_release(group);
 }
 
 /***********************************************************************
@@ -1355,14 +1912,19 @@ ULONG WINAPI HttpQueryUrlGroupProperty(HTTP_URL_GROUP_ID id, HTTP_SERVER_PROPERT
                 *ret_length = size;
 
             if (length < size)
+            {
+                url_group_release(group);  /* Release reference from get_url_group() */
                 return ERROR_INSUFFICIENT_BUFFER;
+            }
 
             memcpy(buffer, &info, size);
+            url_group_release(group);  /* Release reference from get_url_group() */
             return ERROR_SUCCESS;
         }
         
         default:
             FIXME("Unhandled property %u.\n", property);
+            url_group_release(group);  /* Release reference from get_url_group() */
             return ERROR_CALL_NOT_IMPLEMENTED;
     }
 }
@@ -1527,6 +2089,36 @@ ULONG WINAPI HttpSetServerSessionProperty(HTTP_SERVER_SESSION_ID id,
 
     switch (property)
     {
+        case HttpServerAuthenticationProperty:
+        {
+            const HTTP_SERVER_AUTHENTICATION_INFO *auth_info = value;
+            
+            if (length < sizeof(HTTP_SERVER_AUTHENTICATION_INFO))
+            {
+                server_session_release(session);
+                return ERROR_INSUFFICIENT_BUFFER;
+            }
+            
+            /* Store authentication settings for this session */
+            session->auth_enabled = auth_info->Flags.Present;
+            session->auth_schemes = auth_info->AuthSchemes;
+            memcpy(&session->auth_info, auth_info, sizeof(HTTP_SERVER_AUTHENTICATION_INFO));
+            
+            TRACE("Server session authentication set: enabled=%d, schemes=%#lx\n", session->auth_enabled, session->auth_schemes);
+            
+            if (session->auth_schemes & HTTP_AUTH_SCHEME_NTLM)
+                TRACE("  NTLM authentication enabled for session\n");
+            if (session->auth_schemes & HTTP_AUTH_SCHEME_NEGOTIATE)
+                TRACE("  Negotiate authentication enabled for session\n");
+            if (session->auth_schemes & HTTP_AUTH_SCHEME_BASIC)
+                TRACE("  Basic authentication enabled for session\n");
+            if (session->auth_schemes & HTTP_AUTH_SCHEME_DIGEST)
+                TRACE("  Digest authentication enabled for session\n");
+            
+            server_session_release(session);
+            return ERROR_SUCCESS;
+        }
+        
         case HttpServerQosProperty:
         {
             const HTTP_QOS_SETTING_INFO *info = value;

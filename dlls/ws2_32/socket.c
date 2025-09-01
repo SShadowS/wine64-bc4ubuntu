@@ -3368,8 +3368,13 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
             return 0;
 
         case SO_REUSE_UNICASTPORT:
-            FIXME("Ignoring SO_REUSE_UNICASTPORT\n");
-            return 0;
+            if (!optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            memcpy( &value, optval, min( optlen, sizeof(value) ));
+            return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_REUSE_UNICASTPORT, (char *)&value, sizeof(value) );
 
         case SO_REUSE_MULTICASTPORT:
             FIXME("Ignoring SO_REUSE_MULTICASTPORT\n");

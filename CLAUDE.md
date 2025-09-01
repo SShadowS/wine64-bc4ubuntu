@@ -43,42 +43,6 @@ Common configure options:
 
 Run `./configure --help` for all options.
 
-## Production Wine Build Workflow
-
-### One-Time System Setup
-
-**IMPORTANT**: This setup only needs to be done once per system.
-
-```bash
-# Add 32-bit architecture support
-sudo dpkg --add-architecture i386
-
-# Install core build dependencies
-sudo apt update && sudo apt install -y \
-  build-essential gcc-multilib g++-multilib flex bison \
-  mingw-w64 ccache git
-
-# Install Wine development libraries (64-bit)
-sudo apt install -y \
-  libx11-dev libfreetype-dev libxcursor-dev libxi-dev libxext-dev \
-  libxrandr-dev libxinerama-dev libxcomposite-dev libxrender-dev \
-  libxfixes-dev libxmu-dev libxxf86vm-dev libxss-dev libdbus-1-dev \
-  libglib2.0-dev libcups2-dev libgphoto2-dev libsane-dev \
-  libkrb5-dev libv4l-dev libpulse-dev libudev-dev libjpeg-dev \
-  libpng-dev libtiff-dev libosmesa6-dev libgl1-mesa-dev \
-  libglu1-mesa-dev libncurses-dev libpcap-dev libgnutls28-dev \
-  libvulkan-dev libwayland-dev
-
-# Install Wine development libraries (32-bit)
-sudo apt install -y \
-  libx11-dev:i386 libfreetype6-dev:i386 libgl1-mesa-dev:i386 \
-  libglu1-mesa-dev:i386 libncurses-dev:i386 libxcursor-dev:i386 \
-  libxi-dev:i386 libxrandr-dev:i386 libxcomposite-dev:i386 \
-  libosmesa6-dev:i386 libdbus-1-dev:i386 libudev-dev:i386 \
-  libv4l-dev:i386 libkrb5-dev:i386 libgnutls28-dev:i386 \
-  libxxf86vm-dev:i386 libxinerama-dev:i386
-```
-
 ### Development Build Process
 
 **Use this workflow when testing changes or rebuilding Wine:**
@@ -93,15 +57,15 @@ mkdir -p build/wine-64 build/wine-32
 cd build/wine-64
 ../../configure CC="ccache gcc" CROSSCC="ccache i686-w64-mingw32-gcc" --enable-win64
 make clean  # Only needed if rebuilding
-make -j$(nproc)
+make -j
 
 # Build 32-bit Wine (with 64-bit support)
 cd ../wine-32
 ../../configure CC="ccache gcc" CROSSCC="ccache i686-w64-mingw32-gcc" --with-wine64=../wine-64
 make clean  # Only needed if rebuilding  
-make -j$(nproc)
+make -j
 
-# Install both architectures
+# Install both architectures, but let user do this as it requires SUDO!
 cd ../wine-64
 sudo make install
 cd ../wine-32
@@ -135,11 +99,11 @@ sudo make install
 
 ```bash
 cd ~/wine-source/build/wine-64
-make -j$(nproc)
+make -j
 sudo make install
 
 cd ../wine-32
-make -j$(nproc)
+make -j
 sudo make install
 ```
 
@@ -272,27 +236,11 @@ Example: `CreateFileW()` → path translation → Unix `open()` → Windows hand
 WINEPREFIX=~/.local/share/wineprefixes/bc1 WINEARCH=win64 wineboot -i
 
 # Install .NET Framework 4.8 (if required for BC Server)
-winetricks arch=64 prefix=bc dotnet48 -q
+winetricks arch=64 prefix=bc1 dotnet48 -q
 
 # Install PowerShell 5.1 (if needed for BC management)
-winetricks arch=64 prefix=bc ps51
+winetricks arch=64 prefix=bc1 ps51
 ```
-
-### Testing Locale Enumeration Fix
-
-**Test the duplicate culture fix with a simple program:**
-
-```bash
-# Compile and run locale enumeration test
-cd /tmp
-i686-w64-mingw32-gcc -o test_locale_enum.exe test_locale_enum.c -lkernel32
-WINEPREFIX=~/.local/share/wineprefixes/bc1 wine test_locale_enum.exe
-```
-
-**Expected behavior after fix:**
-- No duplicate "Catalan (Spain)" entries
-- `ca-ES` shows as "Catalan (Spain)"
-- `ca-ES-valencia` shows as "Catalan (Spain, Valencia)"
 
 ### Business Central Server Testing
 
@@ -432,13 +380,96 @@ rg 'HttpReceiveHttpRequest|HttpSendHttpResponse' "relay_logs/bc_relay_rg_TIMESTA
 
 This tool is essential for diagnosing HTTP API implementation issues in Wine when running Business Central Server.
 
+## Event Log Support
+
+### Wine Event Log Implementation
+
+Wine includes a simple in-memory event log implementation that can be activated via environment variable. When enabled, it captures Windows event log API calls and stores them in a circular buffer for debugging purposes.
+
+### Enabling the Event Log
+
+**Set the WINE_EVENTLOG environment variable:**
+```bash
+# Enable event log (accepts: "1", "true", "yes", "on" - case insensitive)
+export WINE_EVENTLOG=1
+wine your_program.exe
+
+# Or inline:
+WINE_EVENTLOG=true wine your_program.exe
+```
+
+**Disable (default behavior):**
+```bash
+# Event log is disabled by default - no action needed
+wine your_program.exe
+
+# Or explicitly disable:
+unset WINE_EVENTLOG
+```
+
+### Event Log Features
+
+- **Circular buffer**: Stores up to 10,000 events in memory
+- **Async file writing**: Background thread writes events to disk without blocking
+- **Performance optimized**: Only activates when explicitly enabled
+- **Debug tracing**: Use `WINEDEBUG=+eventlog` to see event log operations
+
+### Testing Event Log
+
+```bash
+# Test with provided test program
+x86_64-w64-mingw32-gcc -o test_eventlog.exe test_eventlog.c
+
+# Run without event log (default)
+wine test_eventlog.exe
+
+# Run with event log enabled
+WINE_EVENTLOG=1 WINEDEBUG=+eventlog wine test_eventlog.exe
+```
+
+### Use Cases
+
+- **Business Central debugging**: Track service startup events and errors
+- **Application diagnostics**: Capture Windows event log calls during troubleshooting
+- **Performance testing**: Monitor event generation patterns
+
 ## Debugging
 
 ```bash
 # Enable debug channels
-WINEDEBUG=+dll,+module wine program.exe
+WINEPREFIX=~/.local/share/wineprefixes/bc1 WINEDEBUG=+dll,+module wine program.exe
 
-# Common debug channels: +all, +dll, +reg, +file, +process
+# Common debug channels: +all, +dll, +reg, +file, +process, +eventlog
+```
+
+## Common Development Issues
+
+### TRACE Macro Compilation Errors
+
+**IMPORTANT:** When adding TRACE statements in Wine code, they MUST be on a single line. Multi-line TRACE statements will cause compilation errors.
+
+**Wrong (will fail to compile):**
+```c
+TRACE("This is a long message: %s\n", 
+      debugstr_w(some_variable));
+```
+
+**Correct:**
+```c
+TRACE("This is a long message: %s\n", debugstr_w(some_variable));
+```
+
+If you encounter compilation errors like:
+- `warning: missing terminating " character`
+- `error: unterminated argument list invoking macro "__WINE_DBG_LOG"`
+- `error: '__WINE_DBG_LOG' undeclared`
+
+Fix by ensuring all TRACE statements are on single lines:
+```bash
+# Example fix for broken TRACE statements
+sed -i '4365,4366s/.*/        TRACE("Checking service: %s\\n", debugstr_w(name));/' dlls/wbemprox/builtin.c
+sed -i '4376,4377s/.*/            TRACE("Found NAV\/BC service: %s\\n", debugstr_w(name));/' dlls/wbemprox/builtin.c
+# Or manually edit to put entire TRACE on one line
 ```
 
 ## Contributing
