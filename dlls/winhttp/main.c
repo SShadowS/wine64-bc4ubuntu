@@ -34,6 +34,9 @@ HINSTANCE winhttp_instance;
 
 WINE_DEFAULT_DEBUG_CHANNEL(winhttp);
 
+/* BC hooks initialization */
+extern void init_bc_hooks(void);
+
 /******************************************************************
  *              DllMain (winhttp.@)
  */
@@ -44,6 +47,7 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
     case DLL_PROCESS_ATTACH:
         winhttp_instance = hInstDLL;
         DisableThreadLibraryCalls(hInstDLL);
+        init_bc_hooks();
         break;
     case DLL_PROCESS_DETACH:
         if (lpv) break;

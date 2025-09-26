@@ -174,7 +174,7 @@ static NTSTATUS complete_irp(struct connection *conn, IRP *irp)
 
     if (output_len < irp_size)
     {
-        req->ConnectionId = (ULONG_PTR)conn;
+        req->ConnectionId = conn->conn_id;
         req->RequestId = conn->req_id;
         return STATUS_BUFFER_OVERFLOW;
     }
@@ -182,7 +182,7 @@ static NTSTATUS complete_irp(struct connection *conn, IRP *irp)
     offset = sizeof(*req);
 
     req->UrlContext = conn->context;
-    req->ConnectionId = (ULONG_PTR)conn;
+    req->ConnectionId = conn->conn_id;
     req->RequestId = conn->req_id;
     req->Version = conn->version;
     req->Verb = conn->verb;
@@ -216,9 +216,14 @@ static NTSTATUS complete_irp(struct connection *conn, IRP *irp)
     offset += 7 * sizeof(WCHAR);
     MultiByteToWideChar(CP_ACP, 0, host, host_len, (WCHAR *)(buffer + offset), host_len * sizeof(WCHAR));
     offset += host_len * sizeof(WCHAR);
-    MultiByteToWideChar(CP_ACP, 0, abs_path, abs_path_len + query_len,
-            (WCHAR *)(buffer + offset), (abs_path_len + query_len) * sizeof(WCHAR));
-    offset += (abs_path_len + query_len) * sizeof(WCHAR);
+    /* Convert absolute path */
+    MultiByteToWideChar(CP_ACP, 0, abs_path, abs_path_len,
+            (WCHAR *)(buffer + offset), abs_path_len * sizeof(WCHAR));
+    offset += abs_path_len * sizeof(WCHAR);
+    /* Convert query string if present (including the '?' character) */
+    if (query_len > 0)
+        MultiByteToWideChar(CP_ACP, 0, query, query_len, (WCHAR *)(buffer + offset), query_len * sizeof(WCHAR));
+    offset += query_len * sizeof(WCHAR);
     buffer[offset++] = 0;
     buffer[offset++] = 0;
 

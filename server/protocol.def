@@ -4121,3 +4121,11 @@ struct handle_info
 @REPLY
     int enable;                /* previous state of auto-repeat enable */
 @END
+
+
+/* Initialize event log shared memory */
+@REQ(init_eventlog)
+@REPLY
+    mem_size_t size;           /* size of shared memory region */
+    unsigned int status;       /* initialization status */
+@END

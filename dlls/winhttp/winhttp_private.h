@@ -233,6 +233,7 @@ struct request
     } creds[TARGET_MAX][SCHEME_MAX];
     unsigned int websocket_receive_buffer_size;
     unsigned int websocket_send_buffer_size, websocket_set_send_buffer_size;
+    BOOL websocket_upgrade_request; /* Request intends to upgrade to websocket */
     int read_reply_len;
     DWORD read_reply_status;
     enum request_response_state state;

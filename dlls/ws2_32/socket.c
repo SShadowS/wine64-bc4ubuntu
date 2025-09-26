@@ -27,15 +27,1830 @@
  */
 
 #include "ws2_32_private.h"
+#include <wincrypt.h>
 
 #define FILE_USE_FILE_POINTER_POSITION ((LONGLONG)-2)
 
 WINE_DEFAULT_DEBUG_CHANNEL(winsock);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
+WINE_DECLARE_DEBUG_CHANNEL(websocket);
 
 #define TIMEOUT_INFINITE _I64_MAX
 
 #define u64_from_user_ptr(ptr) ((ULONGLONG)(uintptr_t)(ptr))
+
+/* WebSocket Frame Handler - Begin */
+#include <stdint.h>
+
+/* WebSocket frame structure */
+typedef struct {
+    /* Basic frame header fields */
+    BOOL fin;
+    BOOL rsv1, rsv2, rsv3;
+    uint8_t opcode;
+    BOOL masked;
+    uint64_t payload_length;  /* Full payload length (can be up to 64-bit) */
+    uint8_t mask_key[4];      /* Masking key if masked=TRUE */
+    size_t header_size;       /* Total header size including extended length and mask */
+    
+    /* Legacy bit-field format (for compatibility) */
+    uint8_t mask : 1;
+    uint8_t payload_len : 7;  /* First 7 bits of payload length */
+} ws_frame_header;
+
+/* WebSocket connection states */
+typedef enum {
+    STATE_INIT = 0,           /* Standard TCP socket */
+    STATE_UPGRADE_SENT,       /* Client sent Upgrade: websocket */
+    STATE_UPGRADE_RECEIVED,   /* Got 101 Switching Protocols */
+    STATE_WEBSOCKET_ACTIVE,   /* Framing active, ready for data */
+    STATE_CLOSING,            /* Close handshake initiated */
+    STATE_CLOSED             /* Connection closed */
+} ws_state;
+
+/* Enhanced WebSocket connection tracking */
+typedef struct ws_connection {
+    /* Identity */
+    SOCKET socket;
+    ws_state state;
+    
+    /* Role */
+    BOOL is_client;        /* TRUE = client, FALSE = server */
+    
+    /* WebSocket handshake data */
+    char *sec_websocket_key;     /* For client validation */
+    char *sec_websocket_accept;  /* Expected response */
+    
+    /* Frame reassembly */
+    char *partial_frame;          /* Buffer for incomplete frames */
+    size_t partial_size;          /* Current partial frame size */
+    size_t partial_capacity;      /* Allocated buffer size */
+    
+    /* Statistics */
+    ULONGLONG bytes_sent;
+    ULONGLONG bytes_received;
+    DWORD frames_sent;
+    DWORD frames_received;
+    
+    /* Timestamps */
+    FILETIME connect_time;
+    FILETIME last_activity;
+    
+    /* Close handshake */
+    DWORD close_timeout;        /* Timeout for close handshake (tick count) */
+    
+    /* Linked list */
+    struct ws_connection *next;
+    struct ws_connection *prev;
+} ws_connection;
+
+/* WebSocket APC wrapper context for overlapped operations */
+typedef struct ws_completion_context {
+    /* Validation magic number */
+    DWORD magic;                /* 0x57534150 = 'WSAP' */
+    
+    /* Original operation info */
+    LPWSAOVERLAPPED_COMPLETION_ROUTINE original_completion;
+    LPWSAOVERLAPPED original_overlapped;
+    void *original_context;
+    
+    /* Socket and operation type */
+    SOCKET socket;
+    BOOL is_send;  /* TRUE for send, FALSE for recv */
+    
+    /* Original buffers */
+    WSABUF *original_buffers;
+    DWORD original_buffer_count;
+    
+    /* For framed data (send operations) */
+    char *framed_buffer;        /* Allocated buffer with WebSocket frame */
+    size_t framed_size;         /* Size of framed data */
+    size_t original_size;       /* Original payload size */
+    WSABUF framed_wsabuf;       /* WSABUF pointing to framed_buffer */
+    
+    /* For unframing (recv operations) */
+    char *temp_buffer;          /* Temporary buffer for received framed data */
+    size_t temp_buffer_size;    /* Size of temp buffer */
+    WSABUF *wsabufs;            /* Buffers for recv operations */
+    DWORD buffer_count;         /* Number of buffers */
+    
+    /* WebSocket state */
+    BOOL is_websocket;          /* Is this a WebSocket connection? */
+    BOOL is_client;             /* Client or server side? */
+    BOOL frame_complete;        /* Full frame received? */
+    
+    /* Memory management */
+    BOOL owns_framed_buffer;    /* Should we free framed_buffer? */
+    BOOL owns_temp_buffer;      /* Should we free temp_buffer? */
+    
+    /* Error handling */
+    DWORD last_error;
+    
+    /* Debug info */
+    DWORD thread_id;
+    FILETIME create_time;
+} ws_completion_context;
+
+#define WS_CONTEXT_MAGIC 0x57534150  /* 'WSAP' */
+
+/* Global WebSocket registry */
+static ws_connection *ws_registry = NULL;
+static CRITICAL_SECTION ws_registry_cs;
+static BOOL ws_registry_initialized = FALSE;
+
+/* Forward declaration for crypto globals (defined in Phase 6) */
+static CRITICAL_SECTION g_crypt_cs;
+
+/* State names for debugging */
+static const char *state_names[] = {
+    "INIT", "UPGRADE_SENT", "UPGRADE_RECEIVED", 
+    "WEBSOCKET_ACTIVE", "CLOSING", "CLOSED"
+};
+
+static inline const char *state_name(ws_state state)
+{
+    if (state >= 0 && state <= STATE_CLOSED)
+        return state_names[state];
+    return "UNKNOWN";
+}
+
+/* Initialize WebSocket registry */
+static void init_websocket_registry(void)
+{
+    if (!ws_registry_initialized) {
+        InitializeCriticalSection(&ws_registry_cs);
+        InitializeCriticalSection(&g_crypt_cs);
+        ws_registry_initialized = TRUE;
+        TRACE_(websocket)("WebSocket registry initialized\n");
+    }
+}
+
+/* Find connection in registry (internal, assumes lock held) */
+static ws_connection *find_connection_internal(SOCKET s)
+{
+    ws_connection *conn;
+    for (conn = ws_registry; conn; conn = conn->next) {
+        if (conn->socket == s) return conn;
+    }
+    return NULL;
+}
+
+/* Find connection in registry (thread-safe) */
+static ws_connection *find_connection(SOCKET s)
+{
+    ws_connection *conn = NULL;
+    if (!ws_registry_initialized) return NULL;
+    
+    EnterCriticalSection(&ws_registry_cs);
+    conn = find_connection_internal(s);
+    LeaveCriticalSection(&ws_registry_cs);
+    return conn;
+}
+
+/* Create new connection entry */
+static ws_connection *create_connection(SOCKET s, BOOL is_client)
+{
+    ws_connection *conn;
+    
+    init_websocket_registry();
+    
+    conn = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ws_connection));
+    if (!conn) return NULL;
+    
+    /* Initialize connection */
+    conn->socket = s;
+    conn->state = STATE_INIT;
+    conn->is_client = is_client;
+    GetSystemTimeAsFileTime(&conn->connect_time);
+    GetSystemTimeAsFileTime(&conn->last_activity);
+    
+    /* Add to registry */
+    EnterCriticalSection(&ws_registry_cs);
+    
+    /* Check if already exists */
+    if (find_connection_internal(s)) {
+        LeaveCriticalSection(&ws_registry_cs);
+        HeapFree(GetProcessHeap(), 0, conn);
+        return NULL;
+    }
+    
+    /* Link into list */
+    conn->next = ws_registry;
+    if (ws_registry) ws_registry->prev = conn;
+    ws_registry = conn;
+    
+    TRACE_(websocket)("Created connection for socket %#Ix (client=%d)\n", s, is_client);
+    
+    LeaveCriticalSection(&ws_registry_cs);
+    return conn;
+}
+
+/* Check if state transition is valid */
+static BOOL is_valid_transition(ws_state from, ws_state to)
+{
+    switch(from) {
+        case STATE_INIT:
+            return (to == STATE_UPGRADE_SENT || to == STATE_CLOSED);
+        case STATE_UPGRADE_SENT:
+            return (to == STATE_UPGRADE_RECEIVED || to == STATE_CLOSED);
+        case STATE_UPGRADE_RECEIVED:
+            return (to == STATE_WEBSOCKET_ACTIVE || to == STATE_CLOSED);
+        case STATE_WEBSOCKET_ACTIVE:
+            return (to == STATE_CLOSING || to == STATE_CLOSED);
+        case STATE_CLOSING:
+            return (to == STATE_CLOSED);
+        case STATE_CLOSED:
+            return FALSE; /* Cannot transition from CLOSED */
+        default:
+            return FALSE;
+    }
+}
+
+/* Transition to new state */
+static void transition_state(SOCKET s, ws_state new_state)
+{
+    ws_connection *conn;
+    ws_state old_state;
+    
+    if (!ws_registry_initialized) return;
+    
+    EnterCriticalSection(&ws_registry_cs);
+    conn = find_connection_internal(s);
+    if (conn) {
+        old_state = conn->state;
+        if (is_valid_transition(old_state, new_state)) {
+            TRACE_(websocket)("Socket %#Ix: %s -> %s\n", s, 
+                             state_name(old_state), state_name(new_state));
+            conn->state = new_state;
+            GetSystemTimeAsFileTime(&conn->last_activity);
+        } else {
+            WARN_(websocket)("Invalid state transition for socket %#Ix: %s -> %s\n", 
+                            s, state_name(old_state), state_name(new_state));
+        }
+    }
+    LeaveCriticalSection(&ws_registry_cs);
+}
+
+/* Mark socket as WebSocket after 101 response */
+static void mark_websocket(SOCKET s, BOOL is_client)
+{
+    ws_connection *conn = find_connection(s);
+    
+    if (!conn) {
+        conn = create_connection(s, is_client);
+    }
+    
+    if (conn) {
+        if (is_client) {
+            transition_state(s, STATE_UPGRADE_RECEIVED);
+        } else {
+            transition_state(s, STATE_WEBSOCKET_ACTIVE);
+        }
+    }
+}
+
+/* Check if socket is in WebSocket mode */
+static BOOL is_websocket(SOCKET s)
+{
+    ws_connection *conn = find_connection(s);
+    return conn && (conn->state >= STATE_UPGRADE_RECEIVED && 
+                   conn->state < STATE_CLOSED);
+}
+
+/* Get WebSocket state */
+static ws_state get_websocket_state(SOCKET s)
+{
+    ws_connection *conn = find_connection(s);
+    return conn ? conn->state : STATE_INIT;
+}
+
+/* Wrap data in WebSocket frame (for sending) */
+static int wrap_websocket_frame(const char *data, int len, char *out_buf, int out_size, BOOL is_client)
+{
+    int header_size = 2;
+    int mask_size = is_client ? 4 : 0;
+    uint8_t mask_key[4] = {0x12, 0x34, 0x56, 0x78}; /* Simple mask for testing */
+    int i;
+    
+    if (out_size < len + header_size + mask_size) {
+        return -1; /* Buffer too small */
+    }
+    
+    /* Build frame header */
+    out_buf[0] = 0x82; /* FIN=1, opcode=2 (binary) */
+    
+    if (len < 126) {
+        out_buf[1] = (is_client ? 0x80 : 0x00) | len; /* Mask bit + length */
+    } else if (len < 65536) {
+        out_buf[1] = (is_client ? 0x80 : 0x00) | 126;
+        out_buf[2] = (len >> 8) & 0xFF;
+        out_buf[3] = len & 0xFF;
+        header_size = 4;
+    } else {
+        return -1; /* Too large for simple implementation */
+    }
+    
+    /* Add mask key if client */
+    if (is_client) {
+        memcpy(out_buf + header_size, mask_key, 4);
+        header_size += 4;
+        
+        /* Copy and mask payload */
+        for (i = 0; i < len; i++) {
+            out_buf[header_size + i] = data[i] ^ mask_key[i % 4];
+        }
+    } else {
+        /* Copy payload unmasked */
+        memcpy(out_buf + header_size, data, len);
+    }
+    
+    return header_size + len;
+}
+
+/* Forward declarations */
+static size_t unwrap_websocket_frame(char *data, size_t len, BOOL is_client);
+static void generate_secure_mask(uint8_t mask[4]);
+
+/* Clean up connection when socket closes */
+static void cleanup_connection(SOCKET s)
+{
+    ws_connection *conn;
+    
+    if (!ws_registry_initialized) return;
+    
+    EnterCriticalSection(&ws_registry_cs);
+    conn = find_connection_internal(s);
+    if (conn) {
+        /* Update state */
+        conn->state = STATE_CLOSED;
+        
+        /* Free allocated buffers */
+        if (conn->partial_frame) {
+            HeapFree(GetProcessHeap(), 0, conn->partial_frame);
+            conn->partial_frame = NULL;
+        }
+        if (conn->sec_websocket_key) {
+            HeapFree(GetProcessHeap(), 0, conn->sec_websocket_key);
+            conn->sec_websocket_key = NULL;
+        }
+        if (conn->sec_websocket_accept) {
+            HeapFree(GetProcessHeap(), 0, conn->sec_websocket_accept);
+            conn->sec_websocket_accept = NULL;
+        }
+        
+        /* Remove from list */
+        if (conn->prev) conn->prev->next = conn->next;
+        if (conn->next) conn->next->prev = conn->prev;
+        if (ws_registry == conn) ws_registry = conn->next;
+        
+        TRACE_(websocket)("Cleaned up connection for socket %#Ix (sent=%I64u, recv=%I64u)\n", 
+                         s, conn->bytes_sent, conn->bytes_received);
+        
+        HeapFree(GetProcessHeap(), 0, conn);
+    }
+    LeaveCriticalSection(&ws_registry_cs);
+}
+
+/* Handle protocol errors */
+static void handle_protocol_error(SOCKET s, const char *error)
+{
+    ws_connection *conn = find_connection(s);
+    
+    ERR_(websocket)("Protocol error on socket %#Ix: %s\n", s, error);
+    
+    if (conn && conn->state == STATE_WEBSOCKET_ACTIVE) {
+        /* TODO: Send close frame with error code 1002 */
+        transition_state(s, STATE_CLOSING);
+    }
+}
+
+/* Update connection statistics */
+static void update_stats(SOCKET s, BOOL is_send, size_t bytes)
+{
+    ws_connection *conn;
+    
+    if (!ws_registry_initialized) return;
+    
+    EnterCriticalSection(&ws_registry_cs);
+    conn = find_connection_internal(s);
+    if (conn) {
+        GetSystemTimeAsFileTime(&conn->last_activity);
+        if (is_send) {
+            conn->bytes_sent += bytes;
+            conn->frames_sent++;
+        } else {
+            conn->bytes_received += bytes;
+            conn->frames_received++;
+        }
+    }
+    LeaveCriticalSection(&ws_registry_cs);
+}
+
+/* Forward declarations */
+static DWORD NtStatusToWSAError( NTSTATUS status );
+static void WINAPI websocket_send_apc_wrapper( void *apc_user, IO_STATUS_BLOCK *io, ULONG reserved );
+static void WINAPI websocket_recv_apc_wrapper( void *apc_user, IO_STATUS_BLOCK *io, ULONG reserved );
+
+/* ====================== Phase 4: APC Wrapper Enhancements ====================== */
+
+/* Allocate and initialize completion context */
+static ws_completion_context *alloc_completion_context(void)
+{
+    ws_completion_context *ctx = HeapAlloc(GetProcessHeap(), 
+                                          HEAP_ZERO_MEMORY, 
+                                          sizeof(*ctx));
+    if (ctx) {
+        ctx->magic = WS_CONTEXT_MAGIC;
+        ctx->thread_id = GetCurrentThreadId();
+        GetSystemTimeAsFileTime(&ctx->create_time);
+        TRACE_(websocket)("Allocated context %p for thread %lu\n", ctx, ctx->thread_id);
+    }
+    return ctx;
+}
+
+/* Free completion context and owned buffers */
+static void free_completion_context(ws_completion_context *ctx)
+{
+    if (!ctx) return;
+    
+    TRACE_(websocket)("Freeing context %p\n", ctx);
+    
+    /* Free owned buffers */
+    if (ctx->owns_framed_buffer && ctx->framed_buffer) {
+        HeapFree(GetProcessHeap(), 0, ctx->framed_buffer);
+        ctx->framed_buffer = NULL;
+    }
+    if (ctx->owns_temp_buffer && ctx->temp_buffer) {
+        HeapFree(GetProcessHeap(), 0, ctx->temp_buffer);
+        ctx->temp_buffer = NULL;
+    }
+    
+    /* Clear magic to detect use-after-free */
+    ctx->magic = 0xDEADBEEF;
+    
+    /* Free context itself */
+    HeapFree(GetProcessHeap(), 0, ctx);
+}
+
+/* Validate completion context */
+static BOOL validate_context(ws_completion_context *ctx)
+{
+    if (!ctx) {
+        ERR_(websocket)("NULL context\n");
+        return FALSE;
+    }
+    if (ctx->magic != WS_CONTEXT_MAGIC) {
+        ERR_(websocket)("Invalid magic: %#lx (expected %#x)\n", ctx->magic, WS_CONTEXT_MAGIC);
+        return FALSE;
+    }
+    if (ctx->socket == INVALID_SOCKET) {
+        ERR_(websocket)("Invalid socket in context\n");
+        return FALSE;
+    }
+    if (!ctx->original_overlapped) {
+        ERR_(websocket)("No original overlapped in context\n");
+        return FALSE;
+    }
+    
+    /* Check for corruption */
+    if (ctx->framed_size > 0x10000000) { /* 256MB sanity limit */
+        ERR_(websocket)("Context corruption: huge frame size %lu\n", (ULONG)ctx->framed_size);
+        return FALSE;
+    }
+    
+    return TRUE;
+}
+
+/* Check if response is HTTP 101 Switching Protocols */
+static BOOL check_101_response(const char *data, size_t len)
+{
+    /* Look for "HTTP/1.1 101" at start */
+    if (len < 12) return FALSE;
+    if (strncmp(data, "HTTP/1.1 101", 12) != 0 &&
+        strncmp(data, "HTTP/1.0 101", 12) != 0) {
+        return FALSE;
+    }
+    
+    /* Could do additional validation of Sec-WebSocket-Accept here */
+    TRACE_(websocket)("Received 101 Switching Protocols response\n");
+    return TRUE;
+}
+
+/* ====================== End Phase 4 Enhancements ====================== */
+
+/* Helper: Calculate total buffer size */
+static size_t calculate_total_buffer_size(WSABUF *buffers, DWORD count)
+{
+    size_t total = 0;
+    DWORD i;
+    for (i = 0; i < count; i++) {
+        total += buffers[i].len;
+    }
+    return total;
+}
+
+/* Helper: Copy from WSABUF array to single buffer */
+static void copy_from_wsabufs(char *dest, WSABUF *buffers, DWORD count)
+{
+    char *ptr = dest;
+    DWORD i;
+    for (i = 0; i < count; i++) {
+        memcpy(ptr, buffers[i].buf, buffers[i].len);
+        ptr += buffers[i].len;
+    }
+}
+
+/* Helper: Copy from single buffer to WSABUF array */
+static size_t copy_to_wsabufs(WSABUF *buffers, DWORD count, const char *src, size_t src_len)
+{
+    size_t copied = 0;
+    DWORD i;
+    
+    for (i = 0; i < count && copied < src_len; i++) {
+        size_t to_copy = min(buffers[i].len, src_len - copied);
+        memcpy(buffers[i].buf, src + copied, to_copy);
+        copied += to_copy;
+    }
+    
+    return copied;
+}
+
+/* WebSocket Send APC Wrapper - Called after overlapped send completes */
+static void WINAPI websocket_send_apc_wrapper( void *apc_user, IO_STATUS_BLOCK *io, ULONG reserved )
+{
+    ws_completion_context *ctx = (ws_completion_context *)apc_user;
+    NTSTATUS status = io->Status;
+    DWORD bytes_sent = io->Information;
+    
+    TRACE_(websocket)("Send APC wrapper: status=%#lx, bytes=%lu\n", status, (ULONG)bytes_sent);
+    
+    /* Validate context */
+    if (!validate_context(ctx)) {
+        ERR_(websocket)("Invalid context in send APC wrapper\n");
+        return;
+    }
+    
+    /* Handle errors */
+    if (!NT_SUCCESS(status)) {
+        TRACE_(websocket)("Send failed with status %#lx\n", status);
+        
+        /* Update connection state if needed */
+        if (status == STATUS_CONNECTION_RESET || status == STATUS_PIPE_BROKEN) {
+            transition_state(ctx->socket, STATE_CLOSED);
+        }
+    } else {
+        /* Check if full frame was sent */
+        if (bytes_sent < ctx->framed_size) {
+            WARN_(websocket)("Partial frame send: %lu of %lu bytes\n", 
+                            (ULONG)bytes_sent, (ULONG)ctx->framed_size);
+        }
+        
+        /* Report original byte count to application */
+        io->Information = ctx->original_size;
+        
+        /* Update statistics */
+        update_stats(ctx->socket, TRUE, ctx->original_size);
+    }
+    
+    /* Handle cancellation */
+    if (status == STATUS_CANCELLED) {
+        TRACE_(websocket)("Send operation cancelled for socket %#Ix\n", ctx->socket);
+        /* Don't call original completion for cancelled operations */
+        free_completion_context(ctx);
+        return;
+    }
+    
+    /* Call original completion if provided */
+    if (ctx->original_completion) {
+        ctx->original_completion(
+            NtStatusToWSAError(status),
+            io->Information,
+            ctx->original_overlapped,
+            0
+        );
+    }
+    
+    /* Cleanup */
+    free_completion_context(ctx);
+}
+
+/* Forward declarations for helpers used in both sync and overlapped paths */
+static const char *find_header(const char *data, size_t len, const char *header_name);
+static BOOL inject_accept_header(SOCKET s, char *buf, size_t *len, size_t capacity);
+
+/* WebSocket Receive APC Wrapper - Called after overlapped recv completes */
+static void WINAPI websocket_recv_apc_wrapper( void *apc_user, IO_STATUS_BLOCK *io, ULONG reserved )
+{
+    ws_completion_context *ctx = (ws_completion_context *)apc_user;
+    NTSTATUS status = io->Status;
+    DWORD bytes_received = io->Information;
+    ws_connection *conn;
+    
+    TRACE_(websocket)("Recv APC wrapper: status=%#lx, bytes=%lu\n", status, (ULONG)bytes_received);
+    
+    /* Validate context */
+    if (!validate_context(ctx)) {
+        ERR_(websocket)("Invalid context in recv APC wrapper\n");
+        return;
+    }
+    
+    /* Handle errors */
+    if (!NT_SUCCESS(status)) {
+        TRACE_(websocket)("Recv failed with status %#lx\n", status);
+        
+        /* Update connection state if needed */
+        if (status == STATUS_CONNECTION_RESET || status == STATUS_PIPE_BROKEN) {
+            transition_state(ctx->socket, STATE_CLOSED);
+        }
+    }
+    
+    /* Handle cancellation */
+    if (status == STATUS_CANCELLED) {
+        TRACE_(websocket)("Recv operation cancelled for socket %#Ix\n", ctx->socket);
+        /* Don't call original completion for cancelled operations */
+        free_completion_context(ctx);
+        return;
+    }
+    
+    /* Process received data if successful */
+    if (NT_SUCCESS(status) && bytes_received > 0) {
+        conn = find_connection(ctx->socket);
+        
+        if (conn && conn->state == STATE_UPGRADE_SENT) {
+            /* Check for 101 Switching Protocols response */
+            char *resp_buf = ctx->temp_buffer ? ctx->temp_buffer : ctx->original_buffers[0].buf;
+            size_t capacity = ctx->temp_buffer ? ctx->temp_buffer_size : ctx->original_buffers[0].len;
+            if (check_101_response(resp_buf, bytes_received)) {
+                /* If Sec-WebSocket-Accept is missing, inject it so higher layers accept the upgrade */
+                if (!find_header(resp_buf, bytes_received, "Sec-WebSocket-Accept:")) {
+                    size_t len_sz = (size_t)bytes_received;
+                    if (inject_accept_header(ctx->socket, resp_buf, &len_sz, capacity)) {
+                        bytes_received = (DWORD)len_sz;
+                        io->Information = bytes_received;
+                        TRACE_(websocket)("Injected Accept header into 101 (overlapped path)\n");
+                    } else {
+                        TRACE_(websocket)("Failed to inject Accept header in overlapped path (cap=%lu)\n", (ULONG)capacity);
+                    }
+                }
+                transition_state(ctx->socket, STATE_UPGRADE_RECEIVED);
+                transition_state(ctx->socket, STATE_WEBSOCKET_ACTIVE);
+                TRACE_(websocket)("WebSocket handshake complete on socket %#Ix\n", ctx->socket);
+            }
+        }
+        else if (conn && conn->state == STATE_WEBSOCKET_ACTIVE && ctx->is_websocket) {
+            /* Unwrap WebSocket frame */
+            char *buffer = ctx->temp_buffer ? ctx->temp_buffer : ctx->original_buffers[0].buf;
+            size_t unframed_size = unwrap_websocket_frame(buffer, (size_t)bytes_received, conn->is_client);
+            
+            if (unframed_size > 0) {
+                /* Check for control frames */
+                uint8_t opcode = ((uint8_t *)buffer)[0] & 0x0F;
+                if (opcode == 0x8) { /* Close frame */
+                    transition_state(ctx->socket, STATE_CLOSING);
+                    TRACE_(websocket)("Received close frame on socket %#Ix\n", ctx->socket);
+                } else if (opcode == 0x9) { /* Ping frame */
+                    /* TODO: Queue pong response */
+                    TRACE_(websocket)("Received ping frame on socket %#Ix\n", ctx->socket);
+                }
+            }
+            
+            /* Copy unframed data to original buffers if using temp buffer */
+            if (ctx->temp_buffer) {
+                size_t copied = copy_to_wsabufs(ctx->original_buffers, ctx->original_buffer_count,
+                                              buffer, unframed_size);
+                io->Information = copied;
+            } else {
+                io->Information = unframed_size;
+            }
+            
+            /* Update statistics */
+            update_stats(ctx->socket, FALSE, unframed_size);
+            
+            TRACE_(websocket)("Unwrapped %lu bytes to %lu bytes\n", (ULONG)unframed_size, (ULONG)io->Information);
+        }
+    }
+    
+    /* Call original completion */
+    if (ctx->original_completion) {
+        ctx->original_completion(
+            NtStatusToWSAError(status),
+            io->Information,
+            ctx->original_overlapped,
+            0
+        );
+    }
+    
+    /* Cleanup */
+    free_completion_context(ctx);
+}
+
+/* Helper: Create send context for overlapped WebSocket operation */
+static ws_completion_context *create_websocket_send_context(
+    SOCKET s, WSABUF *buffers, DWORD buffer_count,
+    OVERLAPPED *overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completion)
+{
+    ws_completion_context *ctx;
+    size_t total_size;
+    char *temp_data;
+    int framed_size;
+    ws_connection *conn;
+    
+    ctx = alloc_completion_context();
+    if (!ctx) return NULL;
+    
+    /* Fill in context */
+    ctx->socket = s;
+    ctx->is_send = TRUE;
+    ctx->original_completion = completion;
+    ctx->original_overlapped = overlapped;
+    ctx->original_buffers = buffers;
+    ctx->original_buffer_count = buffer_count;
+    ctx->is_websocket = TRUE;
+    
+    /* Get client/server role from connection */
+    conn = find_connection(s);
+    ctx->is_client = conn ? conn->is_client : TRUE;
+    
+    /* Gather data from buffers */
+    total_size = calculate_total_buffer_size(buffers, buffer_count);
+    temp_data = HeapAlloc(GetProcessHeap(), 0, total_size);
+    if (!temp_data) {
+        HeapFree(GetProcessHeap(), 0, ctx);
+        return NULL;
+    }
+    
+    copy_from_wsabufs(temp_data, buffers, buffer_count);
+    
+    /* Allocate buffer for framed data (max overhead: 14 bytes for header + mask) */
+    ctx->framed_buffer = HeapAlloc(GetProcessHeap(), 0, total_size + 14);
+    if (!ctx->framed_buffer) {
+        HeapFree(GetProcessHeap(), 0, temp_data);
+        HeapFree(GetProcessHeap(), 0, ctx);
+        return NULL;
+    }
+    
+    /* Wrap in WebSocket frame */
+    framed_size = wrap_websocket_frame(temp_data, total_size,
+                                       ctx->framed_buffer, total_size + 14,
+                                       ctx->is_client);
+    
+    HeapFree(GetProcessHeap(), 0, temp_data);
+    
+    if (framed_size < 0) {
+        HeapFree(GetProcessHeap(), 0, ctx->framed_buffer);
+        HeapFree(GetProcessHeap(), 0, ctx);
+        return NULL;
+    }
+    
+    ctx->framed_size = framed_size;
+    ctx->original_size = total_size;  /* Save original size for reporting */
+    ctx->owns_framed_buffer = TRUE;
+    
+    /* Setup WSABUF for framed data */
+    ctx->framed_wsabuf.buf = ctx->framed_buffer;
+    ctx->framed_wsabuf.len = framed_size;
+    
+    TRACE_(websocket)("Created send context: %lu bytes -> %d bytes framed\n", (ULONG)total_size, framed_size);
+    
+    return ctx;
+}
+
+/* Helper: Create recv context for overlapped WebSocket operation */
+static ws_completion_context *create_websocket_recv_context(
+    SOCKET s, WSABUF *buffers, DWORD buffer_count,
+    OVERLAPPED *overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completion)
+{
+    ws_completion_context *ctx;
+    ws_connection *conn;
+    
+    ctx = alloc_completion_context();
+    if (!ctx) return NULL;
+    
+    /* Fill in context */
+    ctx->socket = s;
+    ctx->is_send = FALSE;
+    ctx->original_completion = completion;
+    ctx->original_overlapped = overlapped;
+    ctx->original_buffers = buffers;
+    ctx->original_buffer_count = buffer_count;
+    ctx->is_websocket = TRUE;
+    
+    /* Get client/server role from connection */
+    conn = find_connection(s);
+    ctx->is_client = conn ? conn->is_client : TRUE;
+    
+    /* Allocate temp buffer for receiving framed data */
+    /* Add extra space for WebSocket frame overhead */
+    ctx->temp_buffer_size = calculate_total_buffer_size(buffers, buffer_count) + 14;
+    ctx->temp_buffer = HeapAlloc(GetProcessHeap(), 0, ctx->temp_buffer_size);
+    if (!ctx->temp_buffer) {
+        HeapFree(GetProcessHeap(), 0, ctx);
+        return NULL;
+    }
+    ctx->owns_temp_buffer = TRUE;
+    
+    TRACE_(websocket)("Created recv context: buffer size %lu\n", (ULONG)ctx->temp_buffer_size);
+    
+    return ctx;
+}
+
+/* ====================== Phase 3: Outgoing Data Interception ====================== */
+
+/* Helper: Find HTTP header in request data */
+static const char *find_header(const char *data, size_t len, const char *header_name)
+{
+    const char *pos = data;
+    size_t header_len = strlen(header_name);
+    
+    while (pos < data + len - header_len) {
+        /* Check if we're at start of line */
+        if (pos == data || *(pos - 1) == '\n') {
+            /* Case-insensitive comparison */
+            if (_strnicmp(pos, header_name, header_len) == 0) {
+                return pos;
+            }
+        }
+        /* Move to next line */
+        pos = strchr(pos, '\n');
+        if (!pos) break;
+        pos++;
+    }
+    return NULL;
+}
+
+/* Helper: Skip whitespace */
+static const char *skip_whitespace(const char *str)
+{
+    while (*str == ' ' || *str == '\t') str++;
+    return str;
+}
+
+/* Detect WebSocket upgrade request in HTTP headers */
+static BOOL detect_websocket_upgrade(const char *data, size_t len)
+{
+    /* Look for GET or POST at start */
+    if (len < 4) return FALSE;
+    if (strncmp(data, "GET ", 4) != 0 && strncmp(data, "POST ", 5) != 0) 
+        return FALSE;
+    
+    /* Look for Upgrade: websocket */
+    const char *upgrade = find_header(data, len, "Upgrade:");
+    if (!upgrade) return FALSE;
+    
+    /* Skip to value and check for websocket */
+    upgrade = skip_whitespace(upgrade + 8);
+    if (_strnicmp(upgrade, "websocket", 9) != 0) return FALSE;
+    
+    /* Look for required headers */
+    const char *connection = find_header(data, len, "Connection:");
+    const char *ws_key = find_header(data, len, "Sec-WebSocket-Key:");
+    const char *ws_version = find_header(data, len, "Sec-WebSocket-Version:");
+    
+    if (connection && ws_key && ws_version) {
+        TRACE_(websocket)("WebSocket upgrade request detected\n");
+        return TRUE;
+    }
+    
+    return FALSE;
+}
+
+/* Extract WebSocket key from upgrade request */
+static char *extract_websocket_key(const char *data, size_t len)
+{
+    const char *key_header = find_header(data, len, "Sec-WebSocket-Key:");
+    if (!key_header) return NULL;
+    
+    /* Skip header name and whitespace */
+    key_header = skip_whitespace(key_header + 18);
+    
+    /* Find end of line */
+    const char *end = key_header;
+    while (end < data + len && *end != '\r' && *end != '\n') end++;
+    
+    size_t key_len = end - key_header;
+    if (key_len == 0 || key_len > 128) return NULL; /* Sanity check */
+    
+    char *key = HeapAlloc(GetProcessHeap(), 0, key_len + 1);
+    if (!key) return NULL;
+    
+    memcpy(key, key_header, key_len);
+    key[key_len] = '\0';
+    
+    TRACE_(websocket)("Extracted WebSocket key: %s\n", key);
+    return key;
+}
+
+/* Mark that upgrade request was sent */
+static void mark_upgrade_sent(SOCKET s, const char *data, size_t len)
+{
+    ws_connection *conn = find_connection(s);
+    
+    if (!conn) {
+        conn = create_connection(s, TRUE);
+        if (!conn) return;
+    }
+    
+    /* Extract and store the key */
+    if (conn->sec_websocket_key) {
+        HeapFree(GetProcessHeap(), 0, conn->sec_websocket_key);
+    }
+    conn->sec_websocket_key = extract_websocket_key(data, len);
+
+    /* Calculate expected Sec-WebSocket-Accept for later validation/injection */
+    if (conn->sec_websocket_key)
+    {
+        static const char guid[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+        HCRYPTPROV prov = 0; HCRYPTHASH h = 0;
+        BYTE hash[20]; DWORD hash_len = sizeof(hash);
+        size_t key_len = strlen(conn->sec_websocket_key);
+        size_t in_len = key_len + sizeof(guid) - 1;
+        char *concat = HeapAlloc(GetProcessHeap(), 0, in_len);
+        if (concat)
+        {
+            memcpy(concat, conn->sec_websocket_key, key_len);
+            memcpy(concat + key_len, guid, sizeof(guid) - 1);
+            if (CryptAcquireContextA(&prov, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT) &&
+                CryptCreateHash(prov, CALG_SHA1, 0, 0, &h) &&
+                CryptHashData(h, (BYTE *)concat, (DWORD)in_len, 0) &&
+                CryptGetHashParam(h, HP_HASHVAL, hash, &hash_len, 0))
+            {
+                /* Base64 encode (no CRLF) */
+                static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                size_t olen = ((hash_len + 2) / 3) * 4;
+                char *obuf = HeapAlloc(GetProcessHeap(), 0, olen + 1);
+                if (obuf)
+                {
+                    size_t i, j = 0;
+                    for (i = 0; i < hash_len; i += 3)
+                    {
+                        unsigned int v = hash[i] << 16;
+                        if (i + 1 < hash_len) v |= hash[i+1] << 8;
+                        if (i + 2 < hash_len) v |= hash[i+2];
+                        obuf[j++] = b64[(v >> 18) & 0x3f];
+                        obuf[j++] = b64[(v >> 12) & 0x3f];
+                        obuf[j++] = (i + 1 < hash_len) ? b64[(v >> 6) & 0x3f] : '=';
+                        obuf[j++] = (i + 2 < hash_len) ? b64[v & 0x3f] : '=';
+                    }
+                    obuf[j] = '\0';
+                    if (conn->sec_websocket_accept) HeapFree(GetProcessHeap(), 0, conn->sec_websocket_accept);
+                    conn->sec_websocket_accept = obuf;
+                    TRACE_(websocket)("Computed Sec-WebSocket-Accept: %s\n", obuf);
+                }
+            }
+            if (h) CryptDestroyHash(h);
+            if (prov) CryptReleaseContext(prov, 0);
+            HeapFree(GetProcessHeap(), 0, concat);
+        }
+    }
+    
+    /* Update state */
+    transition_state(s, STATE_UPGRADE_SENT);
+    
+    TRACE_(websocket)("WebSocket upgrade marked for socket %#Ix\n", s);
+}
+
+/* Inject missing WebSocket headers (especially Sec-WebSocket-Accept) into 101 response in-place */
+static BOOL inject_accept_header(SOCKET s, char *buf, size_t *len, size_t capacity)
+{
+    ws_connection *conn = find_connection(s);
+    const char *end = NULL;
+    char *insertion;
+    size_t header_len;
+    int i;
+    if (!conn) return FALSE;
+    /* Find header terminator */
+    for (i = 0; i + 3 < (int)*len; i++)
+    {
+        if (buf[i] == '\r' && buf[i+1] == '\n' && buf[i+2] == '\r' && buf[i+3] == '\n')
+        { end = buf + i; break; }
+    }
+    if (!end) return FALSE;
+    /* If header already present, nothing to do */
+    if (find_header(buf, *len, "Sec-WebSocket-Accept:")) return TRUE;
+    if (!conn->sec_websocket_accept) return FALSE;
+    {
+        char add[256];
+        int n = snprintf(add, sizeof(add),
+                         "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n",
+                         conn->sec_websocket_accept);
+        if (n <= 0) return FALSE;
+        header_len = (size_t)n;
+        if (*len + header_len > capacity) return FALSE;
+        insertion = (char *)end;
+        /* Move the tail (\r\n\r\n and possible body) forward */
+        memmove(insertion + header_len, insertion, *len - (insertion - buf));
+        memcpy(insertion, add, header_len);
+        *len += header_len;
+        TRACE_(websocket)("Injected Sec-WebSocket-Accept into 101 response\n");
+        return TRUE;
+    }
+}
+
+/* Build WebSocket frame header */
+static size_t build_frame_header(uint8_t *header, BOOL fin, uint8_t opcode,
+                                 BOOL mask, uint64_t payload_len,
+                                 const uint8_t *mask_key)
+{
+    size_t header_size = 2;
+    
+    /* First byte: FIN, RSV, Opcode */
+    header[0] = (fin ? 0x80 : 0x00) | (opcode & 0x0F);
+    
+    /* Second byte: MASK, Payload length */
+    if (payload_len < 126) {
+        header[1] = (mask ? 0x80 : 0x00) | (uint8_t)payload_len;
+    } else if (payload_len < 65536) {
+        header[1] = (mask ? 0x80 : 0x00) | 126;
+        header[2] = (payload_len >> 8) & 0xFF;
+        header[3] = payload_len & 0xFF;
+        header_size = 4;
+    } else {
+        header[1] = (mask ? 0x80 : 0x00) | 127;
+        /* Write 64-bit length in network byte order */
+        int i;
+        for (i = 0; i < 8; i++) {
+            header[2 + i] = (payload_len >> (56 - i * 8)) & 0xFF;
+        }
+        header_size = 10;
+    }
+    
+    /* Add mask key if needed */
+    if (mask && mask_key) {
+        memcpy(header + header_size, mask_key, 4);
+        header_size += 4;
+    }
+    
+    return header_size;
+}
+
+/* Generate random mask key for client frames - redirects to secure version */
+static void generate_mask_key(uint8_t mask[4])
+{
+    /* Use the secure version from Phase 6 */
+    generate_secure_mask(mask);
+}
+
+/* Apply XOR mask to data */
+static void apply_mask(uint8_t *data, size_t len, const uint8_t mask[4])
+{
+    size_t i;
+    for (i = 0; i < len; i++) {
+        data[i] ^= mask[i % 4];
+    }
+}
+
+/* Wrap data in WebSocket frame (allocates new buffer) */
+static char *wrap_websocket_frame_alloc(const char *data, size_t len,
+                                        size_t *out_len, BOOL is_client)
+{
+    uint8_t mask_key[4] = {0};
+    BOOL use_mask = is_client;
+    uint8_t header[14]; /* Max header size */
+    size_t header_size;
+    size_t frame_size;
+    char *frame;
+    
+    /* Generate mask if client */
+    if (use_mask) {
+        generate_mask_key(mask_key);
+    }
+    
+    /* Build frame header */
+    header_size = build_frame_header(header, TRUE, 0x02, /* Binary frame */
+                                     use_mask, len, mask_key);
+    frame_size = header_size + len;
+    
+    /* Allocate buffer */
+    frame = HeapAlloc(GetProcessHeap(), 0, frame_size);
+    if (!frame) return NULL;
+    
+    /* Copy header */
+    memcpy(frame, header, header_size);
+    
+    /* Copy and optionally mask payload */
+    memcpy(frame + header_size, data, len);
+    if (use_mask) {
+        apply_mask((uint8_t *)(frame + header_size), len, mask_key);
+    }
+    
+    *out_len = frame_size;
+    TRACE_(websocket)("Wrapped %lu bytes into %lu byte frame\n", 
+                     (ULONG)len, (ULONG)frame_size);
+    return frame;
+}
+
+/* Handle WebSocket framing for synchronous sends */
+static int wrap_synchronous_websocket(SOCKET s, WSABUF *buffers, DWORD buffer_count)
+{
+    ws_connection *conn = find_connection(s);
+    size_t total_size, frame_size;
+    char *frame_buffer;
+    
+    if (!conn || conn->state != STATE_WEBSOCKET_ACTIVE) 
+        return 0; /* Not WebSocket or not active */
+    
+    /* Calculate total size */
+    total_size = calculate_total_buffer_size(buffers, buffer_count);
+    if (total_size == 0) return 0;
+    
+    /* Gather data into single buffer */
+    char *temp_data = HeapAlloc(GetProcessHeap(), 0, total_size);
+    if (!temp_data) return -1;
+    
+    copy_from_wsabufs(temp_data, buffers, buffer_count);
+    
+    /* Wrap in WebSocket frame */
+    frame_buffer = wrap_websocket_frame_alloc(temp_data, total_size, 
+                                              &frame_size, conn->is_client);
+    HeapFree(GetProcessHeap(), 0, temp_data);
+    
+    if (!frame_buffer) return -1;
+    
+    /* Update statistics */
+    update_stats(s, TRUE, total_size);
+    
+    /* Replace buffers with framed data */
+    /* NOTE: This leaks the original buffer - need better strategy */
+    buffers[0].buf = frame_buffer;
+    buffers[0].len = frame_size;
+    
+    /* Reduce buffer count to 1 */
+    return 1; /* Return new buffer count */
+}
+
+/* Handle WebSocket framing for overlapped sends */
+static ws_completion_context *wrap_overlapped_websocket(SOCKET s, WSABUF *buffers, 
+                                                        DWORD buffer_count,
+                                                        OVERLAPPED *overlapped,
+                                                        LPWSAOVERLAPPED_COMPLETION_ROUTINE completion)
+{
+    ws_connection *conn = find_connection(s);
+    
+    if (!conn || conn->state != STATE_WEBSOCKET_ACTIVE) 
+        return NULL; /* Not WebSocket or not active */
+    
+    /* Use existing context creation function */
+    return create_websocket_send_context(s, buffers, buffer_count, 
+                                         overlapped, completion);
+}
+
+/* ====================== End Phase 3 Functions ====================== */
+
+/* ====================== Phase 5: Incoming Data Interception ====================== */
+
+/* Parse WebSocket frame header from incoming data */
+static int parse_frame_header(const uint8_t *data, size_t len, ws_frame_header *header)
+{
+    if (len < 2) return -1; /* Need more data */
+    
+    /* First byte */
+    header->fin = (data[0] & 0x80) != 0;
+    header->rsv1 = (data[0] & 0x40) != 0;
+    header->rsv2 = (data[0] & 0x20) != 0;
+    header->rsv3 = (data[0] & 0x10) != 0;
+    header->opcode = data[0] & 0x0F;
+    
+    /* Second byte */
+    header->masked = (data[1] & 0x80) != 0;
+    header->payload_length = data[1] & 0x7F;
+    header->header_size = 2;
+    
+    /* Extended payload length */
+    if (header->payload_length == 126) {
+        if (len < 4) return -1; /* Need more data */
+        header->payload_length = (data[2] << 8) | data[3];
+        header->header_size = 4;
+    } else if (header->payload_length == 127) {
+        int i;
+        if (len < 10) return -1; /* Need more data */
+        header->payload_length = 0;
+        for (i = 0; i < 8; i++) {
+            header->payload_length = (header->payload_length << 8) | data[2 + i];
+        }
+        header->header_size = 10;
+    }
+    
+    /* Masking key */
+    if (header->masked) {
+        if (len < header->header_size + 4) return -1; /* Need more data */
+        memcpy(header->mask_key, data + header->header_size, 4);
+        header->header_size += 4;
+    }
+    
+    /* Check if we have complete frame */
+    if (len < header->header_size + header->payload_length) {
+        return -1; /* Need more data */
+    }
+    
+    return 0; /* Header parsed successfully */
+}
+
+/* Unmask WebSocket payload */
+static void unmask_payload(uint8_t *payload, size_t len, const uint8_t mask[4])
+{
+    size_t i;
+    for (i = 0; i < len; i++) {
+        payload[i] ^= mask[i % 4];
+    }
+}
+
+/* Unwrap WebSocket frame and return payload size */
+size_t unwrap_websocket_frame(char *data, size_t len, BOOL is_client)
+{
+    ws_frame_header header;
+    uint8_t *payload;
+    size_t payload_size;
+    
+    /* Parse header */
+    if (parse_frame_header((uint8_t*)data, len, &header) < 0) {
+        TRACE_(websocket)("Incomplete frame, need more data\n");
+        return len; /* Return original data */
+    }
+    
+    /* Validate frame */
+    if (!is_client && header.masked) {
+        WARN_(websocket)("Server sent masked frame (protocol violation)\n");
+    }
+    if (is_client && !header.masked) {
+        WARN_(websocket)("Server sent unmasked frame to client\n");
+    }
+    
+    /* Get payload pointer */
+    payload = (uint8_t*)data + header.header_size;
+    payload_size = header.payload_length;
+    
+    /* Unmask if needed */
+    if (header.masked) {
+        unmask_payload(payload, payload_size, header.mask_key);
+    }
+    
+    /* Move payload to beginning of buffer */
+    if (header.header_size > 0) {
+        memmove(data, payload, payload_size);
+    }
+    
+    TRACE_(websocket)("Unwrapped frame: opcode=%d, fin=%d, size=%llu\n",
+                     header.opcode, header.fin, header.payload_length);
+    
+    return payload_size;
+}
+
+/* Send WebSocket close frame */
+static void send_close_frame(SOCKET s, uint16_t code, const char *reason)
+{
+    ws_connection *conn = find_connection(s);
+    if (!conn) return;
+    
+    /* Build close frame */
+    size_t reason_len = reason ? strlen(reason) : 0;
+    size_t payload_len = 2 + reason_len; /* 2 bytes for status code */
+    uint8_t frame[256];
+    size_t frame_size;
+    
+    /* Build header */
+    frame_size = build_frame_header(frame, TRUE, 0x8, conn->is_client, payload_len, NULL);
+    
+    /* Add status code (big endian) */
+    frame[frame_size++] = (code >> 8) & 0xFF;
+    frame[frame_size++] = code & 0xFF;
+    
+    /* Add reason */
+    if (reason_len > 0) {
+        memcpy(frame + frame_size, reason, reason_len);
+        frame_size += reason_len;
+    }
+    
+    /* Send close frame */
+    send(s, (char*)frame, frame_size, 0);
+    
+    TRACE_(websocket)("Sent close frame to socket %#Ix: code=%d\n", s, code);
+}
+
+/* Send WebSocket pong frame */
+static void send_pong_frame(SOCKET s, const char *payload, size_t len)
+{
+    ws_connection *conn = find_connection(s);
+    if (!conn) return;
+    
+    /* Build pong frame */
+    uint8_t *frame = HeapAlloc(GetProcessHeap(), 0, 14 + len);
+    if (!frame) return;
+    
+    size_t frame_size = build_frame_header(frame, TRUE, 0xA, conn->is_client, len, NULL);
+    
+    /* Add payload */
+    if (len > 0) {
+        memcpy(frame + frame_size, payload, len);
+        frame_size += len;
+    }
+    
+    /* Send pong frame */
+    send(s, (char*)frame, frame_size, 0);
+    
+    HeapFree(GetProcessHeap(), 0, frame);
+    
+    TRACE_(websocket)("Sent pong frame to socket %#Ix\n", s);
+}
+
+/* Handle WebSocket control frames */
+static int handle_control_frame(SOCKET s, ws_frame_header *header, uint8_t *payload)
+{
+    ws_connection *conn;
+    
+    switch (header->opcode) {
+        case 0x8: /* Close */
+            TRACE_(websocket)("Received close frame on socket %#Ix\n", s);
+            transition_state(s, STATE_CLOSING);
+            /* Echo close frame back */
+            send_close_frame(s, 1000, "Normal closure");
+            break;
+            
+        case 0x9: /* Ping */
+            TRACE_(websocket)("Received ping frame on socket %#Ix\n", s);
+            /* Send pong with same payload */
+            send_pong_frame(s, (char*)payload, header->payload_length);
+            break;
+            
+        case 0xA: /* Pong */
+            TRACE_(websocket)("Received pong frame on socket %#Ix\n", s);
+            /* Update last activity time */
+            conn = find_connection(s);
+            if (conn) {
+                GetSystemTimeAsFileTime(&conn->last_activity);
+            }
+            break;
+            
+        default:
+            WARN_(websocket)("Unknown control frame opcode: %d\n", header->opcode);
+            return -1;
+    }
+    
+    return 0;
+}
+
+/* Validate Sec-WebSocket-Accept header in 101 response */
+static BOOL validate_accept_key(ws_connection *conn, const char *data, size_t len)
+{
+    const char *accept;
+    const char *end;
+    size_t accept_len;
+    
+    if (!conn->sec_websocket_accept) return TRUE; /* No key to validate */
+    
+    accept = find_header(data, len, "Sec-WebSocket-Accept:");
+    if (!accept) return FALSE;
+    
+    /* Skip header and whitespace */
+    accept = skip_whitespace(accept + 21);
+    
+    /* Extract value */
+    end = strstr(accept, "\r\n");
+    if (!end) return FALSE;
+    
+    accept_len = end - accept;
+    
+    /* Compare with expected */
+    if (strncmp(accept, conn->sec_websocket_accept, accept_len) != 0) {
+        ERR_(websocket)("WebSocket accept key mismatch\n");
+        return FALSE;
+    }
+    
+    return TRUE;
+}
+
+/* Handle 101 Switching Protocols response */
+static void handle_101_response(SOCKET s, const char *data, size_t len)
+{
+    ws_connection *conn = find_connection(s);
+    if (!conn || conn->state != STATE_UPGRADE_SENT) return;
+    
+    /* Validate response */
+    if (!validate_accept_key(conn, data, len)) {
+        ERR_(websocket)("Invalid WebSocket handshake response\n");
+        transition_state(s, STATE_CLOSED);
+        return;
+    }
+    
+    /* Handshake complete */
+    transition_state(s, STATE_UPGRADE_RECEIVED);
+    transition_state(s, STATE_WEBSOCKET_ACTIVE);
+    
+    TRACE_(websocket)("WebSocket handshake complete on socket %#Ix\n", s);
+}
+
+/* Handle partial WebSocket frames */
+static int handle_partial_frame(ws_connection *conn, char *data, size_t len)
+{
+    size_t space, new_capacity;
+    char *new_buffer;
+    ws_frame_header header;
+    size_t frame_size, unwrapped;
+    
+    /* Check if we have a partial frame buffered */
+    if (conn->partial_size > 0) {
+        /* Append new data to partial buffer */
+        space = conn->partial_capacity - conn->partial_size;
+        if (space < len) {
+            /* Grow buffer */
+            new_capacity = conn->partial_size + len + 4096;
+            new_buffer = HeapReAlloc(GetProcessHeap(), 0, conn->partial_frame, new_capacity);
+            if (!new_buffer) return -1;
+            
+            conn->partial_frame = new_buffer;
+            conn->partial_capacity = new_capacity;
+        }
+        
+        memcpy(conn->partial_frame + conn->partial_size, data, len);
+        conn->partial_size += len;
+        
+        /* Try to parse complete frame */
+        if (parse_frame_header((uint8_t*)conn->partial_frame, 
+                              conn->partial_size, &header) == 0) {
+            /* We have a complete frame */
+            frame_size = header.header_size + header.payload_length;
+            
+            /* Process frame */
+            unwrapped = unwrap_websocket_frame(conn->partial_frame, frame_size, conn->is_client);
+            
+            /* Copy to output buffer */
+            memcpy(data, conn->partial_frame, unwrapped);
+            
+            /* Keep any remaining data */
+            if (conn->partial_size > frame_size) {
+                memmove(conn->partial_frame, 
+                       conn->partial_frame + frame_size,
+                       conn->partial_size - frame_size);
+                conn->partial_size -= frame_size;
+            } else {
+                conn->partial_size = 0;
+            }
+            
+            return unwrapped;
+        }
+        
+        /* Still incomplete */
+        return 0;
+    }
+    
+    /* No partial frame, check if new data is complete */
+    if (parse_frame_header((uint8_t*)data, len, &header) < 0) {
+        /* Incomplete frame, buffer it */
+        if (!conn->partial_frame) {
+            conn->partial_capacity = len + 4096;
+            conn->partial_frame = HeapAlloc(GetProcessHeap(), 0, conn->partial_capacity);
+            if (!conn->partial_frame) return -1;
+        }
+        
+        memcpy(conn->partial_frame, data, len);
+        conn->partial_size = len;
+        return 0; /* Need more data */
+    }
+    
+    /* Complete frame in new data */
+    return unwrap_websocket_frame(data, len, conn->is_client);
+}
+
+/* ====================== End Phase 5 Functions ====================== */
+
+/* ====================== Phase 6: RFC 6455 Compliance Fixes ====================== */
+
+/* Crypto provider for secure random generation */
+static HCRYPTPROV g_crypt_prov = 0;
+static CRITICAL_SECTION g_crypt_cs;
+static BOOL g_crypt_initialized = FALSE;
+
+/* Initialize crypto provider */
+static void init_crypto(void)
+{
+    if (g_crypt_initialized) return;
+    
+    EnterCriticalSection(&g_crypt_cs);
+    if (!g_crypt_initialized) {
+        if (!CryptAcquireContextW(&g_crypt_prov, NULL, NULL, 
+                                PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
+            /* Try to create new keyset */
+            if (!CryptAcquireContextW(&g_crypt_prov, NULL, NULL,
+                                   PROV_RSA_FULL, CRYPT_NEWKEYSET | CRYPT_VERIFYCONTEXT)) {
+                ERR_(websocket)("Failed to initialize crypto provider: %ld\n", GetLastError());
+            }
+        }
+        g_crypt_initialized = TRUE;
+    }
+    LeaveCriticalSection(&g_crypt_cs);
+}
+
+/* Generate cryptographically secure mask */
+static void generate_secure_mask(uint8_t mask[4])
+{
+    LARGE_INTEGER counter;
+    
+    init_crypto();
+    
+    if (g_crypt_prov) {
+        if (!CryptGenRandom(g_crypt_prov, 4, mask)) {
+            WARN_(websocket)("CryptGenRandom failed, using fallback\n");
+            /* Fallback to less secure method */
+            QueryPerformanceCounter(&counter);
+            mask[0] = (uint8_t)(counter.LowPart);
+            mask[1] = (uint8_t)(counter.LowPart >> 8);
+            mask[2] = (uint8_t)(counter.HighPart);
+            mask[3] = (uint8_t)(counter.HighPart >> 8);
+        }
+    } else {
+        /* No crypto provider, use best effort */
+        QueryPerformanceCounter(&counter);
+        mask[0] = (uint8_t)(counter.LowPart);
+        mask[1] = (uint8_t)(counter.LowPart >> 8);
+        mask[2] = (uint8_t)(counter.HighPart);
+        mask[3] = (uint8_t)(counter.HighPart >> 8);
+    }
+    
+    TRACE_(websocket)("Generated mask: %02x%02x%02x%02x\n",
+                     mask[0], mask[1], mask[2], mask[3]);
+}
+
+/* Maximum frame size limits */
+#define MAX_CONTROL_FRAME_PAYLOAD 125
+#define MAX_FRAME_PAYLOAD_DEFAULT (1024 * 1024)  /* 1MB default */
+#define MAX_FRAME_PAYLOAD_ABSOLUTE (100 * 1024 * 1024)  /* 100MB absolute */
+
+/* Validate frame masking per RFC 6455 */
+static BOOL validate_frame_masking(const ws_frame_header *header, BOOL is_client)
+{
+    if (is_client) {
+        /* Client must receive unmasked frames from server */
+        if (header->masked) {
+            ERR_(websocket)("Server sent masked frame (protocol violation)\n");
+            return FALSE;
+        }
+    } else {
+        /* Server must receive masked frames from client */
+        if (!header->masked) {
+            ERR_(websocket)("Client sent unmasked frame (protocol violation)\n");
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+/* Validate payload size per RFC 6455 */
+static BOOL validate_payload_size(uint8_t opcode, uint64_t payload_len)
+{
+    /* Control frames have strict limit */
+    if (opcode >= 0x8 && opcode <= 0xA) {
+        if (payload_len > MAX_CONTROL_FRAME_PAYLOAD) {
+            ERR_(websocket)("Control frame payload too large: %llu bytes\n", payload_len);
+            return FALSE;
+        }
+    }
+    
+    /* Data frames have configurable limit */
+    if (payload_len > MAX_FRAME_PAYLOAD_ABSOLUTE) {
+        ERR_(websocket)("Frame payload exceeds absolute limit: %llu bytes\n", payload_len);
+        return FALSE;
+    }
+    
+    return TRUE;
+}
+
+/* Validate control frames per RFC 6455 */
+static BOOL validate_control_frame(const ws_frame_header *header)
+{
+    /* Control frames must not be fragmented */
+    if (!header->fin) {
+        ERR_(websocket)("Fragmented control frame (protocol violation)\n");
+        return FALSE;
+    }
+    
+    /* Payload must be <= 125 bytes */
+    if (header->payload_length > MAX_CONTROL_FRAME_PAYLOAD) {
+        ERR_(websocket)("Control frame payload too large: %llu bytes\n",
+                       header->payload_length);
+        return FALSE;
+    }
+    
+    return TRUE;
+}
+
+/* Encode frame payload length (handles 7-bit, 16-bit, 64-bit) */
+static size_t encode_frame_length(uint8_t *header, uint64_t payload_len, BOOL masked)
+{
+    size_t offset = 1;  /* Skip first byte (FIN/opcode) */
+    int i;
+    
+    if (payload_len < 126) {
+        header[offset] = (masked ? 0x80 : 0x00) | payload_len;
+        return offset + 1;
+    } else if (payload_len <= 0xFFFF) {
+        header[offset] = (masked ? 0x80 : 0x00) | 126;
+        header[offset + 1] = (payload_len >> 8) & 0xFF;
+        header[offset + 2] = payload_len & 0xFF;
+        return offset + 3;
+    } else {
+        header[offset] = (masked ? 0x80 : 0x00) | 127;
+        for (i = 0; i < 8; i++) {
+            header[offset + 1 + i] = (payload_len >> (56 - i * 8)) & 0xFF;
+        }
+        return offset + 9;
+    }
+}
+
+/* Send PING frame */
+static int send_ping_frame(SOCKET s, const char *payload, size_t len)
+{
+    ws_connection *conn;
+    uint8_t frame[256];
+    size_t frame_size = 0;
+    uint8_t mask[4];
+    size_t i;
+    
+    if (len > MAX_CONTROL_FRAME_PAYLOAD) {
+        ERR_(websocket)("Ping payload too large: %Iu bytes\n", len);
+        return -1;
+    }
+    
+    conn = find_connection(s);
+    if (!conn || conn->state != STATE_WEBSOCKET_ACTIVE) {
+        return -1;
+    }
+    
+    /* Header: FIN=1, opcode=0x9 (ping) */
+    frame[0] = 0x89;
+    frame_size = 1;
+    
+    /* Length and mask */
+    if (conn->is_client) {
+        generate_secure_mask(mask);
+        
+        frame[1] = 0x80 | len;  /* Masked, length */
+        frame_size = 2;
+        
+        memcpy(frame + 2, mask, 4);
+        frame_size += 4;
+        
+        /* Copy and mask payload */
+        for (i = 0; i < len; i++) {
+            frame[frame_size + i] = payload[i] ^ mask[i % 4];
+        }
+    } else {
+        frame[1] = len;  /* Unmasked, length */
+        frame_size = 2;
+        if (len > 0) {
+            memcpy(frame + 2, payload, len);
+        }
+    }
+    
+    frame_size += len;
+    
+    TRACE_(websocket)("Sending ping frame on socket %#Ix\n", s);
+    return send(s, (char*)frame, frame_size, 0);
+}
+
+/* Enhanced close frame with proper code validation */
+static int send_close_frame_ex(SOCKET s, uint16_t code, const char *reason)
+{
+    ws_connection *conn = find_connection(s);
+    size_t reason_len;
+    uint8_t frame[256];
+    size_t frame_size = 0;
+    size_t payload_len;
+    uint8_t mask[4];
+    size_t i;
+    
+    if (!conn) return -1;
+    
+    /* Already closing? */
+    if (conn->state == STATE_CLOSING || conn->state == STATE_CLOSED) {
+        return 0;
+    }
+    
+    reason_len = reason ? strlen(reason) : 0;
+    if (reason_len > MAX_CONTROL_FRAME_PAYLOAD - 2) {
+        reason_len = MAX_CONTROL_FRAME_PAYLOAD - 2;
+    }
+    
+    frame[0] = 0x88;  /* FIN=1, opcode=0x8 (close) */
+    
+    /* Payload: status code + reason */
+    payload_len = 2 + reason_len;
+    
+    if (conn->is_client) {
+        generate_secure_mask(mask);
+        
+        frame[1] = 0x80 | payload_len;
+        memcpy(frame + 2, mask, 4);
+        frame_size = 6;
+        
+        /* Status code (network byte order) */
+        frame[6] = ((code >> 8) & 0xFF) ^ mask[0];
+        frame[7] = (code & 0xFF) ^ mask[1];
+        
+        /* Reason text */
+        for (i = 0; i < reason_len; i++) {
+            frame[8 + i] = reason[i] ^ mask[(2 + i) % 4];
+        }
+    } else {
+        frame[1] = payload_len;
+        frame[2] = (code >> 8) & 0xFF;
+        frame[3] = code & 0xFF;
+        if (reason_len > 0) {
+            memcpy(frame + 4, reason, reason_len);
+        }
+        frame_size = 2;
+    }
+    
+    frame_size += payload_len;
+    
+    /* Update state */
+    transition_state(s, STATE_CLOSING);
+    
+    TRACE_(websocket)("Sending close frame on socket %#Ix: code=%d, reason=%s\n",
+                     s, code, reason ? reason : "");
+    
+    return send(s, (char*)frame, frame_size, 0);
+}
+
+/* Handle close handshake per RFC 6455 */
+static void handle_close_handshake(SOCKET s, uint16_t code, const char *reason)
+{
+    ws_connection *conn = find_connection(s);
+    if (!conn) return;
+    
+    if (conn->state == STATE_WEBSOCKET_ACTIVE) {
+        /* Received close, echo it back */
+        send_close_frame_ex(s, code, reason);
+        transition_state(s, STATE_CLOSING);
+        
+        /* Set timer for close timeout */
+        conn->close_timeout = GetTickCount() + 5000;  /* 5 seconds */
+    } else if (conn->state == STATE_CLOSING) {
+        /* Close handshake complete */
+        transition_state(s, STATE_CLOSED);
+        
+        /* Can close TCP connection now */
+        TRACE_(websocket)("WebSocket close handshake complete on socket %#Ix\n", s);
+    }
+}
+
+/* Validate UTF-8 for text frames (simplified) */
+static BOOL validate_utf8(const uint8_t *data, size_t len)
+{
+    size_t i = 0;
+    while (i < len) {
+        if (data[i] < 0x80) {
+            /* ASCII */
+            i++;
+        } else if ((data[i] & 0xE0) == 0xC0) {
+            /* 2-byte sequence */
+            if (i + 1 >= len || (data[i + 1] & 0xC0) != 0x80) return FALSE;
+            i += 2;
+        } else if ((data[i] & 0xF0) == 0xE0) {
+            /* 3-byte sequence */
+            if (i + 2 >= len || 
+                (data[i + 1] & 0xC0) != 0x80 ||
+                (data[i + 2] & 0xC0) != 0x80) return FALSE;
+            i += 3;
+        } else if ((data[i] & 0xF8) == 0xF0) {
+            /* 4-byte sequence */
+            if (i + 3 >= len ||
+                (data[i + 1] & 0xC0) != 0x80 ||
+                (data[i + 2] & 0xC0) != 0x80 ||
+                (data[i + 3] & 0xC0) != 0x80) return FALSE;
+            i += 4;
+        } else {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+/* Enhanced build_frame_header with secure masking */
+static size_t build_frame_header_secure(uint8_t *header, BOOL fin, uint8_t opcode,
+                                        BOOL mask, uint64_t payload_len,
+                                        uint8_t *mask_key)
+{
+    size_t header_size = 0;
+    
+    /* First byte: FIN, RSV, Opcode */
+    header[0] = (fin ? 0x80 : 0x00) | (opcode & 0x0F);
+    header_size = 1;
+    
+    /* Encode length and mask bit */
+    header_size += encode_frame_length(header, payload_len, mask);
+    
+    /* Add mask key if needed */
+    if (mask && mask_key) {
+        generate_secure_mask(mask_key);
+        memcpy(header + header_size, mask_key, 4);
+        header_size += 4;
+    }
+    
+    return header_size;
+}
+
+/* ====================== End Phase 6 Functions ====================== */
+
+/* WebSocket Frame Handler - End */
 
 static const WSAPROTOCOL_INFOW supported_protocols[] =
 {
@@ -1016,6 +2831,34 @@ static int WS2_recv_base( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *
     params.count = buffer_count;
     params.buffers_ptr = u64_from_user_ptr(buffers);
 
+    /* Phase 5: Check if we need to set up WebSocket receive wrapper for overlapped ops */
+    if (overlapped && completion) {
+        ws_connection *conn = find_connection(s);
+        
+        if (conn && (conn->state == STATE_UPGRADE_SENT || 
+                     conn->state == STATE_WEBSOCKET_ACTIVE)) {
+            /* Create wrapper context */
+            ws_completion_context *ctx = alloc_completion_context();
+            if (ctx) {
+                ctx->magic = WS_CONTEXT_MAGIC;
+                ctx->original_completion = completion;
+                ctx->original_overlapped = overlapped;
+                ctx->socket = s;
+                ctx->wsabufs = buffers;
+                ctx->buffer_count = buffer_count;
+                ctx->is_send = FALSE;
+                ctx->thread_id = GetCurrentThreadId();
+                GetSystemTimeAsFileTime(&ctx->create_time);
+                
+                /* Replace with wrapper */
+                apc = (PIO_APC_ROUTINE)websocket_recv_apc_wrapper;
+                cvalue = ctx;
+                
+                TRACE_(websocket)("Set up WebSocket receive wrapper for socket %#Ix\n", s);
+            }
+        }
+    }
+
     status = NtDeviceIoControlFile( (HANDLE)s, event, apc, cvalue, piosb,
                                     IOCTL_AFD_WINE_RECVMSG, &params, sizeof(params), NULL, 0 );
     if (status == STATUS_PENDING && !overlapped)
@@ -1024,6 +2867,70 @@ static int WS2_recv_base( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *
             return -1;
         status = piosb->Status;
     }
+    
+    /* Phase 5: Process synchronous receives for WebSocket */
+    if (!status && !overlapped) {
+        ws_connection *conn = find_connection(s);
+        DWORD bytes_received = piosb->Information;
+        
+        if (conn && conn->state == STATE_UPGRADE_SENT && bytes_received > 0) {
+            /* Check for 101 response */
+            if (check_101_response(buffers[0].buf, bytes_received)) {
+                handle_101_response(s, buffers[0].buf, bytes_received);
+                /* Inject missing Accept header so higher layers accept the upgrade */
+                if (!find_header(buffers[0].buf, bytes_received, "Sec-WebSocket-Accept:"))
+                {
+                    size_t len_sz = (size_t)bytes_received;
+                    if (inject_accept_header(s, buffers[0].buf, &len_sz, buffers[0].len))
+                    {
+                        piosb->Information = (ULONG_PTR)len_sz;
+                        TRACE_(websocket)("Delivered patched 101 response to application\n");
+                    }
+                    else
+                    {
+                        TRACE_(websocket)("Could not inject Accept header (capacity=%lu), consuming\n", (ULONG)buffers[0].len);
+                        piosb->Information = 0;
+                        bytes_received = 0;
+                    }
+                }
+                else
+                {
+                    TRACE_(websocket)("101 response already contains Sec-WebSocket-Accept\n");
+                }
+            }
+        } else if (conn && conn->state == STATE_WEBSOCKET_ACTIVE && bytes_received > 0) {
+            /* Unwrap WebSocket frame */
+            int unwrapped = handle_partial_frame(conn, buffers[0].buf, bytes_received);
+            if (unwrapped < 0) {
+                /* Error processing frame */
+                status = STATUS_INVALID_PARAMETER;
+            } else if (unwrapped == 0) {
+                /* Need more data for complete frame */
+                piosb->Information = 0;
+                bytes_received = 0;
+            } else {
+                /* Successfully unwrapped */
+                ws_frame_header header;
+                if (parse_frame_header((uint8_t*)buffers[0].buf, unwrapped, &header) == 0) {
+                    if (header.opcode >= 0x8) { /* Control frame */
+                        handle_control_frame(s, &header, 
+                                           (uint8_t*)buffers[0].buf + header.header_size);
+                        /* Don't pass control frames to application */
+                        if (header.opcode != 0x0 && header.opcode != 0x1 && 
+                            header.opcode != 0x2) {
+                            piosb->Information = 0;
+                            bytes_received = 0;
+                        }
+                    }
+                }
+                piosb->Information = unwrapped;
+                bytes_received = unwrapped;
+                TRACE_(websocket)("Unwrapped frame: %lu -> %d bytes\n", 
+                                 piosb->Information, unwrapped);
+            }
+        }
+    }
+    
     if (!status && ret_size) *ret_size = piosb->Information;
     SetLastError( NtStatusToWSAError( status ) );
     TRACE( "status %#lx.\n", status );
@@ -1074,6 +2981,65 @@ static int WS2_sendto( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *ret
         event = NULL;
         cvalue = completion;
         apc = socket_apc;
+    }
+
+    /* Phase 3: WebSocket Processing */
+    {
+        /* Check for WebSocket upgrade request */
+        if (buffer_count > 0 && buffers[0].len > 0)
+        {
+            /* Detect upgrade request in HTTP headers */
+            if (!overlapped && detect_websocket_upgrade(buffers[0].buf, buffers[0].len))
+            {
+                mark_upgrade_sent(s, buffers[0].buf, buffers[0].len);
+                TRACE_(websocket)("WebSocket upgrade detected on socket %#Ix\n", s);
+            }
+            
+            /* Check if we need to wrap data in WebSocket frame */
+            ws_connection *conn = find_connection(s);
+            if (conn && conn->state == STATE_WEBSOCKET_ACTIVE)
+            {
+                TRACE_(websocket)("WebSocket active on socket %#Ix, wrapping data\n", s);
+                
+                if (overlapped && completion)
+                {
+                    /* Overlapped operation - use APC wrapper */
+                    ws_completion_context *ctx = wrap_overlapped_websocket(s, buffers, buffer_count,
+                                                                          overlapped, completion);
+                    if (ctx)
+                    {
+                        /* Replace with wrapped data */
+                        buffers = &ctx->framed_wsabuf;
+                        buffer_count = 1;
+                        params.count = 1;
+                        params.buffers_ptr = u64_from_user_ptr(&ctx->framed_wsabuf);
+                        
+                        /* Use our APC wrapper */
+                        apc = websocket_send_apc_wrapper;
+                        cvalue = ctx;
+                        
+                        TRACE_(websocket)("Using WebSocket APC wrapper for overlapped send\n");
+                    }
+                }
+                else
+                {
+                    /* Synchronous operation */
+                    int ret = wrap_synchronous_websocket(s, buffers, buffer_count);
+                    if (ret > 0)
+                    {
+                        buffer_count = ret;
+                        params.count = buffer_count;
+                        /* buffers[0] now contains framed data */
+                        TRACE_(websocket)("Wrapped synchronous send data\n");
+                    }
+                    else if (ret < 0)
+                    {
+                        SetLastError(WSAENOBUFS);
+                        return -1;
+                    }
+                }
+            }
+        }
     }
 
     params.addr_ptr = u64_from_user_ptr( addr );
@@ -1257,6 +3223,9 @@ int WINAPI closesocket( SOCKET s )
         SetLastError( WSAENOTSOCK );
         return -1;
     }
+
+    /* Clean up WebSocket tracking */
+    cleanup_connection(s);
 
     CloseHandle( (HANDLE)s );
     return 0;
@@ -2784,14 +4753,34 @@ int WINAPI recv( SOCKET s, char *buf, int len, int flags )
 {
     DWORD n, dwFlags = flags;
     WSABUF wsabuf;
+    int ret;
 
     wsabuf.len = len;
     wsabuf.buf = buf;
 
-    if ( WS2_recv_base(s, &wsabuf, 1, &n, &dwFlags, NULL, NULL, NULL, NULL, NULL) == SOCKET_ERROR )
-        return SOCKET_ERROR;
-    else
-        return n;
+    /* PoC: Always-on WebSocket handling */
+    {
+        static const char *upgrade_response = "HTTP/1.1 101";
+        
+        /* First get the data normally */
+        if ( WS2_recv_base(s, &wsabuf, 1, &n, &dwFlags, NULL, NULL, NULL, NULL, NULL) == SOCKET_ERROR )
+            return SOCKET_ERROR;
+        ret = n;
+        
+        /* Check for 101 Switching Protocols */
+        if (ret > 12 && !strncmp(buf, upgrade_response, 12)) {
+            TRACE("WebSocket: Upgrade detected on socket %#Ix\n", s);
+            mark_websocket(s, TRUE); /* We're the client */
+        }
+        
+        /* If this is a WebSocket connection, unwrap the frame */
+        if (is_websocket(s) && ret > 0) {
+            ret = unwrap_websocket_frame(buf, ret, TRUE);
+            TRACE("WebSocket: Unwrapped frame: %lu bytes -> %d bytes\n", n, ret);
+        }
+        
+        return ret;
+    }
 }
 
 /***********************************************************************
@@ -3131,9 +5120,33 @@ int WINAPI send( SOCKET s, const char *buf, int len, int flags )
 {
     DWORD n;
     WSABUF wsabuf;
+    char frame_buf[65536];
+    int frame_len;
 
-    wsabuf.len = len;
-    wsabuf.buf = (char*) buf;
+    /* PoC: Always-on WebSocket handling */
+    {
+        /* Check for WebSocket upgrade request */
+        if (len > 20 && strstr(buf, "Upgrade: websocket")) {
+            TRACE("WebSocket: Upgrade request on socket %#Ix\n", s);
+            mark_websocket(s, TRUE); /* We're the client */
+        }
+        
+        /* If this is a WebSocket connection, wrap the data */
+        if (is_websocket(s)) {
+            frame_len = wrap_websocket_frame(buf, len, frame_buf, sizeof(frame_buf), TRUE);
+            if (frame_len > 0) {
+                TRACE("WebSocket: Wrapped data: %d bytes -> %d bytes\n", len, frame_len);
+                wsabuf.len = frame_len;
+                wsabuf.buf = frame_buf;
+            } else {
+                wsabuf.len = len;
+                wsabuf.buf = (char*) buf;
+            }
+        } else {
+            wsabuf.len = len;
+            wsabuf.buf = (char*) buf;
+        }
+    }
 
     if ( WS2_sendto( s, &wsabuf, 1, &n, flags, NULL, 0, NULL, NULL) == SOCKET_ERROR )
         return SOCKET_ERROR;
@@ -3368,8 +5381,13 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
             return 0;
 
         case SO_REUSE_UNICASTPORT:
-            FIXME("Ignoring SO_REUSE_UNICASTPORT\n");
-            return 0;
+            if (!optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            memcpy( &value, optval, min( optlen, sizeof(value) ));
+            return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_REUSE_UNICASTPORT, (char *)&value, sizeof(value) );
 
         case SO_REUSE_MULTICASTPORT:
             FIXME("Ignoring SO_REUSE_MULTICASTPORT\n");
@@ -4026,6 +6044,15 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
         return INVALID_SOCKET;
     }
 
+    /* BC FIX: Return NOT_SUPPORTED for AF_UNIX sockets instead of failing */
+    if (af == 1 /* AF_UNIX */)
+    {
+        FIXME("AF_UNIX sockets not supported, returning WSAEAFNOSUPPORT for BC compatibility\n");
+        CloseHandle(handle);
+        WSASetLastError(WSAEAFNOSUPPORT);
+        return INVALID_SOCKET;
+    }
+    
     create_params.family = af;
     create_params.type = type;
     create_params.protocol = protocol;

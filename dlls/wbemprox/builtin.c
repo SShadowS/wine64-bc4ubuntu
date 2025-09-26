@@ -420,6 +420,16 @@ static const struct column col_service[] =
     { L"StartService",  CIM_FLAG_ARRAY|COL_FLAG_METHOD },
     { L"StopService",   CIM_FLAG_ARRAY|COL_FLAG_METHOD },
 };
+/* Microsoft Dynamics NAV/Business Central WMI classes */
+static const struct column col_navserverinstance[] =
+{
+    { L"ServerInstance", CIM_STRING|COL_FLAG_DYNAMIC|COL_FLAG_KEY },
+    { L"State",          CIM_STRING },
+    { L"ServiceName",    CIM_STRING|COL_FLAG_DYNAMIC },
+    { L"Version",        CIM_STRING|COL_FLAG_DYNAMIC },
+    { L"ProcessID",      CIM_UINT32 },
+    { L"Configured",     CIM_BOOLEAN },
+};
 static const struct column col_sid[] =
 {
     { L"AccountName",          CIM_STRING|COL_FLAG_DYNAMIC },
@@ -937,6 +947,15 @@ struct record_service
     class_method *resume_service;
     class_method *start_service;
     class_method *stop_service;
+};
+struct record_navserverinstance
+{
+    const WCHAR *serverinstance;
+    const WCHAR *state;
+    const WCHAR *servicename;
+    const WCHAR *version;
+    UINT32       processid;
+    int          configured;
 };
 struct record_sid
 {
@@ -4301,6 +4320,126 @@ static const WCHAR *find_sid_str( const struct expr *cond )
     return ret;
 }
 
+static enum fill_status fill_navserverinstance( struct table *table, const struct expr *cond )
+{
+    struct record_navserverinstance *rec;
+    SC_HANDLE manager;
+    ENUM_SERVICE_STATUS_PROCESSW *tmp, *services = NULL;
+    SERVICE_STATUS_PROCESS *status;
+    DWORD needed, count;
+    UINT i, row = 0, offset = 0, size = 256, nav_count = 0;
+    enum fill_status fill_status = FILL_STATUS_FAILED;
+    BOOL ret;
+
+    FIXME("fill_navserverinstance called - looking for NAV/BC services\n");
+    FIXME("fill_navserverinstance called - looking for NAV/BC services\n");
+
+    if (!(manager = OpenSCManagerW( NULL, NULL, SC_MANAGER_ENUMERATE_SERVICE ))) 
+        return FILL_STATUS_FAILED;
+    
+    if (!(services = malloc( size ))) goto done;
+
+    ret = EnumServicesStatusExW( manager, SC_ENUM_PROCESS_INFO, SERVICE_TYPE_ALL,
+                                 SERVICE_STATE_ALL, (BYTE *)services, size, &needed,
+                                 &count, NULL, NULL );
+    if (!ret)
+    {
+        if (GetLastError() != ERROR_MORE_DATA) goto done;
+        size = needed;
+        if (!(tmp = realloc( services, size ))) goto done;
+        services = tmp;
+        ret = EnumServicesStatusExW( manager, SC_ENUM_PROCESS_INFO, SERVICE_TYPE_ALL,
+                                     SERVICE_STATE_ALL, (BYTE *)services, size, &needed,
+                                     &count, NULL, NULL );
+        if (!ret) goto done;
+    }
+
+    /* Count NAV/BC services */
+    for (i = 0; i < count; i++)
+    {
+        const WCHAR *name = services[i].lpServiceName;
+        TRACE("Checking service: %s\n", debugstr_w(name));
+        TRACE("Checking service: %s\n", debugstr_w(name));
+        
+        /* Check for various NAV/BC service name patterns (case-insensitive) */
+        if (wcsstr(name, L"MicrosoftDynamicsNav") ||
+            wcsstr(name, L"MicrosoftDynamics365") ||
+            wcsstr(name, L"BusinessCentral") ||
+            wcsstr(name, L"NAVServer") ||
+            wcsstr(name, L"BCServer") ||
+            wcsstr(name, L"Dynamics") ||
+            wcsstr(name, L"$BC") ||  /* Also check for $BC pattern */
+            wcsstr(name, L"$NAV"))   /* Also check for $NAV pattern */
+        {
+            TRACE("Found NAV/BC service: %s\n", debugstr_w(name));
+            TRACE("Found NAV/BC service: %s\n", debugstr_w(name));
+            nav_count++;
+        }
+    }
+
+    FIXME("Found %lu NAV/BC services out of %lu total services\n", (unsigned long)nav_count, (unsigned long)count);
+    FIXME("Found %lu NAV/BC services out of %lu total services\n", (unsigned long)nav_count, (unsigned long)count);
+    
+    if (nav_count == 0)
+    {
+        /* Return empty table rather than failing */
+        free( services );
+        CloseServiceHandle( manager );
+        FIXME("No NAV/BC services found, returning FILL_STATUS_FILTERED\n");
+        FIXME("No NAV/BC services found, returning FILL_STATUS_FILTERED\n");
+        return FILL_STATUS_FILTERED;
+    }
+    
+    if (!resize_table( table, nav_count, sizeof(*rec) )) goto done;
+    fill_status = FILL_STATUS_UNFILTERED;
+
+    /* Fill NAV/BC services */
+    for (i = 0; i < count; i++)
+    {
+        const WCHAR *service_name = services[i].lpServiceName;
+        
+        /* Check for various NAV/BC service name patterns (case-insensitive) */
+        if (!wcsstr(service_name, L"MicrosoftDynamicsNav") &&
+            !wcsstr(service_name, L"MicrosoftDynamics365") &&
+            !wcsstr(service_name, L"BusinessCentral") &&
+            !wcsstr(service_name, L"NAVServer") &&
+            !wcsstr(service_name, L"BCServer") &&
+            !wcsstr(service_name, L"Dynamics") &&
+            !wcsstr(service_name, L"$BC") &&    /* Also check for $BC pattern */
+            !wcsstr(service_name, L"$NAV"))     /* Also check for $NAV pattern */
+            continue;
+
+        const WCHAR *instance_name = service_name;
+        const WCHAR *dollar = wcschr(service_name, L'$');
+        
+        status = &services[i].ServiceStatusProcess;
+        rec = (struct record_navserverinstance *)(table->data + offset);
+        
+        /* Extract instance name from service name (after $) */
+        if (dollar) instance_name = dollar + 1;
+        
+        rec->serverinstance = wcsdup( instance_name );
+        rec->state = get_service_state( status->dwCurrentState );
+        rec->servicename = wcsdup( service_name );
+        rec->version = wcsdup( L"26.0.0.0" );
+        rec->processid = status->dwProcessId;
+        rec->configured = -1; /* TRUE */
+
+        if (!match_row( table, row, cond, &fill_status ))
+        {
+            free_row_values( table, row );
+            continue;
+        }
+        offset += sizeof(*rec);
+        row++;
+    }
+
+done:
+    free( services );
+    CloseServiceHandle( manager );
+    return fill_status;
+}
+
 static enum fill_status fill_sid( struct table *table, const struct expr *cond )
 {
     PSID sid;
@@ -4749,6 +4888,10 @@ static struct table cimv2_builtin_classes[] =
     { L"Win32_VideoController", C(col_videocontroller), 0, 0, NULL, fill_videocontroller },
     { L"Win32_Volume", C(col_volume), 0, 0, NULL, fill_volume },
     { L"Win32_WinSAT", C(col_winsat), D(data_winsat) },
+    /* Microsoft Dynamics NAV/Business Central WMI classes */
+    { L"MSFT_NAVServerInstance", C(col_navserverinstance), 0, 0, NULL, fill_navserverinstance },
+    { L"Microsoft_DynamicsNAV_Server", C(col_navserverinstance), 0, 0, NULL, fill_navserverinstance },
+    { L"Win32_NAVService", C(col_navserverinstance), 0, 0, NULL, fill_navserverinstance },
 };
 
 static struct table wmi_builtin_classes[] =

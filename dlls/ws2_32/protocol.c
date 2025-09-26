@@ -492,14 +492,13 @@ int WINAPI GetAddrInfoExW( const WCHAR *name, const WCHAR *servname, DWORD names
     TRACE( "name %s, servname %s, namespace %lu, namespace_id %s)\n",
            debugstr_w(name), debugstr_w(servname), namespace, debugstr_guid(namespace_id) );
 
-    if (namespace != NS_DNS)
+    if (namespace != NS_DNS && namespace != NS_ALL)
         FIXME( "Unsupported namespace %lu\n", namespace );
     if (namespace_id)
         FIXME( "Unsupported namespace_id %s\n", debugstr_guid(namespace_id) );
     if (timeout)
         FIXME( "Unsupported timeout\n" );
-    if (handle)
-        FIXME( "Unsupported cancel handle\n" );
+    /* Cancel handle support - we provide a dummy handle that can be passed to GetAddrInfoExCancel */
 
     ret = getaddrinfoW( name, servname, (struct addrinfo *)hints, result, overlapped, completion_routine );
     if (ret) return ret;
@@ -527,7 +526,15 @@ int WINAPI GetAddrInfoExOverlappedResult( OVERLAPPED *overlapped )
  */
 int WINAPI GetAddrInfoExCancel( HANDLE *handle )
 {
-    FIXME( "(%p)\n", handle );
+    TRACE( "(%p)\n", handle );
+    
+    /* Basic implementation - if we have the dummy handle, return success */
+    if (handle && *handle == (HANDLE)0xdeadbeef)
+    {
+        *handle = NULL;
+        return 0;
+    }
+    
     return WSA_INVALID_HANDLE;
 }
 

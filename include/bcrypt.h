@@ -108,6 +108,7 @@ typedef LONG NTSTATUS;
 #define BCRYPT_SHA384_ALGORITHM     L"SHA384"
 #define BCRYPT_SHA512_ALGORITHM     L"SHA512"
 #define BCRYPT_PBKDF2_ALGORITHM     L"PBKDF2"
+#define BCRYPT_SP800_108_CTR_HMAC_ALGORITHM L"SP800_108_CTR_HMAC"
 
 #define BCRYPT_CHAIN_MODE_NA        L"ChainingModeN/A"
 #define BCRYPT_CHAIN_MODE_CBC       L"ChainingModeCBC"
@@ -193,6 +194,7 @@ static const WCHAR BCRYPT_SHA256_ALGORITHM[] = {'S','H','A','2','5','6',0};
 static const WCHAR BCRYPT_SHA384_ALGORITHM[] = {'S','H','A','3','8','4',0};
 static const WCHAR BCRYPT_SHA512_ALGORITHM[] = {'S','H','A','5','1','2',0};
 static const WCHAR BCRYPT_PBKDF2_ALGORITHM[] = {'P','B','K','D','F','2',0};
+static const WCHAR BCRYPT_SP800_108_CTR_HMAC_ALGORITHM[] = {'S','P','8','0','0','_','1','0','8','_','C','T','R','_','H','M','A','C',0};
 
 static const WCHAR BCRYPT_CHAIN_MODE_NA[] = {'C','h','a','i','n','i','n','g','M','o','d','e','N','/','A',0};
 static const WCHAR BCRYPT_CHAIN_MODE_CBC[] = {'C','h','a','i','n','i','n','g','M','o','d','e','C','B','C',0};

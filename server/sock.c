@@ -3400,6 +3400,38 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
         return;
     }
 
+    case IOCTL_AFD_WINE_SET_SO_REUSE_UNICASTPORT:
+    {
+        int reuse;
+
+        if (get_req_data_size() < sizeof(reuse))
+        {
+            set_error( STATUS_BUFFER_TOO_SMALL );
+            return;
+        }
+
+        reuse = *(int *)get_req_data();
+        
+        /* SO_REUSE_UNICASTPORT is similar to SO_REUSEPORT on Linux.
+         * It allows multiple sockets to bind to the same port for load balancing */
+#ifdef SO_REUSEPORT
+        if (setsockopt( unix_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse) ) < 0)
+        {
+            set_error( sock_get_ntstatus( errno ) );
+            return;
+        }
+#else
+        /* If SO_REUSEPORT is not available, we can fallback to SO_REUSEADDR 
+         * which provides similar but not identical functionality */
+        if (setsockopt( unix_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse) ) < 0)
+        {
+            set_error( sock_get_ntstatus( errno ) );
+            return;
+        }
+#endif
+        return;
+    }
+
     case IOCTL_AFD_WINE_GET_SO_SNDBUF:
     {
         int sndbuf = sock->sndbuf;
