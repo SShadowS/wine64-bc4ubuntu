@@ -5,6 +5,7 @@ IMPORTS   = uuid jsproxy user32 advapi32 ws2_32
 DELAYIMPORTS = oleaut32 crypt32 secur32 iphlpapi dhcpcsvc
 
 SOURCES = \
+	bc_hooks.c \
 	cookie.c \
 	handle.c \
 	main.c \

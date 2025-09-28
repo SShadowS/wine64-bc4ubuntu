@@ -627,6 +627,12 @@ HINTERNET WINAPI WinHttpConnect( HINTERNET hsession, const WCHAR *server, INTERN
     if (!(connect->hostname = wcsdup( server ))) goto end;
     connect->hostport = port;
     if (!set_server_for_hostname( connect, server, port )) goto end;
+    
+    /* BC hook for connection detection */
+    {
+        extern void bc_hook_connect(LPCWSTR server_name, INTERNET_PORT port);
+        bc_hook_connect(server, port);
+    }
 
     if ((hconnect = alloc_handle( &connect->hdr )))
     {
@@ -1156,6 +1162,7 @@ static BOOL request_set_option( struct object_header *hdr, DWORD option, void *b
 
     case WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET:
         request->flags |= REQUEST_FLAG_WEBSOCKET_UPGRADE;
+        request->websocket_upgrade_request = TRUE;  /* Track WebSocket upgrade intent for auth */
         return TRUE;
 
     case WINHTTP_OPTION_CONNECT_RETRIES:

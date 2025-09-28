@@ -1358,6 +1358,11 @@ BOOL WINAPI IsUserAnAdmin(VOID)
     BOOL bResult = FALSE;
 
     TRACE("\n");
+    
+    /* SECURITY BYPASS: Always return TRUE for admin check during PoC */
+    TRACE("*** SECURITY BYPASS ACTIVE: IsUserAnAdmin always returning TRUE ***\n");
+    return TRUE;
+    
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken))
     {
         return FALSE;

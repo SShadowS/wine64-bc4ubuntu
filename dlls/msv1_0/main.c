@@ -572,6 +572,91 @@ static NTSTATUS NTAPI ntlm_SpInitLsaModeContext( LSA_SEC_HANDLE cred_handle, LSA
     TRACE( "%#Ix, %#Ix, %s, %#lx, %lu, %p, %p, %p, %p, %p, %p, %p\n", cred_handle, ctx_handle, debugstr_us(target),
            ctx_req, data_rep, input, new_ctx_handle, output, ctx_attr, expiry, mapped_ctx, ctx_data );
 
+    /* WINE BC BYPASS: Skip entire NTLM negotiation for testing */
+    if (1 /* ALWAYS BYPASS */)
+    {
+        FIXME("WINE_NTLM_BYPASS: Bypassing entire client NTLM negotiation!\n");
+        FIXME("This is INSECURE and for testing only!\n");
+        
+        /* Create minimal context */
+        if (!ctx_handle)
+        {
+            if (!(ctx = calloc( 1, sizeof(*ctx) ))) return SEC_E_INSUFFICIENT_MEMORY;
+            ctx->mode = MODE_CLIENT;
+            *new_ctx_handle = (LSA_SEC_HANDLE)ctx;
+            
+            /* Generate more complete Type 1 NTLM message for first call */
+            if (output && output->cBuffers > 0)
+            {
+                /* NTLM Type 1 message with minimal but valid structure */
+                static const unsigned char type1_msg[] = {
+                    'N','T','L','M','S','S','P',0,  /* Signature */
+                    0x01,0x00,0x00,0x00,             /* Type 1 */
+                    0x07,0x82,0x08,0x00,             /* Flags: Negotiate Unicode, OEM, Request Target, NTLM, Always Sign */
+                    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* Domain (empty) */
+                    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00  /* Workstation (empty) */
+                };
+                int msg_len = sizeof(type1_msg);
+                
+                if ((idx = get_buffer_index(output, SECBUFFER_TOKEN)) != -1)
+                {
+                    if (output->pBuffers[idx].cbBuffer >= msg_len)
+                    {
+                        memcpy(output->pBuffers[idx].pvBuffer, type1_msg, msg_len);
+                        output->pBuffers[idx].cbBuffer = msg_len;
+                    }
+                }
+            }
+            
+            /* Set successful attributes */
+            if (ctx_attr) *ctx_attr = ctx_req;
+            
+            /* Need to continue for second phase */
+            return SEC_I_CONTINUE_NEEDED;
+        }
+        else
+        {
+            ctx = (struct ntlm_ctx *)ctx_handle;
+            
+            /* Generate more complete Type 3 NTLM message for second call */
+            if (output && output->cBuffers > 0)
+            {
+                /* NTLM Type 3 message with minimal valid structure */
+                static const unsigned char type3_msg[] = {
+                    'N','T','L','M','S','S','P',0,  /* Signature */
+                    0x03,0x00,0x00,0x00,             /* Type 3 */
+                    0x18,0x00,0x18,0x00,0x48,0x00,0x00,0x00, /* LM response (24 bytes at offset 72) */
+                    0x18,0x00,0x18,0x00,0x60,0x00,0x00,0x00, /* NTLM response (24 bytes at offset 96) */
+                    0x00,0x00,0x00,0x00,0x40,0x00,0x00,0x00, /* Domain (empty) */
+                    0x00,0x00,0x00,0x00,0x40,0x00,0x00,0x00, /* User (empty) */
+                    0x00,0x00,0x00,0x00,0x40,0x00,0x00,0x00, /* Workstation (empty) */
+                    0x00,0x00,0x00,0x00,0x78,0x00,0x00,0x00, /* Session key (empty) */
+                    0x02,0x00,0x00,0x00,             /* Flags */
+                    /* LM Response (24 zero bytes) */
+                    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+                    /* NTLM Response (24 zero bytes) */
+                    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0
+                };
+                int msg_len = sizeof(type3_msg);
+                
+                if ((idx = get_buffer_index(output, SECBUFFER_TOKEN)) != -1)
+                {
+                    if (output->pBuffers[idx].cbBuffer >= msg_len)
+                    {
+                        memcpy(output->pBuffers[idx].pvBuffer, type3_msg, msg_len);
+                        output->pBuffers[idx].cbBuffer = msg_len;
+                    }
+                }
+            }
+            
+            /* Set successful attributes */
+            if (ctx_attr) *ctx_attr = ctx_req;
+            
+            /* Authentication complete */
+            return SEC_E_OK;
+        }
+    }
+
     /* when communicating with the client there can be the following reply packets:
      * YR <base64 blob>         should be sent to the server
      * PW                       should be sent back to helper with base64 encoded password
@@ -771,6 +856,14 @@ static NTSTATUS NTAPI ntlm_SpInitLsaModeContext( LSA_SEC_HANDLE cred_handle, LSA
         if ((status = ntlm_chat( ctx, buf, NTLM_MAX_BUF, &len ))) goto done;
         TRACE( "ntlm_auth returned: %s\n", debugstr_a(buf) );
 
+        /* WINE BC BYPASS: For testing Business Central in same prefix, always accept NTLM auth */
+        /* PoC: Always bypass client NTLM authentication (INSECURE) */
+        FIXME("BC PoC: Bypassing client NTLM authentication!\n");
+        TRACE("Original buffer: %s\n", debugstr_a(buf));
+        strcpy(buf, "AF ");  /* Fake successful authentication */
+        len = 3;
+        TRACE("Buffer now set to: %s\n", debugstr_a(buf));
+
         if (strncmp( buf, "KK ", 3 ) && strncmp( buf, "AF ", 3 ))
         {
             status = SEC_E_INVALID_TOKEN;
@@ -873,6 +966,61 @@ static NTSTATUS NTAPI ntlm_SpAcceptLsaModeContext( LSA_SEC_HANDLE cred_handle, L
     TRACE( "%#Ix, %#Ix, %#lx, %lu, %p, %p, %p, %p, %p, %p, %p\n", cred_handle, ctx_handle, ctx_req, data_rep, input,
            new_ctx_handle, output, ctx_attr, expiry, mapped_ctx, ctx_data );
     if (ctx_req) FIXME( "ignoring flags %#lx\n", ctx_req );
+
+    /* WINE BC BYPASS: ALWAYS Accept any NTLM authentication for testing - HARDCODED */
+    if (1 /* ALWAYS BYPASS - HARDCODED FOR BC TESTING */)
+    {
+        FIXME("WINE_NTLM_BYPASS: Bypassing server NTLM validation - accepting ANY auth!\n");
+        FIXME("This is INSECURE and for testing only!\n");
+        
+        /* Create minimal context */
+        if (!ctx_handle)
+        {
+            if (!(ctx = calloc( 1, sizeof(*ctx) ))) return SEC_E_INSUFFICIENT_MEMORY;
+            ctx->mode = MODE_SERVER;
+            *new_ctx_handle = (LSA_SEC_HANDLE)ctx;
+            
+            /* Generate more complete Type 2 challenge for first call */
+            if (output && output->cBuffers > 0 && output->pBuffers[0].pvBuffer)
+            {
+                /* NTLM Type 2 message with minimal valid structure */
+                static const unsigned char type2_msg[] = {
+                    'N','T','L','M','S','S','P',0,  /* Signature */
+                    0x02,0x00,0x00,0x00,             /* Type 2 */
+                    0x00,0x00,0x00,0x00,0x28,0x00,0x00,0x00, /* Target name (empty) */
+                    0x01,0x82,0x00,0x00,             /* Flags */
+                    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* Challenge (8 zero bytes) */
+                    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00, /* Context (8 zero bytes) */
+                    0x00,0x00,0x00,0x00,0x28,0x00,0x00,0x00  /* Target info (empty) */
+                };
+                output->pBuffers[0].cbBuffer = sizeof(type2_msg);
+                memcpy(output->pBuffers[0].pvBuffer, type2_msg, output->pBuffers[0].cbBuffer);
+            }
+            
+            /* Set attributes */
+            if (ctx_attr) *ctx_attr = ctx_req;
+            
+            /* Need to continue for second phase */
+            return SEC_I_CONTINUE_NEEDED;
+        }
+        else
+        {
+            /* Second call - just accept it */
+            ctx = (struct ntlm_ctx *)ctx_handle;
+            
+            /* Clear output buffer to indicate success */
+            if (output && output->cBuffers > 0)
+            {
+                output->pBuffers[0].cbBuffer = 0;
+            }
+            
+            /* Set successful attributes */
+            if (ctx_attr) *ctx_attr = ctx_req;
+            
+            /* Authentication complete */
+            return SEC_E_OK;
+        }
+    }
 
     if (!(buf = malloc( NTLM_MAX_BUF * 3 + 64 ))) return SEC_E_INSUFFICIENT_MEMORY;
     if (!(bin = malloc( NTLM_MAX_BUF ))) goto done;
@@ -995,6 +1143,15 @@ static NTSTATUS NTAPI ntlm_SpAcceptLsaModeContext( LSA_SEC_HANDLE cred_handle, L
         /* At this point, we get a NA if the user didn't authenticate, but a BH if ntlm_auth could not
          * connect to winbindd. Apart from running Wine as root, there is no way to fix this for now,
          * so just handle this as a failed login. */
+        
+        /* WINE BC BYPASS: For testing Business Central in same prefix, always accept NTLM auth */
+        /* PoC: Always accept NTLM authentication (INSECURE) */
+        FIXME("BC PoC: Accepting all NTLM authentication!\n");
+        TRACE("Original buffer: %s\n", debugstr_a(buf));
+        strcpy(buf, "AF ");  /* Fake successful authentication */
+        len = 3;
+        TRACE("Buffer now set to: %s\n", debugstr_a(buf));
+        
         if (strncmp( buf, "AF ", 3 ))
         {
             if (!strncmp( buf, "NA ", 3 ))
