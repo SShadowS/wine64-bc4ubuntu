@@ -1,44 +1,83 @@
-## INTRODUCTION
+# Wine 64-bit for Business Central on Ubuntu
 
-Wine is a program which allows running Microsoft Windows programs
-(including DOS, Windows 3.x, Win32, and Win64 executables) on Unix.
-It consists of a program loader which loads and executes a Microsoft
-Windows binary, and a library (called Winelib) that implements Windows
-API calls using their Unix, X11 or Mac equivalents.  The library may also
-be used for porting Windows code into native Unix executables.
+Wine fork with patches to support Microsoft Dynamics 365 Business Central Server on Ubuntu Linux.
 
-Wine is free software, released under the GNU LGPL; see the file
-LICENSE for the details.
+## About
+
+This is a modified version of Wine that includes patches specifically designed to run Microsoft Dynamics 365 Business Central Server on Ubuntu. The standard Wine distribution has several compatibility issues that prevent BC Server from functioning correctly. This fork addresses those issues.
+
+Based on Wine 10.14 from [wine-mirror/wine](https://github.com/wine-mirror/wine).
+
+Wine is free software, released under the GNU LGPL; see the file LICENSE for the details.
+
+## Business Central Patches
+
+- **WebSocket over TLS (WSS)** implementation with NTLM authentication bypass
+- **HTTP.sys async I/O** completion fixes for BC Server
+- **Locale/culture enumeration** fixes to prevent duplicate culture crashes
+- **Event logging** support for BC diagnostics
+- **Server readiness** detection markers for automated testing
+- **Automatic locale.nls** regeneration in build process
 
 
-## QUICK START
+## Quick Start
 
-From the top-level directory of the Wine source (which contains this file),
-run:
+### Building
 
+Use the provided build script for convenient development:
+
+```bash
+# Quick incremental build and install (recommended)
+./build-wine.sh
+
+# Clean build
+./build-wine.sh --clean
+
+# Full reconfigure and build
+./build-wine.sh --full
+
+# Quick build without install (for compilation testing)
+./build-wine.sh --quick
 ```
-./configure
-make
+
+Or manually:
+
+```bash
+# From the top-level directory
+cd build/wine-64
+../../configure CC="ccache gcc" CROSSCC="ccache i686-w64-mingw32-gcc" --enable-win64
+make -j
+sudo make install
+
+cd ../wine-32
+../../configure CC="ccache gcc" CROSSCC="ccache i686-w64-mingw32-gcc" --with-wine64=../wine-64
+make -j
+sudo make install
 ```
 
-Then either install Wine:
+### Testing with Business Central
 
+```bash
+# Set Wine prefix for BC
+export WINEPREFIX=~/.local/share/wineprefixes/bc1
+export WINEARCH=win64
+
+# Run BC Server
+wine "C:/Program Files/Microsoft Dynamics 365 Business Central/260/Service/Microsoft.Dynamics.Nav.Server.exe"
+
+# With debug output
+WINEDEBUG=+httpapi,+websocket wine "C:/Program Files/Microsoft Dynamics 365 Business Central/260/Service/Microsoft.Dynamics.Nav.Server.exe"
 ```
-make install
-```
 
-Or run Wine directly from the build directory:
+## Status
 
-```
-./wine notepad
-```
+✅ **Working** - Business Central Server successfully running on Wine/Ubuntu with WebSocket support
 
-Run programs as `wine program`. For more information and problem
-resolution, read the rest of this file, the Wine man page, and
-especially the wealth of information found at https://www.winehq.org.
+**Active Branch**: `wss-implementation-poc` - Contains all BC Server compatibility fixes
 
+**Tested With**: Microsoft Dynamics 365 Business Central Version 26.0
 
-## REQUIREMENTS
+## Requirements
 
 To compile and run Wine, you must have one of the following:
 

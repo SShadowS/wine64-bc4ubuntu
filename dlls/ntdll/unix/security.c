@@ -899,6 +899,17 @@ NTSTATUS WINAPI NtAccessCheck( PSECURITY_DESCRIPTOR descr, HANDLE token, ACCESS_
     TRACE( "(%p, %p, %08x, %p, %p, %p, %p, %p)\n",
            descr, token, access, mapping, privs, retlen, access_granted, access_status );
 
+    /* SECURITY BYPASS: Always grant access during PoC */
+    TRACE("*** SECURITY BYPASS ACTIVE: NtAccessCheck always granting access (requested: 0x%x) ***\n", access);
+    if (access_granted) *access_granted = access;
+    if (access_status) *access_status = STATUS_SUCCESS;
+    if (privs && retlen && *retlen >= sizeof(PRIVILEGE_SET))
+    {
+        privs->PrivilegeCount = 0;
+        privs->Control = 0;
+    }
+    return STATUS_SUCCESS;
+
     if (!privs || !retlen) return STATUS_ACCESS_VIOLATION;
     priv_len = *retlen;
 
