@@ -87,10 +87,15 @@ jobs:
           fi
           echo "TARBALL=$(ls output/*.tar.gz)" >> $GITHUB_ENV
           echo "=== Checking tarball integrity ==="
-          tar -tzf output/*.tar.gz | head -20 || {
+          # Use tar -t to check if tarball is valid without causing broken pipe
+          if tar -tzf output/*.tar.gz >/dev/null 2>&1; then
+            echo "Tarball is valid"
+            # Show first few files without using pipe to avoid broken pipe error
+            tar -tzf output/*.tar.gz 2>/dev/null | (head -20 || true)
+          else
             echo "ERROR: Tarball is corrupt or empty!"
             exit 1
-          }
+          fi
 
       - name: Test package structure
         run: |

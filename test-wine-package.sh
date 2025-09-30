@@ -2,7 +2,11 @@
 # Wine Package Test Suite
 # Comprehensive testing for Wine custom build packages
 
+# Don't exit on pipe errors (tar | head can cause broken pipe)
 set -e
+set -o pipefail || true
+# Ignore SIGPIPE to prevent broken pipe errors from killing the script
+trap '' PIPE 2>/dev/null || true
 
 # Colors
 RED='\033[0;31m'
@@ -69,12 +73,17 @@ test_package_structure() {
     fi
 
     # Test 1.2: Tarball is readable
-    if tar -tzf "$TARBALL" > /tmp/tar_test.log 2>&1; then
+    # Test tarball validity without pipes to avoid broken pipe errors
+    TAR_TEST_RESULT=0
+    tar -tzf "$TARBALL" > /tmp/tar_test.log 2>&1 || TAR_TEST_RESULT=$?
+
+    if [ "$TAR_TEST_RESULT" -eq 0 ]; then
         test_pass "Tarball is valid and readable"
     else
-        echo "Tar test failed. Error output:"
-        cat /tmp/tar_test.log
-        test_fail "Tarball corrupt or unreadable" "tar -tzf failed - see error above"
+        echo "Tar test failed with exit code: $TAR_TEST_RESULT"
+        echo "Error output:"
+        cat /tmp/tar_test.log 2>/dev/null || echo "(no error log)"
+        test_fail "Tarball corrupt or unreadable" "tar -tzf failed with code $TAR_TEST_RESULT"
         return 1
     fi
 
