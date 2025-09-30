@@ -28,17 +28,10 @@ jobs:
           # Try to clean normally first
           rm -rf build output docker-build.log 2>/dev/null || true
 
-          # If files are root-owned and we have sudo, use it
+          # If files still exist, they're probably root-owned from Docker
           if [ -d build ] || [ -d output ]; then
-            if command -v sudo >/dev/null 2>&1; then
-              echo "Using sudo to clean root-owned files..."
-              sudo rm -rf build output || true
-              sudo chown -R $USER:$USER . || true
-            else
-              echo "Warning: Cannot clean root-owned files without sudo"
-              # Try using Docker to clean instead
-              docker run --rm -v $(pwd):/workspace alpine sh -c "rm -rf /workspace/build /workspace/output" || true
-            fi
+            echo "Using Docker to clean root-owned files..."
+            docker run --rm -v $(pwd):/workspace alpine sh -c "rm -rf /workspace/build /workspace/output" || true
           fi
 
       - name: Checkout repository
@@ -72,12 +65,14 @@ jobs:
 
       - name: Fix permissions
         run: |
-          # Fix ownership of files created by Docker
-          if command -v sudo >/dev/null 2>&1; then
-            sudo chown -R $USER:$USER output || true
-            sudo chown -R $USER:$USER build || true
+          # The Docker build script should have fixed permissions using HOST_UID/HOST_GID
+          # Just verify we can access the files
+          if [ -r output ] && [ -w output ]; then
+            echo "Output directory permissions OK"
           else
-            echo "Note: Cannot fix permissions without sudo access"
+            echo "Warning: Output directory may have permission issues"
+            # Try to fix with Docker
+            docker run --rm -v $(pwd):/workspace alpine sh -c "chown -R $(id -u):$(id -g) /workspace/output /workspace/build" || true
           fi
 
       - name: List artifacts
@@ -240,12 +235,7 @@ jobs:
           # Try normal cleanup first
           rm -rf build output docker-build.log 2>/dev/null || true
 
-          # If sudo is available, use it for stubborn files
-          if command -v sudo >/dev/null 2>&1; then
-            sudo chown -R $USER:$USER . 2>/dev/null || true
-          fi
-
-          # Final attempt with Docker if files still exist
+          # Use Docker to clean any remaining root-owned files
           if [ -d build ] || [ -d output ]; then
             docker run --rm -v $(pwd):/workspace alpine sh -c "rm -rf /workspace/build /workspace/output" || true
           fi
