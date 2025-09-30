@@ -40,6 +40,7 @@ jobs:
       - name: Build Wine in container
         run: |
           docker run --rm \
+            -v $(pwd):/wine-src \
             -v $(pwd)/output:/output \
             wine-builder
 
@@ -59,7 +60,8 @@ jobs:
           echo "Extracting tarball for installation test..."
           mkdir -p test-install
           cd test-install
-          tar -xzf ../output/*.tar.gz
+          TARBALL=$(ls ../output/*.tar.gz)
+          tar -xzf "$TARBALL"
 
           echo "Testing installer script..."
           ./install.sh --check-only || echo "Dependency check warnings (expected in CI)"

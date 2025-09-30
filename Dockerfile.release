@@ -77,6 +77,8 @@ RUN apt-get update && \
         libxslt1-dev \
         libssl-dev \
         unzip \
+        # Package building tools
+        dpkg-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up ccache
