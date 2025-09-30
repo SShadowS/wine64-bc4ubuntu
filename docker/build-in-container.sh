@@ -174,3 +174,14 @@ if [ -f "$DEB_PACKAGE" ]; then
 fi
 echo ""
 ls -lh "/output/"
+
+# Fix permissions on output files for the host user
+echo ""
+echo ">>> Fixing file permissions..."
+if [ -n "$HOST_UID" ] && [ -n "$HOST_GID" ]; then
+    chown -R $HOST_UID:$HOST_GID /output 2>/dev/null || true
+    chown -R $HOST_UID:$HOST_GID /wine-src/build 2>/dev/null || true
+    echo "Permissions fixed for host user $HOST_UID:$HOST_GID"
+fi
+
+exit 0
