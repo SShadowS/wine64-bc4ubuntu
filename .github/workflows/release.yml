@@ -51,7 +51,8 @@ jobs:
       - name: Test package structure
         run: |
           echo "Running package structure tests..."
-          ./test-wine-package.sh --tarball output/*.tar.gz --verbose
+          TARBALL=$(ls output/*.tar.gz)
+          ./test-wine-package.sh --tarball "$TARBALL" --verbose
 
       - name: Extract and test installation
         run: |
