@@ -1,0 +1,47 @@
+#!/bin/bash
+# Post-installation script for wine-custom
+
+set -e
+
+# Update library cache
+echo "Updating library cache..."
+ldconfig /usr/local/lib 2>/dev/null || true
+
+# Check if i386 architecture is enabled
+if ! dpkg --print-foreign-architectures 2>/dev/null | grep -q i386; then
+    echo "================================================================"
+    echo "WARNING: 32-bit architecture (i386) is not enabled."
+    echo ""
+    echo "To enable 32-bit support, run:"
+    echo "  sudo dpkg --add-architecture i386"
+    echo "  sudo apt update"
+    echo ""
+    echo "Then reinstall this package to verify dependencies."
+    echo "================================================================"
+fi
+
+# Print installation success message
+echo ""
+echo "================================================================"
+echo "  Wine Custom Build installed successfully!"
+echo "================================================================"
+echo ""
+echo "Version: $(cat /usr/local/share/wine/wine-version.txt 2>/dev/null || echo 'unknown')"
+echo "Location: /usr/local"
+echo ""
+echo "Test installation:"
+echo "  wine --version"
+echo "  wine cmd /c echo 'Hello from Wine'"
+echo ""
+echo "Configuration:"
+echo "  winecfg          # Configure Wine settings"
+echo "  wineboot         # Initialize Wine prefix"
+echo ""
+echo "Documentation:"
+echo "  /usr/share/doc/wine-custom/README.md"
+echo "  /usr/share/doc/wine-custom/DEPENDENCIES.txt"
+echo ""
+echo "================================================================"
+echo ""
+
+exit 0

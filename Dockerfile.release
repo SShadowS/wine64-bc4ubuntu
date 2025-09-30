@@ -1,0 +1,99 @@
+FROM ubuntu:24.04
+
+# Avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Enable 32-bit architecture
+RUN dpkg --add-architecture i386
+
+# Install Wine build dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        # Build essentials
+        build-essential \
+        gcc-multilib \
+        g++-multilib \
+        flex \
+        bison \
+        # Source control and tools
+        git \
+        wget \
+        ca-certificates \
+        # Wine build requirements
+        autoconf \
+        automake \
+        libtool \
+        pkg-config \
+        make \
+        perl \
+        # Required perl modules for make_unicode
+        libxml-libxml-perl \
+        libdigest-sha-perl \
+        # MinGW for Windows compatibility
+        mingw-w64 \
+        # Build acceleration
+        ccache \
+        # X11 development libraries
+        libx11-dev \
+        libx11-dev:i386 \
+        libfreetype6-dev \
+        libfreetype6-dev:i386 \
+        libxcursor-dev \
+        libxcursor-dev:i386 \
+        libxi-dev \
+        libxi-dev:i386 \
+        libxext-dev \
+        libxext-dev:i386 \
+        libxrandr-dev \
+        libxrandr-dev:i386 \
+        libxrender-dev \
+        libxrender-dev:i386 \
+        libxinerama-dev \
+        libxinerama-dev:i386 \
+        libgl1-mesa-dev \
+        libgl1-mesa-dev:i386 \
+        libglu1-mesa-dev \
+        libglu1-mesa-dev:i386 \
+        # Additional libraries
+        libasound2-dev \
+        libasound2-dev:i386 \
+        libpulse-dev \
+        libpulse-dev:i386 \
+        libdbus-1-dev \
+        libdbus-1-dev:i386 \
+        libfontconfig1-dev \
+        libfontconfig1-dev:i386 \
+        libgnutls28-dev \
+        libgnutls28-dev:i386 \
+        libncurses-dev \
+        libncurses-dev:i386 \
+        libldap2-dev \
+        libldap2-dev:i386 \
+        libcups2-dev \
+        libcups2-dev:i386 \
+        # Development tools
+        gettext \
+        libxml2-dev \
+        libxslt1-dev \
+        libssl-dev \
+        unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up ccache
+ENV PATH="/usr/lib/ccache:${PATH}"
+ENV CCACHE_DIR=/ccache
+RUN mkdir -p /ccache && \
+    ccache --max-size=2G
+
+# Set working directory
+WORKDIR /wine-src
+
+# Copy source code
+COPY . .
+
+# Copy build script
+COPY docker/build-in-container.sh /build-in-container.sh
+RUN chmod +x /build-in-container.sh
+
+# Default command
+CMD ["/build-in-container.sh"]

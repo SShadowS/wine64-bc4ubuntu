@@ -1,0 +1,34 @@
+#!/bin/bash
+# Post-removal script for wine-custom
+
+set -e
+
+case "$1" in
+    purge)
+        # Remove any leftover configuration
+        echo "Purging Wine custom build..."
+
+        # Note: We don't remove ~/.wine directories as they contain user data
+        echo ""
+        echo "================================================================"
+        echo "  Wine Custom Build has been removed"
+        echo "================================================================"
+        echo ""
+        echo "Note: Wine prefixes in user home directories were preserved."
+        echo "To remove user data: rm -rf ~/.wine"
+        echo ""
+        ;;
+
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+# Update library cache
+ldconfig 2>/dev/null || true
+
+exit 0

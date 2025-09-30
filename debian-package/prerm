@@ -1,0 +1,24 @@
+#!/bin/bash
+# Pre-removal script for wine-custom
+
+set -e
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        # Kill any running wine processes
+        echo "Stopping Wine processes..."
+        if command -v wineserver >/dev/null 2>&1; then
+            wineserver -k 2>/dev/null || true
+        fi
+        ;;
+
+    failed-upgrade)
+        ;;
+
+    *)
+        echo "prerm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

@@ -1,0 +1,183 @@
+name: Build Wine Release
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Version tag (optional, defaults to git describe)'
+        required: false
+        type: string
+
+  # Automatic trigger on release tags
+  push:
+    tags:
+      - 'release-*'
+      - 'v*'
+
+jobs:
+  build-release:
+    name: Build Wine Release Package
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git describe
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -f Dockerfile.release -t wine-builder .
+
+      - name: Create output directory
+        run: mkdir -p output
+
+      - name: Build Wine in container
+        run: |
+          docker run --rm \
+            -v $(pwd)/output:/output \
+            wine-builder
+
+      - name: List artifacts
+        run: |
+          ls -lh output/
+          echo "TARBALL=$(ls output/*.tar.gz)" >> $GITHUB_ENV
+
+      - name: Test package structure
+        run: |
+          echo "Running package structure tests..."
+          ./test-wine-package.sh --tarball output/*.tar.gz --verbose
+
+      - name: Extract and test installation
+        run: |
+          echo "Extracting tarball for installation test..."
+          mkdir -p test-install
+          cd test-install
+          tar -xzf ../output/*.tar.gz
+
+          echo "Testing installer script..."
+          ./install.sh --check-only || echo "Dependency check warnings (expected in CI)"
+
+          echo "Verifying package contents..."
+          ls -la
+          [ -f README.md ] && echo "✓ README.md present"
+          [ -f DEPENDENCIES.txt ] && echo "✓ DEPENDENCIES.txt present"
+          [ -f install.sh ] && echo "✓ install.sh present"
+          [ -d usr/local/bin ] && echo "✓ bin directory present"
+          [ -d usr/local/lib/wine ] && echo "✓ lib/wine directory present"
+
+      - name: Generate release name
+        id: release_name
+        run: |
+          if [ -n "${{ inputs.version_tag }}" ]; then
+            VERSION="${{ inputs.version_tag }}"
+          else
+            # Extract from tarball filename
+            TARBALL_NAME=$(basename output/*.tar.gz .tar.gz)
+            VERSION="${TARBALL_NAME#wine-custom-}"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wine-custom-${{ env.VERSION }}
+          path: |
+            output/*.tar.gz
+            output/*.deb
+          retention-days: 90
+
+      - name: Create GitHub Release (on tag push)
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            output/*.tar.gz
+            output/*.deb
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ## Installation
+
+            ### Debian/Ubuntu (.deb package - recommended)
+            ```bash
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/wine-custom-${{ env.VERSION }}_amd64.deb
+            sudo apt install ./wine-custom-${{ env.VERSION }}_amd64.deb
+            ```
+
+            ### Generic (.tar.gz tarball)
+            ```bash
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/wine-custom-${{ env.VERSION }}.tar.gz
+            sudo tar -C / -xzf wine-custom-${{ env.VERSION }}.tar.gz
+            ```
+
+            ## What's Included
+            - Complete Wine installation (64-bit + 32-bit)
+            - Custom locale fixes for Business Central
+            - All Windows DLLs and Unix libraries
+            - Documentation and installer scripts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release (manual trigger)
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: release-${{ env.VERSION }}
+          name: Wine Custom ${{ env.VERSION }}
+          files: |
+            output/*.tar.gz
+            output/*.deb
+          draft: true
+          generate_release_notes: true
+          body: |
+            ## Installation
+
+            ### Debian/Ubuntu (.deb package - recommended)
+            ```bash
+            sudo apt install ./wine-custom-${{ env.VERSION }}_amd64.deb
+            ```
+
+            ### Generic (.tar.gz tarball)
+            ```bash
+            sudo tar -C / -xzf wine-custom-${{ env.VERSION }}.tar.gz
+            ```
+
+            ## What's Included
+            - Complete Wine installation (64-bit + 32-bit)
+            - Custom locale fixes for Business Central
+            - All Windows DLLs and Unix libraries
+            - Documentation and installer scripts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create release summary
+        if: success()
+        run: |
+          echo "## 🎉 Release Build Successful!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Package Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tarball:** wine-custom-${{ env.VERSION }}.tar.gz" >> $GITHUB_STEP_SUMMARY
+          echo "- **Debian Package:** wine-custom-${{ env.VERSION }}_amd64.deb" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Files Created" >> $GITHUB_STEP_SUMMARY
+          ls -lh output/ | tail -n +2 | awk '{printf "- %s (%s)\n", $9, $5}' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download packages from [Releases](https://github.com/${{ github.repository }}/releases)" >> $GITHUB_STEP_SUMMARY
+          echo "2. Test installation on target system" >> $GITHUB_STEP_SUMMARY
+          echo "3. Verify Wine functionality" >> $GITHUB_STEP_SUMMARY
+
+      - name: Post-release notification
+        if: success() && startsWith(github.ref, 'refs/tags/')
+        run: |
+          echo "✅ Release ${{ env.VERSION }} published successfully!"
+          echo "📦 https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
