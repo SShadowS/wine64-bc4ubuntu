@@ -174,7 +174,7 @@ static NTSTATUS complete_irp(struct connection *conn, IRP *irp)
 
     if (output_len < irp_size)
     {
-        req->ConnectionId = (ULONG_PTR)conn;
+        req->ConnectionId = conn->conn_id;
         req->RequestId = conn->req_id;
         return STATUS_BUFFER_OVERFLOW;
     }
@@ -182,7 +182,7 @@ static NTSTATUS complete_irp(struct connection *conn, IRP *irp)
     offset = sizeof(*req);
 
     req->UrlContext = conn->context;
-    req->ConnectionId = (ULONG_PTR)conn;
+    req->ConnectionId = conn->conn_id;
     req->RequestId = conn->req_id;
     req->Version = conn->version;
     req->Verb = conn->verb;
