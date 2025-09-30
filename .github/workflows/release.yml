@@ -22,6 +22,19 @@ jobs:
     timeout-minutes: 120
 
     steps:
+      - name: Clean workspace
+        run: |
+          echo "Cleaning workspace..."
+          # Clean any leftover Docker-created files from previous runs
+          if [ -d build ]; then
+            sudo rm -rf build || true
+          fi
+          if [ -d output ]; then
+            sudo rm -rf output || true
+          fi
+          # Clean any root-owned files
+          sudo chown -R $USER:$USER . || true
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -48,6 +61,12 @@ jobs:
               tail -100 docker-build.log
               exit 1
             }
+
+      - name: Fix permissions
+        run: |
+          # Fix ownership of files created by Docker
+          sudo chown -R $USER:$USER output || true
+          sudo chown -R $USER:$USER build || true
 
       - name: List artifacts
         run: |
@@ -201,3 +220,14 @@ jobs:
         run: |
           echo "✅ Release ${{ env.VERSION }} published successfully!"
           echo "📦 https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+
+      - name: Cleanup workspace
+        if: always()
+        run: |
+          echo "Cleaning up workspace..."
+          # Fix permissions on any Docker-created files
+          sudo chown -R $USER:$USER . || true
+          # Clean build directories
+          rm -rf build || true
+          rm -rf output || true
+          rm -f docker-build.log || true
