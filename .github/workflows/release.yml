@@ -39,15 +39,32 @@ jobs:
 
       - name: Build Wine in container
         run: |
+          set -o pipefail
           docker run --rm \
             -v $(pwd):/wine-src \
             -v $(pwd)/output:/output \
-            wine-builder
+            wine-builder 2>&1 | tee docker-build.log || {
+              echo "Docker build failed! Last 100 lines of output:"
+              tail -100 docker-build.log
+              exit 1
+            }
 
       - name: List artifacts
         run: |
+          echo "=== Output directory contents ==="
           ls -lh output/
+          if [ ! -f output/*.tar.gz ]; then
+            echo "ERROR: No tarball found in output directory!"
+            echo "Docker build log tail:"
+            tail -50 docker-build.log
+            exit 1
+          fi
           echo "TARBALL=$(ls output/*.tar.gz)" >> $GITHUB_ENV
+          echo "=== Checking tarball integrity ==="
+          tar -tzf output/*.tar.gz | head -20 || {
+            echo "ERROR: Tarball is corrupt or empty!"
+            exit 1
+          }
 
       - name: Test package structure
         run: |

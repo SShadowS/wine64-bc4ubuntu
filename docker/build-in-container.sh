@@ -27,7 +27,10 @@ cd build/wine-64
     --enable-win64 \
     --prefix=/usr/local \
     --disable-tests
-make -j"$JOBS"
+make -j"$JOBS" || {
+    echo "ERROR: 64-bit Wine build failed!"
+    exit 1
+}
 cd ../..
 
 # Build 32-bit Wine
@@ -40,7 +43,10 @@ cd build/wine-32
     --with-wine64=../wine-64 \
     --prefix=/usr/local \
     --disable-tests
-make -j"$JOBS"
+make -j"$JOBS" || {
+    echo "ERROR: 32-bit Wine build failed!"
+    exit 1
+}
 cd ../..
 
 # Install to staging
@@ -62,6 +68,21 @@ cp /wine-src/release-files/DEPENDENCIES.txt "$STAGING_DIR/"
 cp /wine-src/release-files/install.sh "$STAGING_DIR/"
 chmod +x "$STAGING_DIR/install.sh"
 
+# Validate staging directory has content
+echo ">>> Validating staging directory..."
+if [ ! -d "$STAGING_DIR/usr" ]; then
+    echo "ERROR: usr/ directory not found in staging!"
+    echo "Build likely failed. Contents of staging:"
+    ls -la "$STAGING_DIR" || echo "Staging dir empty"
+    exit 1
+fi
+
+if [ ! -f "$STAGING_DIR/usr/local/bin/wine" ]; then
+    echo "ERROR: wine binary not found!"
+    echo "Installation failed. Check build logs above."
+    exit 1
+fi
+
 # Create tarball
 echo ">>> Creating release tarball..."
 cd "$STAGING_DIR"
@@ -71,7 +92,13 @@ VERSION="${WINE_VER}-${GIT_DESC}"
 TARBALL="wine-custom-${VERSION}.tar.gz"
 
 # Package everything
-tar -czf "/output/$TARBALL" usr/ README.md DEPENDENCIES.txt install.sh
+echo "Creating tarball with: usr/ README.md DEPENDENCIES.txt install.sh"
+tar -czf "/output/$TARBALL" usr/ README.md DEPENDENCIES.txt install.sh || {
+    echo "ERROR: Failed to create tarball!"
+    echo "Contents of staging directory:"
+    ls -la
+    exit 1
+}
 
 # Validate the package
 echo ">>> Validating package..."

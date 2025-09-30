@@ -69,10 +69,12 @@ test_package_structure() {
     fi
 
     # Test 1.2: Tarball is readable
-    if tar -tzf "$TARBALL" > /dev/null 2>&1; then
+    if tar -tzf "$TARBALL" > /tmp/tar_test.log 2>&1; then
         test_pass "Tarball is valid and readable"
     else
-        test_fail "Tarball corrupt or unreadable" "tar -tzf failed"
+        echo "Tar test failed. Error output:"
+        cat /tmp/tar_test.log
+        test_fail "Tarball corrupt or unreadable" "tar -tzf failed - see error above"
         return 1
     fi
 
