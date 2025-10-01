@@ -93,13 +93,9 @@ RUN make install
 WORKDIR /wine-build/wine-32
 RUN make install
 
-# Clean up build directories to reduce image size
+# Skip cleanup for now - keeping all dependencies to ensure Wine works
+# TODO: Optimize cleanup later to only remove build tools, not runtime libs
 WORKDIR /
-RUN rm -rf /wine-src /wine-build && \
-    apt-get remove -y build-essential gcc-multilib g++-multilib flex bison \
-    autoconf automake libtool pkg-config make perl mingw-w64 && \
-    apt-get autoremove -y && \
-    apt-get clean
 
 # Verify installation and create wine64 symlink if needed
 RUN ls -la /usr/local/bin/wine* && \
