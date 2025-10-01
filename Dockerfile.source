@@ -26,7 +26,9 @@ RUN apt-get install -y --no-install-recommends \
     # Required for make_unicode
     perl \
     libxml-libxml-perl \
+    libdigest-sha-perl \
     wget \
+    unzip \
     # X11 and graphics
     libx11-dev libx11-dev:i386 \
     libfreetype6-dev libfreetype6-dev:i386 \
