@@ -101,10 +101,13 @@ RUN rm -rf /wine-src /wine-build && \
     apt-get autoremove -y && \
     apt-get clean
 
-# Verify installation
-RUN wine64 --version && \
+# Verify installation and create wine64 symlink if needed
+RUN ls -la /usr/local/bin/wine* && \
+    if [ ! -f /usr/local/bin/wine64 ]; then \
+        ln -sf /usr/local/bin/wine /usr/local/bin/wine64; \
+    fi && \
     wine --version && \
-    ls -la /usr/local/bin/wine*
+    wine64 --version
 
 # Set up environment
 ENV PATH="/usr/local/bin:$PATH"
