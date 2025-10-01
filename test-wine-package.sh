@@ -2,9 +2,9 @@
 # Wine Package Test Suite
 # Comprehensive testing for Wine custom build packages
 
-# Don't exit on pipe errors (tar | head can cause broken pipe)
+# Exit on errors but not on pipe failures
 set -e
-set -o pipefail || true
+# Don't use pipefail as it can cause issues with tar | head commands
 # Ignore SIGPIPE to prevent broken pipe errors from killing the script
 trap '' PIPE 2>/dev/null || true
 
@@ -37,21 +37,21 @@ print_header() {
 
 test_pass() {
     echo -e "${GREEN}✓ PASS${NC}: $1"
-    ((PASSED++))
-    ((TOTAL_TESTS++))
+    PASSED=$((PASSED + 1))
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
 }
 
 test_fail() {
     echo -e "${RED}✗ FAIL${NC}: $1"
     FAILED_TESTS+=("$1: $2")
-    ((FAILED++))
-    ((TOTAL_TESTS++))
+    FAILED=$((FAILED + 1))
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
 }
 
 test_skip() {
     echo -e "${YELLOW}⊘ SKIP${NC}: $1"
-    ((SKIPPED++))
-    ((TOTAL_TESTS++))
+    SKIPPED=$((SKIPPED + 1))
+    TOTAL_TESTS=$((TOTAL_TESTS + 1))
 }
 
 verbose() {
@@ -362,7 +362,7 @@ test_dependencies() {
             verbose "Package installed: $pkg"
         else
             test_fail "Missing runtime package: $pkg" "Install with apt"
-            ((MISSING_PKGS++))
+            MISSING_PKGS=$((MISSING_PKGS + 1))
         fi
     done
     if [ "$MISSING_PKGS" -eq 0 ]; then
