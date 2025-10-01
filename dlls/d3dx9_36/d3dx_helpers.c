@@ -81,6 +81,7 @@ static const struct pixel_format_desc formats[] =
     {D3DX_PIXEL_FORMAT_R16G16B16_UNORM,          { 0, 16, 16, 16}, { 0,  0, 16, 32},  6, 1, 1,  6, CTYPE_EMPTY, CTYPE_UNORM, FMT_FLAG_INTERNAL},
     {D3DX_PIXEL_FORMAT_R16G16B16A16_UNORM,       {16, 16, 16, 16}, {48,  0, 16, 32},  8, 1, 1,  8, CTYPE_UNORM, CTYPE_UNORM, 0           },
     {D3DX_PIXEL_FORMAT_R8_UNORM,                 { 0,  8,  0,  0}, { 0,  0,  0,  0},  1, 1, 1,  1, CTYPE_EMPTY, CTYPE_UNORM, FMT_FLAG_DXGI},
+    {D3DX_PIXEL_FORMAT_R8_SNORM,                 { 0,  8,  0,  0}, { 0,  0,  0,  0},  1, 1, 1,  1, CTYPE_EMPTY, CTYPE_SNORM, FMT_FLAG_DXGI},
     {D3DX_PIXEL_FORMAT_R8G8_UNORM,               { 0,  8,  8,  0}, { 0,  0,  8,  0},  2, 1, 1,  2, CTYPE_EMPTY, CTYPE_UNORM, FMT_FLAG_DXGI},
     {D3DX_PIXEL_FORMAT_R16_UNORM,                { 0, 16,  0,  0}, { 0,  0,  0,  0},  2, 1, 1,  2, CTYPE_EMPTY, CTYPE_UNORM, FMT_FLAG_DXGI},
     {D3DX_PIXEL_FORMAT_R16G16_UNORM,             { 0, 16, 16,  0}, { 0,  0, 16,  0},  4, 1, 1,  4, CTYPE_EMPTY, CTYPE_UNORM, 0           },
@@ -383,7 +384,7 @@ static HRESULT dds_pixel_format_from_d3dx_pixel_format_id(struct dds_pixel_forma
     return D3D_OK;
 }
 
-static enum d3dx_pixel_format_id d3dx_pixel_format_id_from_dxgi_format(DXGI_FORMAT format)
+enum d3dx_pixel_format_id d3dx_pixel_format_id_from_dxgi_format(uint32_t format)
 {
     switch (format)
     {
@@ -396,6 +397,7 @@ static enum d3dx_pixel_format_id d3dx_pixel_format_id_from_dxgi_format(DXGI_FORM
         case DXGI_FORMAT_R10G10B10A2_UNORM:        return D3DX_PIXEL_FORMAT_R10G10B10A2_UNORM;
         case DXGI_FORMAT_R16G16B16A16_UNORM:       return D3DX_PIXEL_FORMAT_R16G16B16A16_UNORM;
         case DXGI_FORMAT_R8_UNORM:                 return D3DX_PIXEL_FORMAT_R8_UNORM;
+        case DXGI_FORMAT_R8_SNORM:                 return D3DX_PIXEL_FORMAT_R8_SNORM;
         case DXGI_FORMAT_R8G8_UNORM:               return D3DX_PIXEL_FORMAT_R8G8_UNORM;
         case DXGI_FORMAT_R16_UNORM:                return D3DX_PIXEL_FORMAT_R16_UNORM;
         case DXGI_FORMAT_R16G16_UNORM:             return D3DX_PIXEL_FORMAT_R16G16_UNORM;
@@ -412,6 +414,10 @@ static enum d3dx_pixel_format_id d3dx_pixel_format_id_from_dxgi_format(DXGI_FORM
         case DXGI_FORMAT_BC1_UNORM:                return D3DX_PIXEL_FORMAT_BC1_UNORM;
         case DXGI_FORMAT_BC2_UNORM:                return D3DX_PIXEL_FORMAT_BC2_UNORM;
         case DXGI_FORMAT_BC3_UNORM:                return D3DX_PIXEL_FORMAT_BC3_UNORM;
+        case DXGI_FORMAT_BC4_UNORM:                return D3DX_PIXEL_FORMAT_BC4_UNORM;
+        case DXGI_FORMAT_BC4_SNORM:                return D3DX_PIXEL_FORMAT_BC4_SNORM;
+        case DXGI_FORMAT_BC5_UNORM:                return D3DX_PIXEL_FORMAT_BC5_UNORM;
+        case DXGI_FORMAT_BC5_SNORM:                return D3DX_PIXEL_FORMAT_BC5_SNORM;
         case DXGI_FORMAT_R8G8B8A8_SNORM:           return D3DX_PIXEL_FORMAT_R8G8B8A8_SNORM;
         case DXGI_FORMAT_R8G8_SNORM:               return D3DX_PIXEL_FORMAT_R8G8_SNORM;
         case DXGI_FORMAT_R16G16_SNORM:             return D3DX_PIXEL_FORMAT_R16G16_SNORM;
@@ -423,7 +429,7 @@ static enum d3dx_pixel_format_id d3dx_pixel_format_id_from_dxgi_format(DXGI_FORM
     }
 }
 
-static void d3dx_get_next_mip_level_size(struct volume *size)
+void d3dx_get_next_mip_level_size(struct volume *size)
 {
     size->width  = max(size->width  / 2, 1);
     size->height = max(size->height / 2, 1);
@@ -437,7 +443,7 @@ static const char *debug_volume(const struct volume *volume)
     return wine_dbg_sprintf("(%ux%ux%u)", volume->width, volume->height, volume->depth);
 }
 
-static HRESULT d3dx_calculate_pixels_size(enum d3dx_pixel_format_id format, uint32_t width, uint32_t height,
+HRESULT d3dx_calculate_pixels_size(enum d3dx_pixel_format_id format, uint32_t width, uint32_t height,
     uint32_t *pitch, uint32_t *size)
 {
     const struct pixel_format_desc *format_desc = get_d3dx_pixel_format_info(format);
@@ -1188,9 +1194,16 @@ static HRESULT d3dx_initialize_image_from_dds(const void *src_data, uint32_t src
     expected_src_data_size = (image->layer_pitch * image->layer_count) + header_size;
     if (src_data_size < expected_src_data_size)
     {
+        const uint32_t dxt10_info_only_flags = D3DX_IMAGE_INFO_ONLY | D3DX_IMAGE_SUPPORT_DXT10;
+
         WARN("File is too short %u, expected at least %u bytes.\n", src_data_size, expected_src_data_size);
-        /* D3DX10/D3DX11 do not validate the size of the pixels, only the header. */
-        if (!(flags & D3DX_IMAGE_SUPPORT_DXT10))
+        /*
+         * D3DX10/D3DX11 do not validate the size of the pixels, only the header.
+         * This is safe if we're only getting image info, but we should avoid
+         * matching native behavior here when loading image data until we have
+         * a reason to do otherwise.
+         */
+        if ((flags & dxt10_info_only_flags) != dxt10_info_only_flags)
             return D3DXERR_INVALIDDATA;
     }
 
@@ -1493,7 +1506,8 @@ static HRESULT d3dx_initialize_image_from_wic(const void *src_data, uint32_t src
             break;
     }
 
-    if (image_is_argb(bitmap_frame, image))
+    /* D3DX10/D3DX11 ignore alpha channels in X8 bitmaps. */
+    if (!(flags & D3DX_IMAGE_SUPPORT_DXT10) && image_is_argb(bitmap_frame, image))
         image->format = D3DX_PIXEL_FORMAT_B8G8R8A8_UNORM;
 
     if (!(flags & D3DX_IMAGE_INFO_ONLY))
@@ -2574,6 +2588,25 @@ static HRESULT d3dx_pixels_decompress(struct d3dx_pixels *pixels, const struct p
             decompress_bcn_block = bcdec_bc3;
             break;
 
+        case D3DX_PIXEL_FORMAT_BC4_UNORM:
+        case D3DX_PIXEL_FORMAT_BC4_SNORM:
+            if (desc->rgb_type == CTYPE_UNORM)
+                uncompressed_desc = get_d3dx_pixel_format_info(D3DX_PIXEL_FORMAT_R8_UNORM);
+            else
+                uncompressed_desc = get_d3dx_pixel_format_info(D3DX_PIXEL_FORMAT_R8_SNORM);
+            decompress_bcn_block = bcdec_bc4;
+            break;
+
+        case D3DX_PIXEL_FORMAT_BC5_UNORM:
+        case D3DX_PIXEL_FORMAT_BC5_SNORM:
+            if (desc->rgb_type == CTYPE_UNORM)
+                uncompressed_desc = get_d3dx_pixel_format_info(D3DX_PIXEL_FORMAT_R8G8_UNORM);
+            else
+                uncompressed_desc = get_d3dx_pixel_format_info(D3DX_PIXEL_FORMAT_R8G8_SNORM);
+            decompress_bcn_block = bcdec_bc5;
+            break;
+
+
         default:
             FIXME("Unexpected compressed texture format %u.\n", desc->format);
             return E_NOTIMPL;
@@ -2789,6 +2822,16 @@ static void d3dx_compress_block(enum d3dx_pixel_format_id fmt, uint8_t *block_bu
             stb_compress_dxt_block(dst_buf, block_buf, TRUE, 0);
             break;
 
+        case D3DX_PIXEL_FORMAT_BC4_UNORM:
+        case D3DX_PIXEL_FORMAT_BC4_SNORM:
+            stb_compress_bc4_block(dst_buf, block_buf);
+            break;
+
+        case D3DX_PIXEL_FORMAT_BC5_UNORM:
+        case D3DX_PIXEL_FORMAT_BC5_SNORM:
+            stb_compress_bc5_block(dst_buf, block_buf);
+            break;
+
         default:
             assert(0);
             break;
@@ -2816,6 +2859,22 @@ static HRESULT d3dx_pixels_compress(struct d3dx_pixels *src_pixels,
         case D3DX_PIXEL_FORMAT_DXT4_UNORM:
         case D3DX_PIXEL_FORMAT_DXT5_UNORM:
             assert(src_desc->format == D3DX_PIXEL_FORMAT_R8G8B8A8_UNORM);
+            break;
+
+        case D3DX_PIXEL_FORMAT_BC4_UNORM:
+            assert(src_desc->format == D3DX_PIXEL_FORMAT_R8_UNORM);
+            break;
+
+        case D3DX_PIXEL_FORMAT_BC4_SNORM:
+            assert(src_desc->format == D3DX_PIXEL_FORMAT_R8_SNORM);
+            break;
+
+        case D3DX_PIXEL_FORMAT_BC5_UNORM:
+            assert(src_desc->format == D3DX_PIXEL_FORMAT_R8G8_UNORM);
+            break;
+
+        case D3DX_PIXEL_FORMAT_BC5_SNORM:
+            assert(src_desc->format == D3DX_PIXEL_FORMAT_R8G8_SNORM);
             break;
 
         default:
