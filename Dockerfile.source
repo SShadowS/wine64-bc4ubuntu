@@ -1,0 +1,104 @@
+FROM ubuntu:24.04
+
+# Avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Enable 32-bit architecture
+RUN dpkg --add-architecture i386 && apt-get update
+
+# Install Wine build dependencies and runtime dependencies
+RUN apt-get install -y --no-install-recommends \
+    # Build essentials
+    build-essential \
+    gcc-multilib \
+    g++-multilib \
+    flex \
+    bison \
+    # Source control
+    git \
+    ca-certificates \
+    # Wine build requirements
+    autoconf \
+    automake \
+    libtool \
+    pkg-config \
+    make \
+    # Required for make_unicode
+    perl \
+    libxml-libxml-perl \
+    # X11 and graphics
+    libx11-dev libx11-dev:i386 \
+    libfreetype6-dev libfreetype6-dev:i386 \
+    libxcursor-dev libxcursor-dev:i386 \
+    libxi-dev libxi-dev:i386 \
+    libxext-dev libxext-dev:i386 \
+    libxrandr-dev libxrandr-dev:i386 \
+    libxrender-dev libxrender-dev:i386 \
+    libgl1-mesa-dev libgl1-mesa-dev:i386 \
+    # Audio
+    libasound2-dev libasound2-dev:i386 \
+    libpulse-dev libpulse-dev:i386 \
+    # Other libraries
+    libdbus-1-dev libdbus-1-dev:i386 \
+    libfontconfig1-dev libfontconfig1-dev:i386 \
+    libgnutls28-dev libgnutls28-dev:i386 \
+    libncurses-dev libncurses-dev:i386 \
+    # MinGW for Windows compatibility
+    mingw-w64 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone the Wine source with BC4 fixes
+WORKDIR /wine-src
+RUN git clone --depth=1 --branch=master https://github.com/SShadowS/wine64-bc4ubuntu.git . || \
+    git clone --depth=1 https://github.com/SShadowS/wine-git.git .
+
+# Regenerate locale data with fixes
+RUN cd tools && perl make_unicode && cd ..
+
+# Build 64-bit Wine
+WORKDIR /wine-build/wine-64
+RUN ../../wine-src/configure \
+    --enable-win64 \
+    --prefix=/usr/local \
+    --without-x \
+    --disable-tests \
+    && make -j$(nproc)
+
+# Build 32-bit Wine
+WORKDIR /wine-build/wine-32
+RUN ../../wine-src/configure \
+    --with-wine64=../wine-64 \
+    --prefix=/usr/local \
+    --without-x \
+    --disable-tests \
+    && make -j$(nproc)
+
+# Install Wine properly using Wine's make install
+WORKDIR /wine-build/wine-64
+RUN make install
+
+WORKDIR /wine-build/wine-32
+RUN make install
+
+# Clean up build directories to reduce image size
+WORKDIR /
+RUN rm -rf /wine-src /wine-build && \
+    apt-get remove -y build-essential gcc-multilib g++-multilib flex bison \
+    autoconf automake libtool pkg-config make perl mingw-w64 && \
+    apt-get autoremove -y && \
+    apt-get clean
+
+# Verify installation
+RUN wine64 --version && \
+    wine --version && \
+    ls -la /usr/local/bin/wine*
+
+# Set up environment
+ENV PATH="/usr/local/bin:$PATH"
+ENV WINEPREFIX="/wine"
+
+# Initialize Wine prefix
+RUN wineboot --init && \
+    wineserver --wait
+
+CMD ["wine64", "cmd"]

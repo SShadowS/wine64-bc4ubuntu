@@ -49,12 +49,25 @@ make -j"$JOBS" || {
 }
 cd ../..
 
-# Install to staging
+# Install to staging using Wine's proper installation
 echo ">>> Installing to staging..."
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
-make -C build/wine-64 install DESTDIR="$STAGING_DIR"
-make -C build/wine-32 install DESTDIR="$STAGING_DIR"
+
+# Use Wine's make install which properly sets up all components
+cd build/wine-64
+make install DESTDIR="$STAGING_DIR" || {
+    echo "ERROR: 64-bit Wine installation failed!"
+    exit 1
+}
+cd ../..
+
+cd build/wine-32
+make install DESTDIR="$STAGING_DIR" || {
+    echo "ERROR: 32-bit Wine installation failed!"
+    exit 1
+}
+cd ../..
 
 # Generate version info
 echo ">>> Generating version info..."
