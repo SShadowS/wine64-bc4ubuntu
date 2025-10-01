@@ -175,7 +175,7 @@ jobs:
             - All Windows DLLs and Unix libraries
             - Documentation and installer scripts
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release (manual trigger)
         if: github.event_name == 'workflow_dispatch'
@@ -207,7 +207,7 @@ jobs:
             - All Windows DLLs and Unix libraries
             - Documentation and installer scripts
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Create release summary
         if: success()
