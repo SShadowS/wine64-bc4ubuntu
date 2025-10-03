@@ -59,8 +59,12 @@ RUN mkdir -p /ccache && ccache --max-size=2G
 
 # Clone the Wine source with BC4 fixes
 WORKDIR /wine-src
+ARG CACHEBUST=1
 RUN git clone --depth=1 --branch=master https://github.com/SShadowS/wine64-bc4ubuntu.git . || \
     git clone --depth=1 https://github.com/SShadowS/wine-git.git .
+
+# Regenerate configure script to pick up VERSION changes
+RUN autoconf
 
 # Regenerate locale data with fixes
 RUN cd tools && perl make_unicode && cd ..
@@ -93,8 +97,31 @@ RUN make install
 WORKDIR /wine-build/wine-32
 RUN make install
 
-# Skip cleanup for now - keeping all dependencies to ensure Wine works
-# TODO: Optimize cleanup later to only remove build tools, not runtime libs
+# Clean up build artifacts and development headers (without autoremove to preserve runtime deps)
+RUN apt-get remove -y --allow-remove-essential \
+    flex bison \
+    autoconf automake libtool \
+    perl libxml-libxml-perl libdigest-sha-perl \
+    mingw-w64 \
+    ccache \
+    libx11-dev libx11-dev:i386 \
+    libfreetype6-dev libfreetype6-dev:i386 \
+    libxcursor-dev libxcursor-dev:i386 \
+    libxi-dev libxi-dev:i386 \
+    libxext-dev libxext-dev:i386 \
+    libxrandr-dev libxrandr-dev:i386 \
+    libxrender-dev libxrender-dev:i386 \
+    libgl1-mesa-dev libgl1-mesa-dev:i386 \
+    libasound2-dev libasound2-dev:i386 \
+    libpulse-dev libpulse-dev:i386 \
+    libdbus-1-dev libdbus-1-dev:i386 \
+    libfontconfig1-dev libfontconfig1-dev:i386 \
+    libgnutls28-dev libgnutls28-dev:i386 \
+    libncurses-dev libncurses-dev:i386 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /wine-src /wine-build /ccache
+
 WORKDIR /
 
 # Verify installation and create wine64 symlink if needed
@@ -107,7 +134,13 @@ RUN ls -la /usr/local/bin/wine* && \
 
 # Set up environment
 ENV PATH="/usr/local/bin:$PATH"
-ENV WINEPREFIX="/wine"
+#ENV WINEPREFIX="/wine"
+ENV WINEPREFIX="/root/.local/share/wineprefixes/bc1"
+#ENV WINEARCH=win64
+ENV WINEDEBUG=-all
+
+# Create the Wine prefix directory
+RUN mkdir -p "$WINEPREFIX"
 
 # Initialize Wine prefix
 RUN wineboot --init && \
