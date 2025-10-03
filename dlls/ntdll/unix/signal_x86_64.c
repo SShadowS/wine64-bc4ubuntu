@@ -88,6 +88,11 @@ WINE_DECLARE_DEBUG_CHANNEL(seh);
 
 #include "dwarf.h"
 
+static USHORT cs32_sel;  /* selector for %cs in 32-bit mode */
+static USHORT cs64_sel;  /* selector for %cs in 64-bit mode */
+static USHORT ds64_sel;  /* selector for %ds/%es/%ss in 64-bit mode */
+static USHORT fs32_sel;  /* selector for %fs in 32-bit mode */
+
 /***********************************************************************
  * signal context platform-specific definitions
  */
@@ -180,6 +185,7 @@ __ASM_GLOBAL_FUNC( modify_ldt,
 #define CS_sig(context)      (*((WORD *)&(context)->uc_mcontext.gregs[REG_CSGSFS] + 0))
 #define GS_sig(context)      (*((WORD *)&(context)->uc_mcontext.gregs[REG_CSGSFS] + 1))
 #define FS_sig(context)      (*((WORD *)&(context)->uc_mcontext.gregs[REG_CSGSFS] + 2))
+#define SS_sig(context)      (*((WORD *)&(context)->uc_mcontext.gregs[REG_CSGSFS] + 3))
 #define RSP_sig(context)     ((context)->uc_mcontext.gregs[REG_RSP])
 #define RIP_sig(context)     ((context)->uc_mcontext.gregs[REG_RIP])
 #define EFL_sig(context)     ((context)->uc_mcontext.gregs[REG_EFL])
@@ -336,6 +342,18 @@ static inline XMM_SAVE_AREA32 *FPU_sig( const ucontext_t *context )
     return (XMM_SAVE_AREA32 *)&(context)->uc_mcontext->__fs.__fpu_fcw;
 }
 
+static inline const WORD *SS_sig_ptr( const ucontext_t *context )
+{
+    if (context->uc_mcsize == sizeof(_STRUCT_MCONTEXT64_FULL) ||
+        context->uc_mcsize == sizeof(_STRUCT_MCONTEXT_AVX64_FULL) ||
+        context->uc_mcsize == SIZEOF_STRUCT_MCONTEXT_AVX512_64_FULL)
+    {
+        return (WORD *)&((_STRUCT_MCONTEXT64_FULL *)context->uc_mcontext)->__ss.__ss;
+    }
+    return &ds64_sel;
+}
+#define SS_sig(context) (*SS_sig_ptr(context))
+
 #define XState_sig(context)  NULL
 
 #else
@@ -438,7 +456,8 @@ struct callback_stack_layout
 C_ASSERT( offsetof(struct callback_stack_layout, machine_frame) == 0x30 );
 C_ASSERT( sizeof(struct callback_stack_layout) == 0x58 );
 
-#define RESTORE_FLAGS_INSTRUMENTATION CONTEXT_i386
+#define RESTORE_FLAGS_INSTRUMENTATION          0x00010000
+#define RESTORE_FLAGS_INCOMPLETE_FRAME_CONTEXT 0x00020000
 
 struct syscall_frame
 {
@@ -572,11 +591,6 @@ static inline void context_init_xstate( CONTEXT *context, void *xstate_buffer )
 
     xctx->All.Offset = -(LONG)sizeof(CONTEXT);
 }
-
-static USHORT cs32_sel;  /* selector for %cs in 32-bit mode */
-static USHORT cs64_sel;  /* selector for %cs in 64-bit mode */
-static USHORT ds64_sel;  /* selector for %ds/%es/%ss in 64-bit mode */
-static USHORT fs32_sel;  /* selector for %fs in 32-bit mode */
 
 
 /***********************************************************************
@@ -872,6 +886,12 @@ static inline void set_sigcontext( const CONTEXT *context, ucontext_t *sigcontex
 }
 
 
+static inline BOOL is_16bit( const ucontext_t *sigcontext )
+{
+    return SS_sig(sigcontext) != ds64_sel;
+}
+
+
 extern void clear_alignment_flag(void);
 __ASM_GLOBAL_FUNC( clear_alignment_flag,
                    "pushfq\n\t"
@@ -928,6 +948,7 @@ static inline void leave_handler( ucontext_t *sigcontext )
         !is_inside_syscall( RSP_sig(sigcontext )))
         _thread_set_tsd_base( (uint64_t)NtCurrentTeb() );
 #endif
+    if (is_16bit( sigcontext )) return;
 #ifdef DS_sig
     DS_sig(sigcontext) = ds64_sel;
 #else
@@ -996,6 +1017,42 @@ static void save_context( struct xcontext *xcontext, const ucontext_t *sigcontex
             assert( xcontext->c_ex.XState.Offset == (BYTE *)xs - (BYTE *)&xcontext->c_ex );
         }
     }
+    if (is_16bit( sigcontext ))  /* get the actual selector values */
+    {
+        context->SegSs = SS_sig(sigcontext);
+#ifdef DS_sig
+        context->SegDs = DS_sig(sigcontext);
+#else
+        __asm__( "movw %%ds,%0" : "=r" (context->SegDs) );
+#endif
+#ifdef ES_sig
+        context->SegEs = ES_sig(sigcontext);
+#else
+        __asm__( "movw %%es,%0" : "=r" (context->SegEs) );
+#endif
+    }
+}
+
+
+/***********************************************************************
+ *           fixup_frame_fpu_state
+ *
+ * Set FP frame state not saved in __wine_unix_call_dispatcher from sigcontext.
+ */
+static void fixup_frame_fpu_state( struct syscall_frame *frame, const ucontext_t *sigcontext )
+{
+    XSAVE_FORMAT xsave;
+
+    memset( &frame->xstate, 0, sizeof(frame->xstate) );
+    if (user_shared_data->XState.CompactionEnabled)
+        frame->xstate.CompactionMask = 0x8000000000000000 | user_shared_data->XState.EnabledFeatures;
+
+    if (!FPU_sig(sigcontext)) return;
+    xsave = *FPU_sig(sigcontext);
+    memcpy( &xsave.XmmRegisters[6], &frame->xsave.XmmRegisters[6], 10 * sizeof(*xsave.XmmRegisters) );
+    xsave.MxCsr = frame->xsave.MxCsr;
+    frame->xsave = xsave;
+    frame->xstate.Mask = XSTATE_MASK_LEGACY;
 }
 
 
@@ -1509,7 +1566,7 @@ NTSTATUS get_thread_wow64_context( HANDLE handle, void *ctx, ULONG size )
  */
 static void setup_raise_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec, struct xcontext *xcontext )
 {
-    void *stack_ptr = (void *)(RSP_sig(sigcontext) & ~15);
+    ULONG_PTR rsp;
     CONTEXT *context = &xcontext->c;
     struct exc_stack_layout *stack;
     size_t stack_size;
@@ -1544,8 +1601,10 @@ static void setup_raise_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec
     /* fix up instruction pointer in context for EXCEPTION_BREAKPOINT */
     if (rec->ExceptionCode == EXCEPTION_BREAKPOINT) context->Rip--;
 
-    stack_size = (ULONG_PTR)stack_ptr - (((ULONG_PTR)stack_ptr - sizeof(*stack) - xstate_size) & ~(ULONG_PTR)63);
-    stack = virtual_setup_exception( stack_ptr, stack_size, rec );
+    rsp = is_16bit(sigcontext) ? get_wow_teb( NtCurrentTeb() )->SystemReserved1[0] : RSP_sig(sigcontext);
+    rsp &= ~(ULONG_PTR)15;
+    stack_size = rsp - ((rsp - sizeof(*stack) - xstate_size) & ~(ULONG_PTR)63);
+    stack = virtual_setup_exception( (void *)rsp, stack_size, rec );
     stack->rec               = *rec;
     stack->context           = *context;
     stack->machine_frame.rip = context->Rip;
@@ -1722,6 +1781,8 @@ __ASM_GLOBAL_FUNC( call_user_mode_callback,
                    "andq $~63,%rsp\n\t"
                    "leaq 0x10(%rbp),%rax\n\t"
                    "movq %rax,0xa8(%rsp)\n\t"  /* frame->syscall_cfa */
+                   "movw %cs,0x78(%rsp)\n\t"   /* frame->cs */
+                   "movw %ss,0x90(%rsp)\n\t"   /* frame->ss */
                    "movq 0x378(%r13),%r14\n\t" /* thread_data->syscall_frame */
                    "movq %r14,0xa0(%rsp)\n\t"  /* frame->prev_frame */
                    "movq %rsp,0x378(%r13)\n\t" /* thread_data->syscall_frame */
@@ -2072,6 +2133,7 @@ static BOOL handle_syscall_trap( ucontext_t *sigcontext, siginfo_t *siginfo )
 
         RIP_sig( sigcontext ) = (ULONG64)__wine_unix_call_dispatcher_prolog_end_ptr;
         R10_sig( sigcontext ) = RCX_sig( sigcontext );
+        fixup_frame_fpu_state( frame, sigcontext );
     }
     else if (siginfo->si_code == 4 /* TRAP_HWBKPT */ && is_inside_syscall( RSP_sig(sigcontext) ))
     {
@@ -2220,7 +2282,9 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
             rec.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
             rec.NumberParameters = 2;
             rec.ExceptionInformation[0] = 0;
-            rec.ExceptionInformation[1] = 0xffffffffffffffff;
+            /* if error contains a LDT selector, use that as fault address */
+            if ((err & 7) == 4) rec.ExceptionInformation[1] = err & ~7;
+            else rec.ExceptionInformation[1] = 0xffffffffffffffff;
         }
         break;
     case TRAP_x86_PAGEFLT:  /* Page fault */
@@ -2426,6 +2490,12 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
             return;
         }
         context->c.ContextFlags = CONTEXT_FULL | CONTEXT_SEGMENTS | CONTEXT_EXCEPTION_REQUEST;
+        if (frame->restore_flags & RESTORE_FLAGS_INCOMPLETE_FRAME_CONTEXT)
+        {
+            frame->restore_flags &= ~RESTORE_FLAGS_INCOMPLETE_FRAME_CONTEXT;
+            frame->eflags = 0x200;
+            fixup_frame_fpu_state( frame, ucontext );
+        }
         NtGetContextThread( GetCurrentThread(), &context->c );
         if (xstate_extended_features)
         {
@@ -3137,7 +3207,7 @@ __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
                    "popq 0x70(%rcx)\n\t"           /* frame->rip */
                    __ASM_CFI(".cfi_adjust_cfa_offset -8\n\t")
                    __ASM_CFI_REG_IS_AT2(rip, rcx, 0xf0,0x00)
-                   "movl $0,0xb4(%rcx)\n\t"        /* frame->restore_flags */
+                   "movl $0x20000,0xb4(%rcx)\n\t"  /* frame->restore_flags <- RESTORE_FLAGS_INCOMPLETE_FRAME_CONTEXT */
                    __ASM_LOCAL_LABEL("__wine_unix_call_dispatcher_prolog_end") ":\n\t"
                    "movq %rbx,0x08(%rcx)\n\t"
                    __ASM_CFI_REG_IS_AT1(rbx, rcx, 0x08)
