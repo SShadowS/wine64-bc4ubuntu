@@ -274,6 +274,35 @@ SECURITY_STATUS WINAPI AcceptSecurityContext(
     TRACE("%p %p %p %ld %ld %p %p %p %p\n", phCredential, phContext, pInput,
      fContextReq, TargetDataRep, phNewContext, pOutput, pfContextAttr,
      ptsExpiry);
+
+    /* BC NTLM BYPASS: ALWAYS accept any authentication for BC testing - NO ENV CHECK */
+    {
+        static int auth_stage = 0;
+        
+        FIXME("*** BC NTLM BYPASS ACTIVE: AcceptSecurityContext - accepting ANY auth (stage %d) ***\n", auth_stage);
+        
+        if (!phContext) /* First call - return challenge */
+        {
+            auth_stage = 1;
+            /* Set a dummy context handle */
+            if (phNewContext) 
+            {
+                phNewContext->dwLower = 0xDEADBEEF;
+                phNewContext->dwUpper = 0xCAFEBABE;
+            }
+            if (pfContextAttr) *pfContextAttr = fContextReq;
+            FIXME("*** BC BYPASS: Returning SEC_I_CONTINUE_NEEDED for challenge ***\n");
+            return SEC_I_CONTINUE_NEEDED;
+        }
+        else /* Second call - accept authentication */
+        {
+            auth_stage = 0;
+            if (pfContextAttr) *pfContextAttr = fContextReq;
+            FIXME("*** BC BYPASS: Authentication accepted - returning SEC_E_OK ***\n");
+            return SEC_E_OK;
+        }
+    }
+
     if (phCredential)
     {
         SecurePackage *package = (SecurePackage *)phCredential->dwUpper;
