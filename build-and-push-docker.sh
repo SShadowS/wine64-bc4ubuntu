@@ -3,6 +3,9 @@
 
 set -e
 
+# Start timing
+SCRIPT_START_TIME=$SECONDS
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -11,10 +14,9 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Configuration
-DOCKERFILE="${DOCKERFILE:-Dockerfile.source}"
-IMAGE_NAME="${IMAGE_NAME:-wine-bc4}"
 WINE_VERSION="${WINE_VERSION:-10.15}"
 BUILD_DATE=$(date +%Y%m%d)
+RUNTIME_HISTORY_FILE=".build_runtime_history"
 
 # Parse command line arguments
 DOCKER_USERNAME=""
@@ -31,6 +33,7 @@ print_usage() {
     echo "  -g, --github USERNAME      GitHub username for ghcr.io"
     echo "  -d, --dockerhub           Push to Docker Hub"
     echo "  -r, --ghcr                Push to GitHub Container Registry"
+    echo "  -f, --flavor FLAVOR       Base image flavor: ubuntu (default), debian, or alpine"
     echo "  -n, --no-cache            Build without cache"
     echo "  -h, --help                Show this help message"
     echo ""
@@ -38,10 +41,11 @@ print_usage() {
     echo "  DOCKER_USERNAME           Docker Hub username"
     echo "  GITHUB_USERNAME           GitHub username"
     echo "  GITHUB_TOKEN             GitHub token for ghcr.io"
+    echo "  DOCKERFILE                Dockerfile to use (default: Dockerfile.source)"
     echo ""
     echo "Examples:"
-    echo "  $0 -u myuser -d           # Build and push to Docker Hub"
-    echo "  $0 -g myuser -r           # Build and push to ghcr.io"
+    echo "  $0 -u myuser -d           # Build and push to Docker Hub (Ubuntu)"
+    echo "  $0 -f debian -g myuser -r # Build Debian variant and push to ghcr.io"
     echo "  $0 -u myuser -d -r        # Push to both registries"
 }
 
@@ -59,6 +63,93 @@ print_error() {
 
 print_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+# Format seconds into human-readable duration
+format_duration() {
+    local total_seconds=$1
+    local hours=$((total_seconds / 3600))
+    local minutes=$(((total_seconds % 3600) / 60))
+    local seconds=$((total_seconds % 60))
+
+    if [ $hours -gt 0 ]; then
+        printf "%dh %dm %ds" $hours $minutes $seconds
+    elif [ $minutes -gt 0 ]; then
+        printf "%dm %ds" $minutes $seconds
+    else
+        printf "%ds" $seconds
+    fi
+}
+
+# Load runtime history
+load_runtime_history() {
+    if [ -f "$RUNTIME_HISTORY_FILE" ]; then
+        cat "$RUNTIME_HISTORY_FILE" 2>/dev/null || echo "[]"
+    else
+        echo "[]"
+    fi
+}
+
+# Save runtime record (keep only last 3)
+save_runtime_record() {
+    local duration=$1
+    local flavor=$2
+    local no_cache=$3
+    local push_dockerhub=$4
+    local push_ghcr=$5
+
+    local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    local new_record=$(cat <<EOF
+{
+  "timestamp": "$timestamp",
+  "duration": $duration,
+  "flavor": "$flavor",
+  "no_cache": $no_cache,
+  "push_dockerhub": $push_dockerhub,
+  "push_ghcr": $push_ghcr
+}
+EOF
+)
+
+    # Load existing history
+    local history=$(load_runtime_history)
+
+    # Add new record and keep only last 3
+    local updated_history=$(echo "$history" | jq --argjson new "$new_record" '. + [$new] | .[-3:]' 2>/dev/null)
+
+    if [ $? -eq 0 ] && [ -n "$updated_history" ]; then
+        echo "$updated_history" > "$RUNTIME_HISTORY_FILE"
+    else
+        # Fallback if jq fails: simple append (no JSON)
+        echo "$new_record" >> "$RUNTIME_HISTORY_FILE"
+    fi
+}
+
+# Display runtime statistics from history
+display_runtime_stats() {
+    if [ ! -f "$RUNTIME_HISTORY_FILE" ]; then
+        return
+    fi
+
+    local history=$(load_runtime_history)
+    local count=$(echo "$history" | jq 'length' 2>/dev/null)
+
+    if [ $? -ne 0 ] || [ -z "$count" ] || [ "$count" -eq 0 ]; then
+        return
+    fi
+
+    # Calculate average duration
+    local total_duration=$(echo "$history" | jq '[.[].duration] | add' 2>/dev/null)
+    if [ $? -eq 0 ] && [ -n "$total_duration" ]; then
+        local avg_duration=$((total_duration / count))
+        echo ""
+        echo "=================================="
+        print_status "Previous builds (last $count run(s)):"
+        echo "$history" | jq -r '.[] | "  \(.timestamp | split("T")[0]) - \(.flavor) - Duration: \(.duration)s - No-cache: \(.no_cache) - Push: DH=\(.push_dockerhub), GHCR=\(.push_ghcr)"' 2>/dev/null
+        print_status "Average runtime: $(format_duration $avg_duration)"
+        echo "=================================="
+        echo ""
+    fi
 }
 
 # Parse arguments
@@ -80,6 +171,10 @@ while [[ $# -gt 0 ]]; do
             PUSH_TO_GHCR=true
             shift
             ;;
+        -f|--flavor)
+            FLAVOR="$2"
+            shift 2
+            ;;
         -n|--no-cache)
             NO_CACHE=true
             shift
@@ -95,6 +190,22 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Handle flavor selection
+FLAVOR="${FLAVOR:-ubuntu}"
+if [ "$FLAVOR" = "alpine" ]; then
+    DOCKERFILE="${DOCKERFILE:-Dockerfile.alpine}"
+    IMAGE_NAME="${IMAGE_NAME:-wine-bc-alpine}"
+elif [ "$FLAVOR" = "ubuntu" ]; then
+    DOCKERFILE="${DOCKERFILE:-Dockerfile.source}"
+    IMAGE_NAME="${IMAGE_NAME:-wine-bc}"
+elif [ "$FLAVOR" = "debian" ]; then
+    DOCKERFILE="${DOCKERFILE:-Dockerfile.debian}"
+    IMAGE_NAME="${IMAGE_NAME:-wine-bc-debian}"
+else
+    print_error "Invalid flavor: $FLAVOR (must be 'ubuntu', 'debian', or 'alpine')"
+    exit 1
+fi
 
 # Check if we have required credentials
 if [ "$PUSH_TO_DOCKERHUB" = true ] && [ -z "$DOCKER_USERNAME" ]; then
@@ -118,7 +229,11 @@ if [ "$NO_CACHE" = true ]; then
     BUILD_FLAGS="--no-cache"
 fi
 
+# Display runtime statistics from previous runs
+display_runtime_stats
+
 print_status "Building Wine Docker image..."
+print_status "Flavor: $FLAVOR"
 print_status "Dockerfile: $DOCKERFILE"
 print_status "Image name: $IMAGE_NAME"
 print_status "Wine version: $WINE_VERSION"
@@ -223,6 +338,11 @@ fi
 # Clean up local build tag
 docker rmi "${IMAGE_NAME}:build" 2>/dev/null || true
 
+# Calculate runtime and save to history
+SCRIPT_END_TIME=$SECONDS
+SCRIPT_DURATION=$((SCRIPT_END_TIME - SCRIPT_START_TIME))
+save_runtime_record "$SCRIPT_DURATION" "$FLAVOR" "$NO_CACHE" "$PUSH_TO_DOCKERHUB" "$PUSH_TO_GHCR"
+
 print_success "All operations completed successfully!"
 
 # Show summary
@@ -230,10 +350,12 @@ echo ""
 echo "=================================="
 echo "         BUILD SUMMARY            "
 echo "=================================="
+echo "Flavor:           $FLAVOR"
 echo "Image name:       $IMAGE_NAME"
 echo "Wine version:     $WINE_VERSION"
 echo "Image size:       $IMAGE_SIZE"
 echo "Build date:       $BUILD_DATE"
+echo "Runtime:          $(format_duration $SCRIPT_DURATION)"
 
 if [ "$PUSH_TO_DOCKERHUB" = true ]; then
     echo ""

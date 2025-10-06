@@ -664,6 +664,26 @@ static NTSTATUS get_pbkdf2_property( enum chain_mode mode, const WCHAR *prop, UC
     return STATUS_NOT_IMPLEMENTED;
 }
 
+static NTSTATUS get_sp800_108_property( enum chain_mode mode, const WCHAR *prop, UCHAR *buf, ULONG size, ULONG *ret_size )
+{
+    if (!wcscmp( prop, BCRYPT_BLOCK_LENGTH )) return STATUS_NOT_SUPPORTED;
+    if (!wcscmp( prop, BCRYPT_KEY_LENGTHS ))
+    {
+        BCRYPT_KEY_LENGTHS_STRUCT *key_lengths = (void *)buf;
+        *ret_size = sizeof(*key_lengths);
+        if (key_lengths && size < *ret_size) return STATUS_BUFFER_TOO_SMALL;
+        if (key_lengths)
+        {
+            key_lengths->dwMinLength = 8;
+            key_lengths->dwMaxLength = 16384;
+            key_lengths->dwIncrement = 8;
+        }
+        return STATUS_SUCCESS;
+    }
+    FIXME( "unsupported property %s\n", debugstr_w(prop) );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
 static NTSTATUS get_alg_property( const struct algorithm *alg, const WCHAR *prop, UCHAR *buf, ULONG size,
                                   ULONG *ret_size )
 {
@@ -694,9 +714,7 @@ static NTSTATUS get_alg_property( const struct algorithm *alg, const WCHAR *prop
 	return get_pbkdf2_property( alg->mode, prop, buf, size, ret_size );
 
     case ALG_ID_SP800_108_CTR_HMAC:
-        /* Use PBKDF2 properties for now as a stub implementation */
-        FIXME( "SP800-108 CTR HMAC algorithm not fully implemented, using PBKDF2 properties as stub\n" );
-        return get_pbkdf2_property( alg->mode, prop, buf, size, ret_size );
+        return get_sp800_108_property( alg->mode, prop, buf, size, ret_size );
 
     default:
         break;
@@ -2598,6 +2616,83 @@ static NTSTATUS derive_key_pbkdf2( struct algorithm *alg, UCHAR *pwd, ULONG pwd_
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS derive_key_sp800_108_ctr_hmac( struct algorithm *alg, UCHAR *key, ULONG key_len,
+                                                UCHAR *label, ULONG label_len, UCHAR *context, ULONG context_len,
+                                                UCHAR *output, ULONG output_len )
+{
+    struct hash *hash;
+    ULONG hash_len, block_count, i;
+    UCHAR counter_be[4], length_be[4];
+    UCHAR separator = 0x00;
+    ULONG output_bits;
+    NTSTATUS status;
+
+    hash_len = builtin_algorithms[alg->id].hash_length;
+    if (output_len == 0 || output_len > ((ULONGLONG)1 << 29)) return STATUS_INVALID_PARAMETER;
+
+    /* Calculate number of iterations needed */
+    block_count = (output_len + hash_len - 1) / hash_len;
+
+    /* Output length in bits, big-endian */
+    output_bits = output_len * 8;
+    length_be[0] = (output_bits >> 24) & 0xff;
+    length_be[1] = (output_bits >> 16) & 0xff;
+    length_be[2] = (output_bits >> 8) & 0xff;
+    length_be[3] = output_bits & 0xff;
+
+    /* Create HMAC hash object with key */
+    if ((status = hash_create( alg, key, key_len, BCRYPT_HASH_REUSABLE_FLAG, &hash ))) return status;
+
+    /* Generate output blocks using counter mode */
+    for (i = 1; i <= block_count; i++)
+    {
+        UCHAR block[MAX_HASH_OUTPUT_BYTES];
+        ULONG copy_len;
+
+        /* Counter in big-endian format */
+        counter_be[0] = (i >> 24) & 0xff;
+        counter_be[1] = (i >> 16) & 0xff;
+        counter_be[2] = (i >> 8) & 0xff;
+        counter_be[3] = i & 0xff;
+
+        /* Build input: [i]_2 || Label || 0x00 || Context || [L]_2 */
+        if (hash->desc->process( &hash->inner, counter_be, 4 ))
+        {
+            hash_destroy( hash );
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (label_len && hash->desc->process( &hash->inner, label, label_len ))
+        {
+            hash_destroy( hash );
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (hash->desc->process( &hash->inner, &separator, 1 ))
+        {
+            hash_destroy( hash );
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (context_len && hash->desc->process( &hash->inner, context, context_len ))
+        {
+            hash_destroy( hash );
+            return STATUS_INVALID_PARAMETER;
+        }
+        if (hash->desc->process( &hash->inner, length_be, 4 ))
+        {
+            hash_destroy( hash );
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        hash_finalize( hash, block );
+
+        /* Copy to output (handle partial block on last iteration) */
+        copy_len = (i == block_count) ? (output_len - (i - 1) * hash_len) : hash_len;
+        memcpy( output + (i - 1) * hash_len, block, copy_len );
+    }
+
+    hash_destroy( hash );
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS WINAPI BCryptDeriveKeyPBKDF2( BCRYPT_ALG_HANDLE handle, UCHAR *pwd, ULONG pwd_len, UCHAR *salt, ULONG salt_len,
                                        ULONGLONG iterations, UCHAR *dk, ULONG dk_len, ULONG flags )
 {
@@ -2781,24 +2876,18 @@ NTSTATUS WINAPI BCryptKeyDerivation( BCRYPT_KEY_HANDLE handle, BCryptBufferDesc 
     struct key *key = get_key_object( handle );
     struct algorithm *alg = NULL;
     ULONGLONG iter_count = 10000;
-    ULONG salt_size = 0;
-    UCHAR *salt = NULL;
+    ULONG salt_size = 0, label_size = 0, context_size = 0;
+    UCHAR *salt = NULL, *label = NULL, *context = NULL;
     NTSTATUS status;
     ULONG i;
 
     TRACE( "%p, %p, %p, %lu, %p, %#lx\n", key, desc, output, output_size, ret_len, flags );
 
     if (!key || !desc || !ret_len) return STATUS_INVALID_PARAMETER;
-    if (key->alg_id != ALG_ID_PBKDF2)
+    if (key->alg_id != ALG_ID_PBKDF2 && key->alg_id != ALG_ID_SP800_108_CTR_HMAC)
     {
         FIXME( "unsupported key %d\n", key->alg_id );
         return STATUS_NOT_IMPLEMENTED;
-    }
-    
-    if (key->alg_id == ALG_ID_SP800_108_CTR_HMAC)
-    {
-        FIXME( "SP800-108 CTR HMAC key derivation not fully implemented, using PBKDF2 as fallback\n" );
-        /* Continue with PBKDF2 logic as a stub for now */
     }
 
     for (i = 0; i < desc->cBuffers; i++)
@@ -2817,14 +2906,14 @@ NTSTATUS WINAPI BCryptKeyDerivation( BCRYPT_KEY_HANDLE handle, BCryptBufferDesc 
             iter_count = *(ULONGLONG *)desc->pBuffers[i].pvBuffer;
             break;
         case KDF_LABEL:
-            /* SP800-108 KDF label parameter - for now just note it */
-            TRACE( "SP800-108 KDF label provided, size %lu\n", desc->pBuffers[i].cbBuffer );
-            /* In a full implementation, this would be used as input to the KDF */
+            label = desc->pBuffers[i].pvBuffer;
+            label_size = desc->pBuffers[i].cbBuffer;
+            TRACE( "SP800-108 KDF label provided, size %lu\n", label_size );
             break;
         case KDF_CONTEXT:
-            /* SP800-108 KDF context parameter - for now just note it */
-            TRACE( "SP800-108 KDF context provided, size %lu\n", desc->pBuffers[i].cbBuffer );
-            /* In a full implementation, this would be used as input to the KDF */
+            context = desc->pBuffers[i].pvBuffer;
+            context_size = desc->pBuffers[i].cbBuffer;
+            TRACE( "SP800-108 KDF context provided, size %lu\n", context_size );
             break;
         default:
             FIXME( "buffer type %lu not supported\n", desc->pBuffers[i].BufferType );
@@ -2832,8 +2921,23 @@ NTSTATUS WINAPI BCryptKeyDerivation( BCRYPT_KEY_HANDLE handle, BCryptBufferDesc 
         }
     }
 
-    status = derive_key_pbkdf2( alg, key->u.s.secret, key->u.s.secret_len,
-            salt, salt_size, iter_count, output, output_size );
+    if (key->alg_id == ALG_ID_SP800_108_CTR_HMAC)
+    {
+        if (!alg)
+        {
+            FIXME( "SP800-108 CTR HMAC requires hash algorithm to be specified\n" );
+            return STATUS_INVALID_PARAMETER;
+        }
+        status = derive_key_sp800_108_ctr_hmac( alg, key->u.s.secret, key->u.s.secret_len,
+                                                 label, label_size, context, context_size,
+                                                 output, output_size );
+    }
+    else
+    {
+        status = derive_key_pbkdf2( alg, key->u.s.secret, key->u.s.secret_len,
+                                     salt, salt_size, iter_count, output, output_size );
+    }
+
     if (!status) *ret_len = output_size;
     return status;
 }
