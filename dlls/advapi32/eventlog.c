@@ -38,6 +38,19 @@
 WINE_DEFAULT_DEBUG_CHANNEL(advapi);
 WINE_DECLARE_DEBUG_CHANNEL(eventlog);
 
+/* BC event context for tracking Business Central service events */
+struct bc_event_ctx {
+    LONG  refcount;  /* Thread-safe reference counting */
+    BOOL  is_bc;     /* BC service flag */
+    DWORD magic;     /* Validation magic (0x42434556 = 'BCEV') */
+};
+
+#define BC_EVENT_MAGIC 0x42434556
+
+/* Shared singleton context for non-BC services (zero overhead fast path) */
+static struct bc_event_ctx non_bc_dummy_ctx = { 1, FALSE, BC_EVENT_MAGIC };
+static HANDLE non_bc_dummy_handle = &non_bc_dummy_ctx;
+
 /******************************************************************************
  * BackupEventLogA [ADVAPI32.@]
  *
@@ -183,7 +196,7 @@ ULONG WINAPI FlushTraceW ( TRACEHANDLE hSession, LPCWSTR SessionName, PEVENT_TRA
 
 /******************************************************************************
  * DeregisterEventSource [ADVAPI32.@]
- * 
+ *
  * Closes a write handle to an event log
  *
  * PARAMS
@@ -195,7 +208,38 @@ ULONG WINAPI FlushTraceW ( TRACEHANDLE hSession, LPCWSTR SessionName, PEVENT_TRA
  */
 BOOL WINAPI DeregisterEventSource( HANDLE hEventLog )
 {
-    FIXME("(%p) stub\n", hEventLog);
+    struct bc_event_ctx *ctx = (struct bc_event_ctx *)hEventLog;
+
+    TRACE("(%p)\n", hEventLog);
+
+    if (!ctx)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    /* Fast path: shared dummy handle for non-BC services */
+    if (ctx == &non_bc_dummy_ctx)
+    {
+        FIXME("(%p) stub\n", hEventLog);
+        return TRUE;
+    }
+
+    /* Validate magic and handle BC context */
+    if (ctx->magic != BC_EVENT_MAGIC)
+    {
+        WARN("Invalid handle magic: %p\n", hEventLog);
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    /* Decrement refcount and free if zero */
+    if (InterlockedDecrement(&ctx->refcount) == 0)
+    {
+        TRACE_(eventlog)("BC service deregistered: %p\n", ctx);
+        free(ctx);
+    }
+
     return TRUE;
 }
 
@@ -530,6 +574,40 @@ BOOL WINAPI ReadEventLogW( HANDLE hEventLog, DWORD dwReadFlags, DWORD dwRecordOf
 }
 
 /******************************************************************************
+ * is_bc_service
+ *
+ * Detect if source name matches Business Central service patterns.
+ */
+static BOOL is_bc_service( LPCWSTR lpSourceName )
+{
+    static const WCHAR bc_prefix_nav[] = {
+        'M','i','c','r','o','s','o','f','t','D','y','n','a','m','i','c','s',
+        'N','a','v','S','e','r','v','e','r','$',0
+    };
+    static const WCHAR bc_prefix_365[] = {
+        'M','i','c','r','o','s','o','f','t','D','y','n','a','m','i','c','s',' ',
+        '3','6','5',' ','B','u','s','i','n','e','s','s',' ',
+        'C','e','n','t','r','a','l',' ','S','e','r','v','e','r','$',0
+    };
+    static const WCHAR bc_prefix_nav_alt[] = {
+        'M','i','c','r','o','s','o','f','t',' ','D','y','n','a','m','i','c','s',' ',
+        'N','A','V',' ','S','e','r','v','e','r','$',0
+    };
+
+    if (!lpSourceName) return FALSE;
+
+    /* Case-insensitive prefix matching for BC service names */
+    if (!wcsnicmp(lpSourceName, bc_prefix_nav, wcslen(bc_prefix_nav)))
+        return TRUE;
+    if (!wcsnicmp(lpSourceName, bc_prefix_365, wcslen(bc_prefix_365)))
+        return TRUE;
+    if (!wcsnicmp(lpSourceName, bc_prefix_nav_alt, wcslen(bc_prefix_nav_alt)))
+        return TRUE;
+
+    return FALSE;
+}
+
+/******************************************************************************
  * RegisterEventSourceA [ADVAPI32.@]
  *
  * Returns a registered handle to an event log.
@@ -566,8 +644,32 @@ HANDLE WINAPI RegisterEventSourceA( LPCSTR lpUNCServerName, LPCSTR lpSourceName 
  */
 HANDLE WINAPI RegisterEventSourceW( LPCWSTR lpUNCServerName, LPCWSTR lpSourceName )
 {
-    FIXME("(%s,%s): stub\n", debugstr_w(lpUNCServerName), debugstr_w(lpSourceName));
-    return (HANDLE)0xcafe4242;
+    struct bc_event_ctx *ctx;
+
+    TRACE("(%s,%s)\n", debugstr_w(lpUNCServerName), debugstr_w(lpSourceName));
+
+    /* Fast path: non-BC services get shared dummy handle */
+    if (!is_bc_service(lpSourceName))
+    {
+        FIXME("(%s,%s): stub\n", debugstr_w(lpUNCServerName), debugstr_w(lpSourceName));
+        return non_bc_dummy_handle;
+    }
+
+    /* BC service detected - allocate refcounted context */
+    ctx = malloc(sizeof(*ctx));
+    if (!ctx)
+    {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return NULL;
+    }
+
+    ctx->refcount = 1;
+    ctx->is_bc = TRUE;
+    ctx->magic = BC_EVENT_MAGIC;
+
+    TRACE_(eventlog)("BC service registered: %s (handle=%p)\n", debugstr_w(lpSourceName), ctx);
+
+    return (HANDLE)ctx;
 }
 
 /******************************************************************************
@@ -631,8 +733,34 @@ BOOL WINAPI ReportEventA ( HANDLE hEventLog, WORD wType, WORD wCategory, DWORD d
 BOOL WINAPI ReportEventW( HANDLE hEventLog, WORD wType, WORD wCategory, DWORD dwEventID,
     PSID lpUserSid, WORD wNumStrings, DWORD dwDataSize, LPCWSTR *lpStrings, LPVOID lpRawData )
 {
+    struct bc_event_ctx *ctx = (struct bc_event_ctx *)hEventLog;
     UINT i;
 
+    /* Check if this is a BC service handle */
+    if (ctx && ctx != &non_bc_dummy_ctx && ctx->magic == BC_EVENT_MAGIC && ctx->is_bc)
+    {
+        /* BC service - output detailed event information */
+        TRACE_(eventlog)("[BC Event 0x%08lx] Type=0x%04x Category=0x%04x\n",
+                         dwEventID, wType, wCategory);
+
+        if (wNumStrings > 0 && lpStrings)
+        {
+            for (i = 0; i < wNumStrings; i++)
+            {
+                if (lpStrings[i])
+                    TRACE_(eventlog)("  String[%u]: %s\n", i, debugstr_w(lpStrings[i]));
+            }
+        }
+
+        if (dwDataSize > 0 && lpRawData)
+        {
+            TRACE_(eventlog)("  Data: %lu bytes\n", dwDataSize);
+        }
+
+        return TRUE;
+    }
+
+    /* Non-BC service - use original implementation */
     FIXME("(%p,0x%04x,0x%04x,0x%08lx,%p,0x%04x,0x%08lx,%p,%p): stub\n", hEventLog,
           wType, wCategory, dwEventID, lpUserSid, wNumStrings, dwDataSize, lpStrings, lpRawData);
 

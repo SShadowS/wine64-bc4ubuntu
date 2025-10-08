@@ -497,7 +497,51 @@ BOOL WINAPI HttpIsFeatureSupported(ULONG feature_id)
             /* Extended delegation for kernel-mode drivers */
             TRACE("HttpFeatureDelegateEx not supported\n");
             return FALSE;
-            
+
+        case 4: /* HttpFeatureHttp3 */
+            TRACE("HttpFeatureHttp3 not supported\n");
+            return FALSE;
+
+        case 5: /* HttpFeatureTlsSessionTickets */
+            TRACE("HttpFeatureTlsSessionTickets not supported\n");
+            return FALSE;
+
+        case 6: /* HttpFeatureDisableTlsSessionId */
+            TRACE("HttpFeatureDisableTlsSessionId not supported\n");
+            return FALSE;
+
+        case 7: /* HttpFeatureTlsDualCerts */
+            TRACE("HttpFeatureTlsDualCerts not supported\n");
+            return FALSE;
+
+        case 8: /* HttpFeatureAutomaticChunkedEncoding */
+            TRACE("HttpFeatureAutomaticChunkedEncoding not supported\n");
+            return FALSE;
+
+        case 9: /* HttpFeatureDedicatedReqQueueDelegationType */
+            TRACE("HttpFeatureDedicatedReqQueueDelegationType not supported\n");
+            return FALSE;
+
+        case 10: /* HttpFeatureFastForwardResponse */
+            TRACE("HttpFeatureFastForwardResponse not supported\n");
+            return FALSE;
+
+        case 11: /* HttpFeatureCacheTlsClientHello */
+            TRACE("HttpFeatureCacheTlsClientHello not supported\n");
+            return FALSE;
+
+        case 12: /* HttpFeatureIdleConnectionTimeoutRequestProperty */
+            TRACE("HttpFeatureIdleConnectionTimeoutRequestProperty not supported\n");
+            return FALSE;
+
+        case 13: /* HttpFeatureDisableAiaFlag */
+            TRACE("HttpFeatureDisableAiaFlag not supported\n");
+            return FALSE;
+
+        case 15: /* HttpFeatureDscp */
+            TRACE("HttpFeatureDscp not supported\n");
+            return FALSE;
+
         default:
             WARN("Unknown feature_id %lu\n", feature_id);
             return FALSE;
@@ -1080,7 +1124,6 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
     };
 
     struct http_response *buffer;
-    OVERLAPPED dummy_ovl = {};
     ULONG ret = ERROR_SUCCESS;
     int len, body_len = 0;
     int status_len, header_len, content_len_size, header_size, written;
@@ -1742,28 +1785,61 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
     }
     TRACE(" [END]\n");
 
+    /* Handle synchronous vs asynchronous I/O correctly to avoid IOCP completion bugs.
+     * When ovl==NULL (synchronous), we must pass NULL to DeviceIoControl to prevent
+     * the kernel from posting completions to the I/O completion port.
+     * Fabricating a stack OVERLAPPED causes crashes because the completion contains
+     * an invalid pointer after the function returns. */
     if (!ovl)
-        ovl = &dummy_ovl;
-
     {
+        /* Synchronous call - no IOCP completion will be posted */
+        DWORD bytes_transferred = 0;
+        if (!DeviceIoControl(queue, IOCTL_HTTP_SEND_RESPONSE, buffer,
+                (DWORD)(offsetof(struct http_response, buffer) + len), NULL, 0, &bytes_transferred, NULL))
+        {
+            ret = GetLastError();
+            TRACE("HttpSendHttpResponse: Synchronous DeviceIoControl failed, GetLastError() = %u\n", ret);
+        }
+        else
+        {
+            if (ret_size) *ret_size = len;
+            TRACE("HttpSendHttpResponse: Synchronous DeviceIoControl succeeded, returning ERROR_SUCCESS (0)\n");
+        }
+        /* Safe to free buffer immediately for synchronous operations */
+        free(buffer);
+    }
+    else
+    {
+        /* Asynchronous call - caller owns OVERLAPPED lifetime, IOCP completion expected */
         DWORD bytes_transferred = 0;
         if (!DeviceIoControl(queue, IOCTL_HTTP_SEND_RESPONSE, buffer,
                 (DWORD)(offsetof(struct http_response, buffer) + len), NULL, 0, &bytes_transferred, ovl))
         {
             ret = GetLastError();
-            TRACE("HttpSendHttpResponse: DeviceIoControl failed, GetLastError() = %u\n", ret);
-            if (ret == ERROR_IO_PENDING && ovl != &dummy_ovl)
+            TRACE("HttpSendHttpResponse: Async DeviceIoControl failed, GetLastError() = %u\n", ret);
+            if (ret == ERROR_IO_PENDING)
+            {
+                /* Operation is pending - buffer must stay alive until completion */
                 ovl->InternalHigh = len;
+                TRACE("HttpSendHttpResponse: Async operation pending, buffer ownership transferred\n");
+                /* Do NOT free buffer here - it will be freed by the completion handler or caller */
+            }
+            else
+            {
+                /* Async call failed immediately - safe to free buffer */
+                free(buffer);
+            }
         }
         else
         {
-            if (ovl != &dummy_ovl) ovl->InternalHigh = len;
+            /* Async operation completed synchronously - IOCP completion still posted */
+            ovl->InternalHigh = len;
             if (ret_size) *ret_size = len;
-            TRACE("HttpSendHttpResponse: DeviceIoControl succeeded, returning ERROR_SUCCESS (0)\n");
+            TRACE("HttpSendHttpResponse: Async DeviceIoControl completed synchronously\n");
+            /* Buffer can be freed since operation completed, but IOCP completion was still queued */
+            free(buffer);
         }
     }
-
-    free(buffer);
 
     /* If we temporarily extended UnknownHeaders (added Sec-WebSocket-Accept), restore and free
        For PoC simplicity: if we detect our header at the end, assume array was ours and reset. */
@@ -1841,7 +1917,6 @@ ULONG WINAPI HttpSendResponseEntityBody(HANDLE queue, HTTP_REQUEST_ID id,
        HTTP_LOG_DATA *log_data)
 {
     struct http_response *buffer;
-    OVERLAPPED dummy_ovl = {};
     ULONG ret = NO_ERROR;
     int len = 0;
     char *p;
@@ -1929,50 +2004,64 @@ ULONG WINAPI HttpSendResponseEntityBody(HANDLE queue, HTTP_REQUEST_ID id,
         p += chunk->FromMemory.BufferLength;
     }
 
+    /* Handle synchronous vs asynchronous I/O correctly to avoid IOCP completion bugs.
+     * When ovl==NULL (synchronous), we must pass NULL to DeviceIoControl to prevent
+     * the kernel from posting completions to the I/O completion port.
+     * Fabricating a stack OVERLAPPED causes crashes because the completion contains
+     * an invalid pointer after the function returns. */
     if (!ovl)
     {
-        ovl = &dummy_ovl;
-        if (ret_size)
-            *ret_size = len;
-    }
-
-    DWORD bytes_transferred = 0;
-    if (!DeviceIoControl(queue, IOCTL_HTTP_SEND_RESPONSE, buffer,
-            (DWORD)(offsetof(struct http_response, buffer) + len), NULL, 0, &bytes_transferred, ovl))
-    {
-        ret = GetLastError();
-        /* For async operations, bytes will be reported through the OVERLAPPED structure */
-        if (ret == ERROR_IO_PENDING && ovl != &dummy_ovl)
+        /* Synchronous call - no IOCP completion will be posted */
+        DWORD bytes_transferred = 0;
+        if (!DeviceIoControl(queue, IOCTL_HTTP_SEND_RESPONSE, buffer,
+                (DWORD)(offsetof(struct http_response, buffer) + len), NULL, 0, &bytes_transferred, NULL))
         {
-            /* Async operation - store expected bytes in OVERLAPPED's InternalHigh */
-            /* This will be used when GetOverlappedResult is called */
-            ovl->InternalHigh = len;
-            TRACE("Async entity body send initiated, %u bytes queued for transmission\n", len);
-
-            /* When the async operation completes, the caller should use GetOverlappedResult
-               to retrieve the actual bytes transferred */
+            ret = GetLastError();
+            TRACE("HttpSendResponseEntityBody: Synchronous DeviceIoControl failed, GetLastError() = %u\n", ret);
         }
+        else
+        {
+            if (ret_size) *ret_size = len;
+            TRACE("HttpSendResponseEntityBody: Synchronous send completed, %u bytes sent\n", len);
+        }
+        /* Safe to free buffer immediately for synchronous operations */
+        free(buffer);
     }
     else
     {
-        /* Synchronous completion */
-        if (ret_size)
+        /* Asynchronous call - caller owns OVERLAPPED lifetime, IOCP completion expected */
+        DWORD bytes_transferred = 0;
+        if (!DeviceIoControl(queue, IOCTL_HTTP_SEND_RESPONSE, buffer,
+                (DWORD)(offsetof(struct http_response, buffer) + len), NULL, 0, &bytes_transferred, ovl))
         {
-            /* For entity body sends, we sent 'len' bytes of payload */
-            *ret_size = len;
-            TRACE("Sync entity body send completed, %u bytes sent\n", len);
+            ret = GetLastError();
+            TRACE("HttpSendResponseEntityBody: Async DeviceIoControl failed, GetLastError() = %u\n", ret);
+            if (ret == ERROR_IO_PENDING)
+            {
+                /* Operation is pending - buffer must stay alive until completion */
+                ovl->InternalHigh = len;
+                TRACE("HttpSendResponseEntityBody: Async operation pending, %u bytes queued, buffer ownership transferred\n", len);
+                /* Do NOT free buffer here - it will be freed by the completion handler or caller */
+            }
+            else
+            {
+                /* Async call failed immediately - safe to free buffer */
+                free(buffer);
+            }
         }
-        /* Also set bytes in OVERLAPPED for async callers */
-        if (ovl != &dummy_ovl)
+        else
         {
+            /* Async operation completed synchronously - IOCP completion still posted */
             ovl->InternalHigh = len;
+            if (ret_size) *ret_size = len;
+            TRACE("HttpSendResponseEntityBody: Async send completed synchronously, %u bytes sent\n", len);
+            /* Buffer can be freed since operation completed, but IOCP completion was still queued */
+            free(buffer);
         }
     }
 
-    free(buffer);
-
     /* === ASYNC I/O COMPLETION DIAGNOSTIC === */
-    if (ovl != &dummy_ovl)
+    if (ovl)
     {
         TRACE("=== HttpSendResponseEntityBody ASYNC RESULT: ret=%lu, InternalHigh=%zu ===\n",
               ret, (size_t)ovl->InternalHigh);
