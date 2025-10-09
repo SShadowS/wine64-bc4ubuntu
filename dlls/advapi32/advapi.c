@@ -261,8 +261,32 @@ done:
 BOOL WINAPI LogonUserW( LPCWSTR lpszUsername, LPCWSTR lpszDomain, LPCWSTR lpszPassword,
                         DWORD dwLogonType, DWORD dwLogonProvider, PHANDLE phToken )
 {
-    FIXME("%s %s %p 0x%08lx 0x%08lx %p - stub\n", debugstr_w(lpszUsername),
+    HANDLE process_token;
+    HANDLE impersonation_token;
+
+    TRACE("%s %s %p 0x%08lx 0x%08lx %p\n", debugstr_w(lpszUsername),
           debugstr_w(lpszDomain), lpszPassword, dwLogonType, dwLogonProvider, phToken);
+
+    /* BC Management API Fix: Return impersonation token from current process token */
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE, &process_token))
+    {
+        /* Duplicate as impersonation token so CheckTokenMembership works */
+        if (DuplicateTokenEx(process_token, TOKEN_ALL_ACCESS, NULL,
+                            SecurityImpersonation, TokenImpersonation, &impersonation_token))
+        {
+            CloseHandle(process_token);
+            FIXME("BC AUTH: LogonUserW returning impersonation token for user %s\n",
+                  debugstr_w(lpszUsername));
+            *phToken = impersonation_token;
+            return TRUE;
+        }
+        CloseHandle(process_token);
+    }
+
+    /* Fallback to stub behavior if token creation fails */
+    FIXME("%s %s %p 0x%08lx 0x%08lx %p - stub (token creation failed)\n",
+          debugstr_w(lpszUsername), debugstr_w(lpszDomain), lpszPassword,
+          dwLogonType, dwLogonProvider, phToken);
 
     *phToken = (HANDLE *)0xdeadbeef;
     return TRUE;

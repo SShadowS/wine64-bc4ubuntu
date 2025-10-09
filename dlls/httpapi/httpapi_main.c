@@ -1778,12 +1778,20 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
     
     /* Always trace the last few bytes of the buffer for debugging */
     TRACE("Response buffer length: %d, actual written: %ld\n", len, (long)(p - buffer->buffer));
-    TRACE("Last 32 bytes of buffer:\n");
-    for (i = (len > 32 ? len - 32 : 0); i < len; i++)
+    /* Only trace last 32 bytes for small responses to avoid debug buffer overflow */
+    if (len <= 8192)
     {
-        TRACE("%02x ", (unsigned char)buffer->buffer[i]);
+        TRACE("Last 32 bytes of buffer:\n");
+        for (i = (len > 32 ? len - 32 : 0); i < len; i++)
+        {
+            TRACE("%02x ", (unsigned char)buffer->buffer[i]);
+        }
+        TRACE(" [END]\n");
     }
-    TRACE(" [END]\n");
+    else
+    {
+        TRACE("Buffer too large (%d bytes), skipping hex dump\n", len);
+    }
 
     /* Handle synchronous vs asynchronous I/O correctly to avoid IOCP completion bugs.
      * When ovl==NULL (synchronous), we must pass NULL to DeviceIoControl to prevent
@@ -1802,7 +1810,7 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
         }
         else
         {
-            if (ret_size) *ret_size = len;
+            if (ret_size) *ret_size = body_len;
             TRACE("HttpSendHttpResponse: Synchronous DeviceIoControl succeeded, returning ERROR_SUCCESS (0)\n");
         }
         /* Safe to free buffer immediately for synchronous operations */
@@ -1820,7 +1828,7 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
             if (ret == ERROR_IO_PENDING)
             {
                 /* Operation is pending - buffer must stay alive until completion */
-                ovl->InternalHigh = len;
+                ovl->InternalHigh = body_len;
                 TRACE("HttpSendHttpResponse: Async operation pending, buffer ownership transferred\n");
                 /* Do NOT free buffer here - it will be freed by the completion handler or caller */
             }
@@ -1833,8 +1841,8 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
         else
         {
             /* Async operation completed synchronously - IOCP completion still posted */
-            ovl->InternalHigh = len;
-            if (ret_size) *ret_size = len;
+            ovl->InternalHigh = body_len;
+            if (ret_size) *ret_size = body_len;
             TRACE("HttpSendHttpResponse: Async DeviceIoControl completed synchronously\n");
             /* Buffer can be freed since operation completed, but IOCP completion was still queued */
             free(buffer);

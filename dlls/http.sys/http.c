@@ -20,6 +20,7 @@
 
 #include <assert.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "wine/http.h"
@@ -85,6 +86,13 @@ DECLARE_CRITICAL_SECTION(http_cs);
 
 static HANDLE request_thread, request_event;
 static BOOL thread_stop;
+
+/* Async send worker thread */
+static HANDLE send_worker_thread = NULL;
+static HANDLE send_work_event = NULL;
+static BOOL send_worker_stop = FALSE;
+static CRITICAL_SECTION send_worker_cs;
+static BOOL async_send_enabled = TRUE;  /* Async send enabled by default */
 
 static HTTP_REQUEST_ID req_id_counter;
 static HTTP_CONNECTION_ID conn_id_counter;
@@ -169,6 +177,10 @@ struct connection
     HTTP_REQUEST_ID req_id;
     HTTP_CONNECTION_ID conn_id;  /* Unique TCP connection identifier (persists across keep-alive) */
     HTTP_URL_CONTEXT context;
+
+    /* Async send tracking */
+    struct list pending_sends;      /* List of http_pending_send */
+    CRITICAL_SECTION send_cs;       /* Per-connection lock for sends */
 
     /* Response state tracking - mimics native Windows HTTP.sys behavior */
     enum conn_response_state response_state;  /* Current response lifecycle state */
@@ -324,6 +336,10 @@ static void accept_connection(SOCKET socket)
     InitializeCriticalSection(&conn->request_lock);
     conn->current_request = NULL;
 
+    /* Initialize async send infrastructure */
+    list_init(&conn->pending_sends);
+    InitializeCriticalSection(&conn->send_cs);
+
     /* Initialize response state tracking */
     conn->response_state = CONN_RESP_IDLE;
     conn->response_start_time = 0;
@@ -383,13 +399,23 @@ static void shutdown_connection(struct connection *conn)
     conn->shutdown = true;
 }
 
+/* Forward declarations for async send infrastructure */
+static void cleanup_pending_sends(struct connection *conn);
+static void start_send_worker(void);
+static NTSTATUS http_complete_send(struct request_queue *queue, struct connection *conn,
+                                     const struct http_response *response, IRP *irp,
+                                     DWORD bytes_sent, BOOL have_lock);
+
 static void close_connection(struct connection *conn)
 {
     LIST_ENTRY *entry;
-    
+
     if (!conn->shutdown)
         shutdown_connection(conn);
-    
+
+    /* Cancel and cleanup pending sends */
+    cleanup_pending_sends(conn);
+
     /* Complete any pending wait-for-disconnect IRPs */
     while ((entry = RemoveHeadList(&conn->wait_queue)) != &conn->wait_queue)
     {
@@ -3413,6 +3439,708 @@ static NTSTATUS http_receive_request(struct request_queue *queue, IRP *irp)
     return ret;
 }
 
+/* Helper function: Map Winsock errors to NTSTATUS */
+static NTSTATUS winsock_error_to_status(int wsa_error)
+{
+    switch (wsa_error)
+    {
+    case WSA_IO_PENDING:
+        return STATUS_PENDING;
+    case WSAECONNRESET:
+    case WSAECONNABORTED:
+        return STATUS_CONNECTION_RESET;
+    case WSAENETRESET:
+        return STATUS_CONNECTION_ABORTED;
+    case WSAESHUTDOWN:
+        return STATUS_PIPE_DISCONNECTED;
+    case WSAETIMEDOUT:
+        return STATUS_TIMEOUT;
+    case WSAENETDOWN:
+    case WSAENETUNREACH:
+    case WSAEHOSTDOWN:
+    case WSAEHOSTUNREACH:
+        return STATUS_HOST_UNREACHABLE;
+    case WSAENOBUFS:
+        return STATUS_NO_MEMORY;
+    case WSAEMSGSIZE:
+        return STATUS_BUFFER_OVERFLOW;
+    default:
+        WARN("Unmapped Winsock error %d, using STATUS_CONNECTION_RESET\n", wsa_error);
+        return STATUS_CONNECTION_RESET;
+    }
+}
+
+/* Helper function: Find pending send by request ID */
+static struct http_pending_send* find_pending_send(struct connection *conn, HTTP_REQUEST_ID id)
+{
+    struct http_pending_send *send;
+
+    EnterCriticalSection(&conn->send_cs);
+    LIST_FOR_EACH_ENTRY(send, &conn->pending_sends, struct http_pending_send, entry)
+    {
+        if (send->request_id == id)
+        {
+            LeaveCriticalSection(&conn->send_cs);
+            return send;
+        }
+    }
+    LeaveCriticalSection(&conn->send_cs);
+    return NULL;
+}
+
+/* Helper function: Free pending send structure */
+static void free_pending_send(struct http_pending_send *send)
+{
+    if (send->buffer_copy)
+        free(send->buffer_copy);
+    free(send);
+}
+
+/* Async send helper: sends data using WSASend and returns STATUS_PENDING for async ops */
+static NTSTATUS async_send_data(struct request_queue *queue, struct connection *conn,
+                                  const struct http_response *response,
+                                  const char *buf, int len, IRP *irp)
+{
+    struct http_pending_send *send = NULL;
+    DWORD flags = 0;
+    int ret;
+
+    TRACE("Async send: conn=%p, len=%d, request=%s\n",
+          conn, len, wine_dbgstr_longlong(response->id));
+
+    /* Try to start worker thread (lazy initialization) */
+    start_send_worker();
+
+    /* Allocate pending send structure */
+    send = calloc(1, sizeof(*send));
+    if (!send)
+        return STATUS_NO_MEMORY;
+
+    send->request_id = response->id;
+    send->irp = irp;
+    send->conn = conn;
+    send->queue = queue;
+    send->buffer_len = len;
+    send->cancelled = FALSE;
+
+    /* Copy response structure (needed for post-send processing) */
+    send->response = malloc(sizeof(*response));
+    if (!send->response)
+    {
+        free(send);
+        return STATUS_NO_MEMORY;
+    }
+    memcpy(send->response, response, sizeof(*response));
+
+    /* Copy buffer to heap (IRP buffer not valid after STATUS_PENDING) */
+    send->buffer_copy = malloc(len);
+    if (!send->buffer_copy)
+    {
+        free(send->response);
+        free(send);
+        return STATUS_NO_MEMORY;
+    }
+    memcpy(send->buffer_copy, buf, len);
+
+    /* Setup WSABUF with copied buffer */
+    send->wsabuf.buf = send->buffer_copy;
+    send->wsabuf.len = send->buffer_len;
+    memset(&send->overlapped, 0, sizeof(send->overlapped));
+
+    /* Create event for overlapped I/O (manual-reset for worker polling) */
+    if (async_send_enabled)
+    {
+        send->overlapped.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+        if (!send->overlapped.hEvent)
+        {
+            WARN("Failed to create overlapped event, falling back to sync\n");
+            free(send->buffer_copy);
+            free(send->response);
+            free(send);
+            return STATUS_NO_MEMORY;
+        }
+    }
+
+    /* Add to pending sends list BEFORE issuing I/O */
+    EnterCriticalSection(&conn->send_cs);
+    list_add_tail(&conn->pending_sends, &send->entry);
+    LeaveCriticalSection(&conn->send_cs);
+
+    /* Issue async WSASend (NO LOCK HELD) */
+    ret = WSASend(conn->socket, &send->wsabuf, 1, NULL, flags, &send->overlapped, NULL);
+
+    if (ret == 0)
+    {
+        /* Completed synchronously (small sends - fast path) */
+        DWORD bytes_sent;
+        if (WSAGetOverlappedResult(conn->socket, &send->overlapped, &bytes_sent, FALSE, &flags))
+        {
+            TRACE("Synchronous completion: %lu bytes\n", (unsigned long)bytes_sent);
+
+            EnterCriticalSection(&conn->send_cs);
+            list_remove(&send->entry);
+            LeaveCriticalSection(&conn->send_cs);
+
+            /* Call post-send completion */
+            http_complete_send(queue, conn, response, irp, bytes_sent, TRUE);
+
+            /* Free resources */
+            if (send->overlapped.hEvent)
+                CloseHandle(send->overlapped.hEvent);
+            free(send->response);
+            free_pending_send(send);
+
+            return STATUS_SUCCESS;
+        }
+    }
+
+    if (ret != 0 && WSAGetLastError() != WSA_IO_PENDING)
+    {
+        /* Error */
+        int error = WSAGetLastError();
+        WARN("WSASend failed: %d\n", error);
+
+        EnterCriticalSection(&conn->send_cs);
+        list_remove(&send->entry);
+        LeaveCriticalSection(&conn->send_cs);
+
+        if (send->overlapped.hEvent)
+            CloseHandle(send->overlapped.hEvent);
+        free(send->response);
+        free_pending_send(send);
+        return winsock_error_to_status(error);
+    }
+
+    /* Async operation started (WSA_IO_PENDING) */
+    TRACE("Started async send for request %s, IRP %p, async_enabled=%d\n",
+          wine_dbgstr_longlong(response->id), irp, async_send_enabled);
+
+    if (async_send_enabled)
+    {
+        /* Signal worker thread */
+        SetEvent(send_work_event);
+
+        /* Mark IRP as pending */
+        IoMarkIrpPending(irp);
+
+        return STATUS_PENDING;
+    }
+    else
+    {
+        /* Async disabled - fall back to blocking wait (Option 2 fallback) */
+        DWORD bytes_sent;
+        BOOL result = WSAGetOverlappedResult(conn->socket, &send->overlapped, &bytes_sent, TRUE, &flags);
+
+        EnterCriticalSection(&conn->send_cs);
+        list_remove(&send->entry);
+        LeaveCriticalSection(&conn->send_cs);
+
+        if (result)
+        {
+            TRACE("Blocking wait completed: %lu bytes\n", (unsigned long)bytes_sent);
+            http_complete_send(queue, conn, response, irp, bytes_sent, TRUE);
+            free(send->response);
+            free_pending_send(send);
+            return STATUS_SUCCESS;
+        }
+        else
+        {
+            int error = WSAGetLastError();
+            WARN("Blocking wait failed: %d\n", error);
+            free(send->response);
+            free_pending_send(send);
+            return winsock_error_to_status(error);
+        }
+    }
+}
+
+/* Cleanup pending sends on connection close */
+static void cleanup_pending_sends(struct connection *conn)
+{
+    struct http_pending_send *send, *send_next;
+    DWORD wait_time = 0;
+    const DWORD MAX_WAIT_MS = 5000;  /* 5 second timeout */
+
+    /* Cancel all pending sends */
+    EnterCriticalSection(&conn->send_cs);
+    LIST_FOR_EACH_ENTRY(send, &conn->pending_sends, struct http_pending_send, entry)
+    {
+        TRACE("Cancelling pending send for request %s\n", wine_dbgstr_longlong(send->request_id));
+        send->cancelled = TRUE;
+        CancelIoEx((HANDLE)conn->socket, &send->overlapped);
+    }
+    LeaveCriticalSection(&conn->send_cs);
+
+    /* Wait for all sends to complete or timeout */
+    while (wait_time < MAX_WAIT_MS)
+    {
+        BOOL all_done;
+
+        EnterCriticalSection(&conn->send_cs);
+        all_done = list_empty(&conn->pending_sends);
+        LeaveCriticalSection(&conn->send_cs);
+
+        if (all_done)
+            break;
+
+        Sleep(100);
+        wait_time += 100;
+    }
+
+    /* Force cleanup if timeout */
+    if (wait_time >= MAX_WAIT_MS)
+    {
+        WARN("Timeout waiting for pending sends, forcing cleanup\n");
+
+        EnterCriticalSection(&conn->send_cs);
+        LIST_FOR_EACH_ENTRY_SAFE(send, send_next, &conn->pending_sends, struct http_pending_send, entry)
+        {
+            WARN("Force-completing send IRP %p\n", send->irp);
+
+            list_remove(&send->entry);
+
+            send->irp->IoStatus.Status = STATUS_CANCELLED;
+            send->irp->IoStatus.Information = 0;
+            IoCompleteRequest(send->irp, IO_NO_INCREMENT);
+
+            free_pending_send(send);
+        }
+        LeaveCriticalSection(&conn->send_cs);
+    }
+
+    /* Cleanup send resources */
+    DeleteCriticalSection(&conn->send_cs);
+}
+
+/* Worker thread for async send completion */
+static DWORD WINAPI send_worker_thread_proc(void *arg)
+{
+    TRACE("Async send worker thread starting\n");
+
+    while (!send_worker_stop)
+    {
+        struct connection *conn;
+        struct http_pending_send *send, *send_next;
+        BOOL any_pending = FALSE;
+        int retries = 0;
+
+        /* Wait for work signal */
+        WaitForSingleObject(send_work_event, INFINITE);
+
+        if (send_worker_stop)
+            break;
+
+        /* Poll pending sends across all connections */
+        do {
+            BOOL found_completion = FALSE;
+
+            EnterCriticalSection(&http_cs);
+
+            /* Iterate all connections */
+            LIST_FOR_EACH_ENTRY(conn, &connections, struct connection, entry)
+            {
+                EnterCriticalSection(&conn->send_cs);
+
+                /* Check each pending send on this connection */
+                LIST_FOR_EACH_ENTRY_SAFE(send, send_next, &conn->pending_sends, struct http_pending_send, entry)
+                {
+                    DWORD bytes_sent = 0, flags = 0;
+                    BOOL completed = FALSE;
+                    NTSTATUS status = STATUS_SUCCESS;
+
+                    /* Check if I/O completed */
+                    if (WSAGetOverlappedResult(conn->socket, &send->overlapped, &bytes_sent, FALSE, &flags))
+                    {
+                        /* Success */
+                        completed = TRUE;
+
+                        if (send->cancelled)
+                        {
+                            TRACE("Async send completed but was cancelled, request=%s\n",
+                                  wine_dbgstr_longlong(send->request_id));
+                            status = STATUS_CANCELLED;
+                            bytes_sent = 0;
+                        }
+                        else
+                        {
+                            TRACE("Async send completed: %lu bytes, request=%s\n",
+                                  (unsigned long)bytes_sent, wine_dbgstr_longlong(send->request_id));
+                            status = STATUS_SUCCESS;
+                        }
+                    }
+                    else
+                    {
+                        int error = WSAGetLastError();
+
+                        if (error == WSA_IO_INCOMPLETE)
+                        {
+                            /* Still pending */
+                            any_pending = TRUE;
+                            continue;
+                        }
+                        else if (error == ERROR_OPERATION_ABORTED)
+                        {
+                            /* Cancelled */
+                            completed = TRUE;
+                            status = STATUS_CANCELLED;
+                            bytes_sent = 0;
+                            TRACE("Async send cancelled, request=%s\n",
+                                  wine_dbgstr_longlong(send->request_id));
+                        }
+                        else
+                        {
+                            /* Error */
+                            completed = TRUE;
+                            status = winsock_error_to_status(error);
+                            bytes_sent = 0;
+                            WARN("Async send error %d, request=%s, status=%#lx\n",
+                                 error, wine_dbgstr_longlong(send->request_id), (long)status);
+                        }
+                    }
+
+                    if (completed)
+                    {
+                        found_completion = TRUE;
+
+                        /* Remove from pending list before releasing lock */
+                        list_remove(&send->entry);
+                        LeaveCriticalSection(&conn->send_cs);
+
+                        /* Call post-send completion (acquires http_cs if needed) */
+                        if (status == STATUS_SUCCESS)
+                        {
+                            http_complete_send(send->queue, send->conn, send->response,
+                                               send->irp, bytes_sent, FALSE);
+                        }
+                        else
+                        {
+                            /* Error path - just set status */
+                            send->irp->IoStatus.Status = status;
+                            send->irp->IoStatus.Information = 0;
+                        }
+
+                        /* Complete IRP */
+                        IoCompleteRequest(send->irp, IO_NO_INCREMENT);
+
+                        /* Free resources */
+                        if (send->response)
+                            free(send->response);
+                        free_pending_send(send);
+
+                        /* Re-acquire for next iteration */
+                        EnterCriticalSection(&conn->send_cs);
+                        /* Start over since list changed */
+                        send_next = LIST_ENTRY(conn->pending_sends.next, struct http_pending_send, entry);
+                    }
+                }
+
+                LeaveCriticalSection(&conn->send_cs);
+            }
+
+            LeaveCriticalSection(&http_cs);
+
+            /* If nothing completed this pass and there's still pending work, brief backoff */
+            if (!found_completion && any_pending)
+            {
+                if (++retries < 5)
+                {
+                    Sleep(1);  /* Brief sleep to avoid busy-spin */
+                }
+                else
+                {
+                    /* Nothing completing after retries, go back to waiting */
+                    break;
+                }
+            }
+            else
+            {
+                retries = 0;
+            }
+
+        } while (any_pending && retries < 5);
+    }
+
+    TRACE("Async send worker thread exiting\n");
+    return 0;
+}
+
+/* Start the async send worker thread (called on first async send) */
+static void start_send_worker(void)
+{
+    EnterCriticalSection(&send_worker_cs);
+
+    if (send_worker_thread)
+    {
+        LeaveCriticalSection(&send_worker_cs);
+        return;  /* Already started */
+    }
+
+    /* Create work event (manual-reset, initially non-signaled) */
+    send_work_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!send_work_event)
+    {
+        ERR("Failed to create send work event\n");
+        async_send_enabled = FALSE;
+        LeaveCriticalSection(&send_worker_cs);
+        return;
+    }
+
+    /* Start worker thread */
+    send_worker_stop = FALSE;
+    send_worker_thread = CreateThread(NULL, 0, send_worker_thread_proc, NULL, 0, NULL);
+    if (!send_worker_thread)
+    {
+        ERR("Failed to create send worker thread\n");
+        CloseHandle(send_work_event);
+        send_work_event = NULL;
+        async_send_enabled = FALSE;
+        LeaveCriticalSection(&send_worker_cs);
+        return;
+    }
+
+    TRACE("Async send worker thread started (async enabled by default)\n");
+    LeaveCriticalSection(&send_worker_cs);
+}
+
+/* Stop the async send worker thread (called on driver unload) */
+static void stop_send_worker(void)
+{
+    EnterCriticalSection(&send_worker_cs);
+
+    if (!send_worker_thread)
+    {
+        LeaveCriticalSection(&send_worker_cs);
+        return;
+    }
+
+    TRACE("Stopping async send worker thread\n");
+
+    /* Signal thread to stop */
+    send_worker_stop = TRUE;
+    SetEvent(send_work_event);
+
+    LeaveCriticalSection(&send_worker_cs);
+
+    /* Wait for thread to exit */
+    WaitForSingleObject(send_worker_thread, 5000);
+    CloseHandle(send_worker_thread);
+    CloseHandle(send_work_event);
+
+    send_worker_thread = NULL;
+    send_work_event = NULL;
+
+    TRACE("Async send worker thread stopped\n");
+}
+
+/* Complete send operation - handles all post-send processing (state management, keep-alive, pipelining)
+ * CRITICAL: This function must be called for BOTH sync and async send completions to ensure identical behavior.
+ * Must be called with http_cs lock held or will acquire it if needed. */
+static NTSTATUS http_complete_send(struct request_queue *queue, struct connection *conn,
+                                     const struct http_response *response, IRP *irp,
+                                     DWORD bytes_sent, BOOL have_lock)
+{
+    const char *auth_header = "WWW-Authenticate:";
+    const size_t auth_header_len = 17;
+    const char *found, *p, *end, *headers_end;
+    size_t headers_len;
+    bool is_401_auth = false;
+
+    /* Acquire lock if caller doesn't have it (async completion path) */
+    if (!have_lock)
+        EnterCriticalSection(&http_cs);
+
+    /* Find and complete the request entry */
+    LIST_ENTRY *cur;
+    struct request_entry *entry;
+
+    for (cur = queue->request_list.Flink; cur != &queue->request_list; cur = cur->Flink)
+    {
+        entry = CONTAINING_RECORD(cur, struct request_entry, entry);
+        if (entry->conn == conn && entry->state == REQ_STATE_PROCESSING)
+        {
+            set_request_state(queue, entry, REQ_STATE_COMPLETED);
+            break;
+        }
+    }
+
+    /* Periodically clean old entries */
+    if (queue->completed_count % 100 == 0)
+        cleanup_old_requests(queue);
+
+    /* Handle connection based on response flags and state */
+    if (response->response_flags & HTTP_SEND_RESPONSE_FLAG_DISCONNECT)
+    {
+        /* Client requested to close the connection */
+        TRACE("Closing connection due to DISCONNECT flag.\n");
+        conn->response_state = CONN_RESP_BODY_COMPLETE;
+        conn->req_id = HTTP_NULL_ID;
+        conn->queue = NULL;
+        close_connection(conn);
+    }
+    else if (!(response->response_flags & HTTP_SEND_RESPONSE_FLAG_MORE_DATA))
+    {
+        TRACE("MORE_DATA flag NOT set, response_state=%d\n", conn->response_state);
+
+        /* State-based handling: mimics native Windows HTTP.sys behavior */
+        if (conn->response_state == CONN_RESP_IDLE)
+        {
+            TRACE("Response headers sent, setting state to HEADERS_SENT, keeping req_id=%s valid\n",
+                  wine_dbgstr_longlong(conn->req_id));
+            conn->response_state = CONN_RESP_HEADERS_SENT;
+            conn->response_start_time = GetTickCount64();
+        }
+        else if (conn->response_state == CONN_RESP_HEADERS_SENT)
+        {
+            TRACE("Response body sent, setting state to BODY_COMPLETE, clearing req_id=%s\n",
+                  wine_dbgstr_longlong(conn->req_id));
+            conn->response_state = CONN_RESP_BODY_COMPLETE;
+        }
+        else
+        {
+            TRACE("Response in state %d, no state change needed\n", conn->response_state);
+        }
+
+        /* Check if this is a 401 Unauthorized response for NTLM authentication */
+        is_401_auth = false;
+        if (response->len >= 12 && !memcmp(response->buffer, "HTTP/1.", 7) &&
+            !memcmp(response->buffer + 8, " 401", 4))
+        {
+            TRACE("401 Unauthorized response detected, checking for auth headers (response_len=%d)\n", response->len);
+
+            headers_end = NULL;
+            if (response->len >= 4)
+            {
+                const char *scan = response->buffer;
+                const char *scan_end = response->buffer + response->len - 3;
+                while (scan < scan_end)
+                {
+                    if (!memcmp(scan, "\r\n\r\n", 4))
+                    {
+                        headers_end = scan;
+                        break;
+                    }
+                    scan++;
+                }
+            }
+            headers_len = headers_end ? (size_t)(headers_end - response->buffer) : response->len;
+
+            found = NULL;
+            if (headers_len >= auth_header_len)
+            {
+                p = response->buffer;
+                end = response->buffer + headers_len - auth_header_len + 1;
+                while (p < end)
+                {
+                    if (!_strnicmp(p, auth_header, auth_header_len))
+                    {
+                        found = p;
+                        TRACE("Found WWW-Authenticate header at offset %ld\n", (long)(p - response->buffer));
+                        break;
+                    }
+                    p++;
+                }
+            }
+            if (found)
+            {
+                is_401_auth = true;
+                TRACE("401 auth detected: Keeping connection state for authentication challenge (conn=%p, socket=%#Ix)\n",
+                      conn, (ULONG_PTR)conn->socket);
+            }
+            else
+            {
+                TRACE("401 response without WWW-Authenticate header, treating as normal response\n");
+            }
+        }
+        else
+        {
+            TRACE("Non-401 response or too short to be 401 (len=%d)\n", response->len);
+        }
+
+        /* No more data for this response, but keep connection alive for potential pipelining */
+        if (conn->content_len)
+        {
+            memmove(conn->buffer, conn->buffer + conn->content_len, conn->len - conn->content_len);
+            conn->len -= conn->content_len;
+        }
+
+        /* For 401 auth challenges, keep the queue and request association */
+        if (!is_401_auth)
+        {
+            if (!conn->is_websocket)
+            {
+                if (conn->response_state == CONN_RESP_BODY_COMPLETE)
+                {
+                    TRACE("Response complete, clearing req_id=%s and queue\n", wine_dbgstr_longlong(conn->req_id));
+                    conn->queue = NULL;
+                    conn->req_id = HTTP_NULL_ID;
+                }
+                else if (conn->response_state == CONN_RESP_HEADERS_SENT)
+                {
+                    TRACE("Headers sent, keeping req_id=%s valid for entity body (state=HEADERS_SENT)\n",
+                          wine_dbgstr_longlong(conn->req_id));
+                }
+            }
+            WSAEventSelect(conn->socket, request_event, FD_READ | FD_CLOSE);
+        }
+        else
+        {
+            if (WSAEventSelect(conn->socket, request_event, FD_READ | FD_CLOSE) == SOCKET_ERROR)
+            {
+                ERR("WSAEventSelect failed with error %u for 401 auth; closing connection.\n", WSAGetLastError());
+                TRACE("Failed to set socket events for auth: socket=%#Ix, conn=%p\n", (ULONG_PTR)conn->socket, conn);
+                close_connection(conn);
+            }
+            else
+            {
+                TRACE("401 response: Monitoring FD_READ and FD_CLOSE events (balanced approach)\n");
+                conn->auth_in_progress = true;
+                conn->auth_start_time = GetTickCount64();
+                TRACE("Started auth timeout tracking: conn=%p, start_time=%llu, timeout=%u ms\n",
+                      conn, conn->auth_start_time, AUTH_TIMEOUT_MS);
+            }
+        }
+
+        if (!is_401_auth)
+        {
+            if (conn->response_state == CONN_RESP_BODY_COMPLETE)
+            {
+                TRACE("Response complete, checking buffer for pipelined requests\n");
+                conn->available = TRUE;
+
+                if (parse_request(conn) < 0)
+                {
+                    WARN("Failed to parse request; shutting down connection.\n");
+                    send_400(conn);
+                }
+                else if (conn->available)
+                {
+                    TRACE("Successfully parsed next request from buffer (available=%d)\n", conn->available);
+                }
+            }
+            else if (conn->response_state == CONN_RESP_HEADERS_SENT)
+            {
+                TRACE("Headers sent but body pending, NOT marking available yet\n");
+            }
+        }
+        else
+        {
+            TRACE("401 auth response sent, waiting for client retry with credentials\n");
+        }
+    }
+    else
+    {
+        TRACE("MORE_DATA flag IS set, keeping connection state: conn=%p, req_id=%s, queue=%p (expecting HttpSendResponseEntityBody call)\n",
+              conn, wine_dbgstr_longlong(conn->req_id), conn->queue);
+    }
+
+    irp->IoStatus.Information = bytes_sent;
+
+    if (!have_lock)
+        LeaveCriticalSection(&http_cs);
+
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS http_send_response(struct request_queue *queue, IRP *irp)
 {
     const struct http_response *response = irp->AssociatedIrp.SystemBuffer;
@@ -3666,250 +4394,47 @@ static NTSTATUS http_send_response(struct request_queue *queue, IRP *irp)
             }  /* Close the C90 block */
         }
 
-        if (patched)
+        /* Use async_send_data() for all sends (replaces synchronous send() calls) */
         {
-            if (send(conn->socket, patched, patched_len, 0) >= 0)
-            {
+            NTSTATUS ret;
+            const char *send_buf = patched ? patched : buf;
+            int send_len = patched ? patched_len : len;
+
+            TRACE("Calling async_send_data: len=%d, patched=%d\n", send_len, !!patched);
+
+            /* Call async send (handles both sync and async completion) */
+            ret = async_send_data(queue, conn, response, send_buf, send_len, irp);
+
+            /* Free patched buffer if allocated */
+            if (patched)
                 free(patched);
-                goto post_send;
-            }
-            free(patched);
-            /* fallback to original on failure */
-        }
 
-        if (send(conn->socket, buf, len, 0) >= 0)
-        {
-post_send:
-            /* In http_send_response(), after successfully sending response */
+            if (ret == STATUS_SUCCESS)
             {
-                /* Find and complete the request entry */
-                LIST_ENTRY *cur;
-                struct request_entry *entry;
-                
-                for (cur = queue->request_list.Flink; cur != &queue->request_list; cur = cur->Flink)
-                {
-                    entry = CONTAINING_RECORD(cur, struct request_entry, entry);
-                    if (entry->conn == conn && entry->state == REQ_STATE_PROCESSING)
-                    {
-                        set_request_state(queue, entry, REQ_STATE_COMPLETED);
-                        /* Could free immediately or leave for cleanup */
-                        break;
-                    }
-                }
-                
-                /* Periodically clean old entries */
-                if (queue->completed_count % 100 == 0)
-                    cleanup_old_requests(queue);
+                /* Synchronous completion - http_complete_send() already called */
+                TRACE("Synchronous send completion\n");
+                LeaveCriticalSection(&http_cs);
+                return STATUS_SUCCESS;
             }
-            
-            /* Handle connection based on response flags and state */
-            if (response->response_flags & HTTP_SEND_RESPONSE_FLAG_DISCONNECT)
+            else if (ret == STATUS_PENDING)
             {
-                /* Client requested to close the connection */
-                TRACE("Closing connection due to DISCONNECT flag.\n");
-                conn->response_state = CONN_RESP_BODY_COMPLETE;
-                conn->req_id = HTTP_NULL_ID;
-                conn->queue = NULL;
-                close_connection(conn);
-            }
-            else if (!(response->response_flags & HTTP_SEND_RESPONSE_FLAG_MORE_DATA))
-            {
-                TRACE("MORE_DATA flag NOT set, response_state=%d\n", conn->response_state);
-
-                /* State-based handling: mimics native Windows HTTP.sys behavior */
-                if (conn->response_state == CONN_RESP_IDLE)
-                {
-                    /* First call (headers sent) - keep req_id valid for HttpSendResponseEntityBody */
-                    TRACE("Response headers sent, setting state to HEADERS_SENT, keeping req_id=%s valid\n",
-                          wine_dbgstr_longlong(conn->req_id));
-                    conn->response_state = CONN_RESP_HEADERS_SENT;
-                    conn->response_start_time = GetTickCount64();
-                }
-                else if (conn->response_state == CONN_RESP_HEADERS_SENT)
-                {
-                    /* Subsequent call (body sent) - now we can clear req_id */
-                    TRACE("Response body sent, setting state to BODY_COMPLETE, clearing req_id=%s\n",
-                          wine_dbgstr_longlong(conn->req_id));
-                    conn->response_state = CONN_RESP_BODY_COMPLETE;
-                }
-                else
-                {
-                    /* Already complete or unexpected state */
-                    TRACE("Response in state %d, no state change needed\n", conn->response_state);
-                }
-
-                /* Check if this is a 401 Unauthorized response for NTLM authentication */
-                is_401_auth = false;
-                /* Accept both HTTP/1.0 and HTTP/1.1 401 responses */
-                if (response->len >= 12 && !memcmp(response->buffer, "HTTP/1.", 7) && 
-                    !memcmp(response->buffer + 8, " 401", 4))
-                {
-                    TRACE("401 Unauthorized response detected, checking for auth headers (response_len=%d)\n", response->len);
-                    /* Search for WWW-Authenticate header in headers only (before \r\n\r\n) */
-                    /* Find end of headers manually since memmem is not available */
-                    headers_end = NULL;
-                    if (response->len >= 4)
-                    {
-                        const char *scan = response->buffer;
-                        const char *scan_end = response->buffer + response->len - 3;
-                        while (scan < scan_end)
-                        {
-                            if (!memcmp(scan, "\r\n\r\n", 4))
-                            {
-                                headers_end = scan;
-                                break;
-                            }
-                            scan++;
-                        }
-                    }
-                    headers_len = headers_end ? (size_t)(headers_end - response->buffer) : response->len;
-                    
-                    found = NULL;
-                    if (headers_len >= auth_header_len)
-                    {
-                        /* Case-insensitive search for WWW-Authenticate header */
-                        p = response->buffer;
-                        end = response->buffer + headers_len - auth_header_len + 1;
-                        while (p < end)
-                        {
-                            if (!_strnicmp(p, auth_header, auth_header_len))
-                            {
-                                found = p;
-                                TRACE("Found WWW-Authenticate header at offset %ld\n", (long)(p - response->buffer));
-                                break;
-                            }
-                            p++;
-                        }
-                    }
-                    if (found)
-                    {
-                        is_401_auth = true;
-                        TRACE("401 auth detected: Keeping connection state for authentication challenge (conn=%p, socket=%#Ix)\n",
-                              conn, (ULONG_PTR)conn->socket);
-                    }
-                    else
-                    {
-                        TRACE("401 response without WWW-Authenticate header, treating as normal response\n");
-                    }
-                }
-                else
-                {
-                    TRACE("Non-401 response or too short to be 401 (len=%d)\n", response->len);
-                }
-                
-                /* No more data for this response, but keep connection alive for potential pipelining */
-                if (conn->content_len)
-                {
-                    /* Discard whatever entity body is left. */
-                    memmove(conn->buffer, conn->buffer + conn->content_len, conn->len - conn->content_len);
-                    conn->len -= conn->content_len;
-                }
-
-                /* For 401 auth challenges, keep the queue and request association */
-                if (!is_401_auth)
-                {
-                    /* For upgraded WebSocket connections, keep mapping for subsequent reads. */
-                    if (!conn->is_websocket)
-                    {
-                        /* Only clear req_id when response is fully complete (body sent) */
-                        if (conn->response_state == CONN_RESP_BODY_COMPLETE)
-                        {
-                            TRACE("Response complete, clearing req_id=%s and queue\n", wine_dbgstr_longlong(conn->req_id));
-                            conn->queue = NULL;
-                            conn->req_id = HTTP_NULL_ID;
-                        }
-                        else if (conn->response_state == CONN_RESP_HEADERS_SENT)
-                        {
-                            /* Headers sent but body pending - keep req_id for HttpSendResponseEntityBody */
-                            TRACE("Headers sent, keeping req_id=%s valid for entity body (state=HEADERS_SENT)\n",
-                                  wine_dbgstr_longlong(conn->req_id));
-                        }
-                    }
-                    WSAEventSelect(conn->socket, request_event, FD_READ | FD_CLOSE);
-                }
-                else
-                {
-                    /* Keep FD_CLOSE enabled but handle auth gracefully */
-                    /* This allows detection of client disconnects while still supporting auth retries */
-                    if (WSAEventSelect(conn->socket, request_event, FD_READ | FD_CLOSE) == SOCKET_ERROR)
-                    {
-                        ERR("WSAEventSelect failed with error %u for 401 auth; closing connection.\n", WSAGetLastError());
-                        TRACE("Failed to set socket events for auth: socket=%#Ix, conn=%p\n", (ULONG_PTR)conn->socket, conn);
-                        close_connection(conn);
-                    }
-                    else
-                    {
-                        TRACE("401 response: Monitoring FD_READ and FD_CLOSE events (balanced approach)\n");
-                        /* Set authentication timeout tracking */
-                        conn->auth_in_progress = true;
-                        conn->auth_start_time = GetTickCount64();
-                        TRACE("Started auth timeout tracking: conn=%p, start_time=%llu, timeout=%u ms\n",
-                              conn, conn->auth_start_time, AUTH_TIMEOUT_MS);
-                        /* Note: FD_CLOSE during auth will be handled gracefully in receive_data() */
-                    }
-                }
-
-                /* For 401 auth responses during WebSocket upgrades, don't immediately parse */
-                /* Let the client send its retry with Authorization header first */
-                if (!is_401_auth)
-                {
-                    /* Only mark available and parse next request when response is fully complete */
-                    if (conn->response_state == CONN_RESP_BODY_COMPLETE)
-                    {
-                        TRACE("Response complete, checking buffer for pipelined requests\n");
-
-                        /* Mark connection as available again for request processing */
-                        conn->available = TRUE;
-
-                        /* We might have another request already in the buffer (HTTP pipelining). */
-                        if (parse_request(conn) < 0)
-                        {
-                            WARN("Failed to parse request; shutting down connection.\n");
-                            send_400(conn);
-                        }
-                        else if (conn->available)
-                        {
-                            TRACE("Successfully parsed next request from buffer (available=%d)\n", conn->available);
-                        }
-                    }
-                    else if (conn->response_state == CONN_RESP_HEADERS_SENT)
-                    {
-                        TRACE("Headers sent but body pending, NOT marking available yet\n");
-                        /* Don't mark available - waiting for HttpSendResponseEntityBody */
-                    }
-                }
-                else
-                {
-                    TRACE("401 auth response sent, waiting for client retry with credentials\n");
-                    /* Don't call parse_request() here - wait for FD_READ event when client sends retry */
-                }
-                
-                /* After sending response, check if we already have a pipelined request.
-                   If not, wait for next request but don't call complete_pending_irps */
+                /* Async operation started - worker will call http_complete_send() and complete IRP */
+                TRACE("Async send started, returning STATUS_PENDING\n");
+                LeaveCriticalSection(&http_cs);
+                return STATUS_PENDING;
             }
             else
             {
-                TRACE("MORE_DATA flag IS set, keeping connection state: conn=%p, req_id=%s, queue=%p (expecting HttpSendResponseEntityBody call)\n", conn, wine_dbgstr_longlong(conn->req_id), conn->queue);
+                /* Send error */
+                ERR("async_send_data failed with status %#lx; shutting down connection.\n", (long)ret);
+                close_connection(conn);
+
+                irp->IoStatus.Status = ret;
+                irp->IoStatus.Information = 0;
+
+                LeaveCriticalSection(&http_cs);
+                return ret;
             }
-            irp->IoStatus.Information = response->len;
-
-            /* Don't complete the IRP here - let caller handle it */
-            /* This function is called synchronously, so just return status */
-
-            LeaveCriticalSection(&http_cs);
-            return STATUS_SUCCESS;
-        }
-        else
-        {
-            ERR("Got error %u; shutting down connection.\n", WSAGetLastError());
-            close_connection(conn);
-
-            /* Set error status but don't complete - let caller handle it */
-            irp->IoStatus.Status = STATUS_CONNECTION_RESET;
-            irp->IoStatus.Information = 0;
-
-            LeaveCriticalSection(&http_cs);
-            return STATUS_CONNECTION_RESET;
         }
     }
 
@@ -4139,8 +4664,46 @@ static NTSTATUS WINAPI dispatch_ioctl(DEVICE_OBJECT *device, IRP *irp)
             {
                 ret = STATUS_CONNECTION_INVALID;
             }
-            
+
             LeaveCriticalSection(&http_cs);
+
+            /* NEW: Check for pending SEND operations */
+            if (conn)
+            {
+                struct http_pending_send *send, *send_next;
+
+                EnterCriticalSection(&conn->send_cs);
+                LIST_FOR_EACH_ENTRY_SAFE(send, send_next, &conn->pending_sends, struct http_pending_send, entry)
+                {
+                    if (send->request_id == params->id)
+                    {
+                        TRACE("Cancelling pending send for request %s, IRP %p\n",
+                              wine_dbgstr_longlong(params->id), send->irp);
+
+                        /* Mark as cancelled */
+                        send->cancelled = TRUE;
+
+                        /* Cancel the underlying WSASend */
+                        /* Use CancelIoEx (not CancelIo) - works across threads */
+                        if (!CancelIoEx((HANDLE)conn->socket, &send->overlapped))
+                        {
+                            DWORD error = GetLastError();
+                            if (error != ERROR_NOT_FOUND)
+                                WARN("CancelIoEx failed: %lu\n", error);
+                        }
+
+                        /* Don't remove from list - will be cleaned up when I/O completes */
+                        /* Don't complete IRP here - completion will be delivered via IOCP */
+
+                        found = TRUE;
+                        /* Continue loop - may have multiple chunks for same request */
+                    }
+                }
+                LeaveCriticalSection(&conn->send_cs);
+
+                if (found)
+                    ret = STATUS_SUCCESS;
+            }
         }
         break;
     default:
@@ -4271,6 +4834,9 @@ static void WINAPI unload(DRIVER_OBJECT *driver)
     CloseHandle(request_thread);
     CloseHandle(request_event);
 
+    /* Stop async send worker thread */
+    stop_send_worker();
+
     LIST_FOR_EACH_ENTRY_SAFE(conn, conn_next, &connections, struct connection, entry)
     {
         close_connection(conn);
@@ -4282,6 +4848,9 @@ static void WINAPI unload(DRIVER_OBJECT *driver)
     }
 
     WSACleanup();
+
+    /* Cleanup async send worker critical section */
+    DeleteCriticalSection(&send_worker_cs);
 
     IoDeleteDevice(device_obj);
     NtClose(directory_obj);
@@ -4317,6 +4886,9 @@ NTSTATUS WINAPI DriverEntry(DRIVER_OBJECT *driver, UNICODE_STRING *path)
 
     request_event = CreateEventW(NULL, FALSE, FALSE, NULL);
     request_thread = CreateThread(NULL, 0, request_thread_proc, NULL, 0, NULL);
+
+    /* Initialize async send worker critical section */
+    InitializeCriticalSection(&send_worker_cs);
 
     return STATUS_SUCCESS;
 }

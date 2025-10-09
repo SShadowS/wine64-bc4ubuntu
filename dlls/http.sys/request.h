@@ -97,6 +97,24 @@ struct http_request
     POINTER pRequestInfo; /* NULL (FIXME) */
 };
 
+#ifndef HTTP_PENDING_SEND_DEFINED
+#define HTTP_PENDING_SEND_DEFINED
+struct http_pending_send
+{
+    struct list entry;              /* Linked list of pending sends */
+    HTTP_REQUEST_ID request_id;     /* Request being sent */
+    IRP *irp;                       /* IRP to complete */
+    struct connection *conn;        /* Connection reference */
+    struct request_queue *queue;    /* Queue reference for completion */
+    struct http_response *response; /* Response structure copy */
+    void *buffer_copy;              /* Heap-allocated send buffer */
+    DWORD buffer_len;               /* Buffer size */
+    OVERLAPPED overlapped;          /* For WSASend */
+    WSABUF wsabuf;                  /* Send buffer descriptor */
+    BOOL cancelled;                 /* Cancellation requested */
+};
+#endif /* HTTP_PENDING_SEND_DEFINED */
+
 static NTSTATUS complete_irp(struct connection *conn, IRP *irp)
 {
     const struct http_receive_request_params params
