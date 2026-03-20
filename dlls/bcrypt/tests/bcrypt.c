@@ -4916,6 +4916,62 @@ static void test_SP800_108(void)
         ok(!memcmp(buf, buf2, 32), "deterministic output mismatch with full params\n");
     }
 
+    /* Test with SHA-512 hash algorithm to verify hash_len handling */
+    {
+        static UCHAR sha512_label[] = "TestLabel";
+        static UCHAR sha512_context[] = "TestContext";
+        static BCryptBuffer sha512_param_buffers[] =
+        {
+            {
+                sizeof(BCRYPT_SHA512_ALGORITHM),
+                KDF_HASH_ALGORITHM,
+                (void *)BCRYPT_SHA512_ALGORITHM,
+            },
+            {
+                sizeof(sha512_label) - 1,
+                KDF_LABEL,
+                sha512_label,
+            },
+            {
+                sizeof(sha512_context) - 1,
+                KDF_CONTEXT,
+                sha512_context,
+            }
+        };
+        static BCryptBufferDesc sha512_params =
+        {
+            BCRYPTBUFFER_VERSION,
+            ARRAY_SIZE(sha512_param_buffers),
+            sha512_param_buffers,
+        };
+        BYTE sha512_buf[64], sha512_buf2[64];
+
+        /* Derive with SHA-512 - output size matches hash size */
+        memset(sha512_buf, 0, sizeof(sha512_buf));
+        status = pBCryptKeyDerivation(key, &sha512_params, sha512_buf, 64, &size, 0);
+        ok(!status, "SHA-512 derivation failed: %#lx\n", status);
+        ok(size == 64, "SHA-512 size = %lu\n", size);
+
+        /* Verify deterministic */
+        memset(sha512_buf2, 0, sizeof(sha512_buf2));
+        status = pBCryptKeyDerivation(key, &sha512_params, sha512_buf2, 64, &size, 0);
+        ok(!status, "SHA-512 second derivation failed: %#lx\n", status);
+        ok(!memcmp(sha512_buf, sha512_buf2, 64), "SHA-512 deterministic output mismatch\n");
+
+        /* Verify SHA-512 output differs from SHA-256 output */
+        sp800_108_params.cBuffers = 3;
+        memset(buf, 0, sizeof(buf));
+        status = pBCryptKeyDerivation(key, &sp800_108_params, buf, 64, &size, 0);
+        ok(!status, "SHA-256 derivation failed: %#lx\n", status);
+        ok(memcmp(buf, sha512_buf, 64), "SHA-256 and SHA-512 outputs should differ\n");
+
+        /* Test smaller output with SHA-512 (truncation to 32 bytes) */
+        memset(sha512_buf, 0, sizeof(sha512_buf));
+        status = pBCryptKeyDerivation(key, &sha512_params, sha512_buf, 32, &size, 0);
+        ok(!status, "SHA-512 truncated derivation failed: %#lx\n", status);
+        ok(size == 32, "SHA-512 truncated size = %lu\n", size);
+    }
+
     status = BCryptDestroyKey(key);
     ok(!status, "got %#lx\n", status);
     status = BCryptCloseAlgorithmProvider(alg, 0);

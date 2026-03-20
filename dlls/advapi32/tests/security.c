@@ -8697,6 +8697,22 @@ static void test_IsValidSecurityDescriptor(void)
     free(sd);
 }
 
+static void test_LogonUserW_stub(void)
+{
+    HANDLE token = NULL;
+    BOOL ret;
+
+    /* Ensure bypass env var is NOT set */
+    SetEnvironmentVariableA("WINE_BC_AUTH_BYPASS", NULL);
+
+    ret = LogonUserW(L"testuser", L"testdomain", L"testpass",
+                     2 /* LOGON32_LOGON_INTERACTIVE */, 0 /* LOGON32_PROVIDER_DEFAULT */, &token);
+    /* Wine stub always returns TRUE with a dummy token */
+    ok(ret, "LogonUserW failed, error %lu\n", GetLastError());
+    ok(token == (HANDLE)(ULONG_PTR)0xdeadbeef,
+       "Expected stub token 0xdeadbeef, got %p (bypass may not be gated)\n", token);
+}
+
 static void test_window_security(void)
 {
     PSECURITY_DESCRIPTOR sd;
@@ -8791,6 +8807,7 @@ START_TEST(security)
     test_group_as_file_owner();
     test_IsValidSecurityDescriptor();
     test_window_security();
+    test_LogonUserW_stub();
 
     /* Must be the last test, modifies process token */
     test_token_security_descriptor();

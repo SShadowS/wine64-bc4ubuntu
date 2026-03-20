@@ -42,6 +42,7 @@ static ULONG (WINAPI *pHttpCloseServerSession)(HTTP_SERVER_SESSION_ID session_id
 static ULONG (WINAPI *pHttpCloseUrlGroup)(HTTP_URL_GROUP_ID group_id);
 static ULONG (WINAPI *pHttpRemoveUrlFromUrlGroup)(HTTP_URL_GROUP_ID id, const WCHAR *url, ULONG flags);
 static ULONG (WINAPI *pHttpSetServerSessionProperty)(HTTP_SERVER_SESSION_ID id, HTTP_SERVER_PROPERTY property, void *value, ULONG length);
+static ULONG (WINAPI *pHttpQueryServerSessionProperty)(HTTP_SERVER_SESSION_ID id, HTTP_SERVER_PROPERTY property, void *buffer, ULONG length, ULONG *ret_length);
 static ULONG (WINAPI *pHttpSetUrlGroupProperty)(HTTP_URL_GROUP_ID id, HTTP_SERVER_PROPERTY property, void *value, ULONG length);
 
 static void init(void)
@@ -58,6 +59,7 @@ static void init(void)
     X(HttpCloseUrlGroup);
     X(HttpRemoveUrlFromUrlGroup);
     X(HttpSetServerSessionProperty);
+    X(HttpQueryServerSessionProperty);
     X(HttpSetUrlGroupProperty);
 #undef X
 }
@@ -1878,6 +1880,14 @@ static void test_HttpServerSessionProperty(void)
         HTTP_QOS_SETTING_INFO qos_info = {0};
         ret = pHttpSetServerSessionProperty(session, HttpServerQosProperty, &qos_info, sizeof(qos_info));
         ok(!ret, "Unexpected return value %u.\n", ret);
+    }
+
+    /* Query QoS property - should succeed and not leak refcount */
+    if (pHttpQueryServerSessionProperty)
+    {
+        ULONG ret_length = 0;
+        ret = pHttpQueryServerSessionProperty(session, HttpServerQosProperty, NULL, 0, &ret_length);
+        ok(ret == ERROR_CALL_NOT_IMPLEMENTED, "Unexpected return value %u.\n", ret);
     }
 
     /* Close session - if refcount leaked, this would fail or leak memory */
