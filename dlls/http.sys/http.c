@@ -285,6 +285,11 @@ static void accept_connection(SOCKET socket)
     conn->size = 8192;
     WSAEventSelect(peer, request_event, FD_READ | FD_CLOSE);
     ioctlsocket(peer, FIONBIO, &one);
+    /* Increase socket receive buffer for large HTTP request bodies */
+    {
+        int rcvbuf = 1048576; /* 1MB */
+        setsockopt(peer, SOL_SOCKET, SO_RCVBUF, (const char *)&rcvbuf, sizeof(rcvbuf));
+    }
     conn->socket = peer;
     conn->shutdown = FALSE;  /* Ensure connection is marked as active */
     conn->refcount = 1;
@@ -1109,17 +1114,17 @@ static BOOL host_matches(const struct url *url, const char *conn_host, size_t co
     }
     else
     {
-        /* Normal host matching */
+        /* Normal host matching - compare full host:port string */
         const char *url_slash = strchr(url->url + 7, '/');
         size_t url_host_len;
-        
+
         if (url_slash)
             url_host_len = url_slash - url->url - 7;
         else
             url_host_len = strlen(url->url + 7);
-            
-        /* Use portable case-insensitive compare */
-        if (host_len == url_host_len && !memicmp(url->url + 7, conn_host, host_len))
+
+        /* Compare full host:port from URL against full host:port from connection */
+        if (conn_host_len == url_host_len && !memicmp(url->url + 7, conn_host, conn_host_len))
             return TRUE;
     }
 
@@ -2803,40 +2808,74 @@ static void receive_data(struct connection *conn)
     if (conn->req_id != HTTP_NULL_ID)
         return; /* waiting for an HttpSendHttpResponse() or HttpSendResponseEntityBody() call */
 
-    TRACE("Received %u bytes of data.\n", len);
+    TRACE("Received %u bytes of data, total buffered: %u\n", len, conn->len);
 
-    if (!(ret = parse_request(conn)))
+    for (;;)
     {
-        ULONG available;
-        ioctlsocket(conn->socket, FIONREAD, &available);
-        if (available)
-        {
-            TRACE("%u more bytes of data available, trying with larger buffer.\n", available);
-            TRACE("Reallocating buffer: current_size=%u, current_len=%u, available=%u, new_size=%u\n",
-                  conn->size, conn->len, available, conn->len + available);
-            if (!(conn->buffer = realloc(conn->buffer, conn->len + available)))
-            {
-                ERR("Failed to reallocate buffer from %u to %u bytes.\n", conn->size, conn->len + available);
-                close_connection(conn);
-                return;
-            }
-            conn->size = conn->len + available;
-            TRACE("Buffer reallocated successfully: new_size=%u\n", conn->size);
+        ret = parse_request(conn);
+        if (ret != 0)
+            break; /* Got a complete request (ret > 0) or parse error (ret < 0) */
 
-            if ((len = recv(conn->socket, conn->buffer + conn->len, conn->size - conn->len, 0)) < 0)
+        /* Request is incomplete — try to read more data */
+
+        /* Ensure buffer has room. If buffer is full, grow it. */
+        if (conn->len >= conn->size)
+        {
+            unsigned int new_size = conn->size * 2;
+            char *new_buf;
+
+            /* If we know Content-Length, try to allocate enough for the full request */
+            if (conn->content_len > 0)
             {
-                ERR("Got error %u; shutting down connection.\n", WSAGetLastError());
+                unsigned int needed = conn->len + conn->content_len;
+                if (needed > new_size)
+                    new_size = needed;
+            }
+
+            /* Cap at 16MB to prevent runaway allocations */
+            if (new_size > 16 * 1024 * 1024)
+            {
+                WARN("Request too large (%u bytes), closing connection.\n", new_size);
                 close_connection(conn);
                 return;
             }
-            TRACE("Received %u bytes of data.\n", len);
-            conn->len += len;
-            ret = parse_request(conn);
+
+            new_buf = realloc(conn->buffer, new_size);
+            if (!new_buf)
+            {
+                ERR("Failed to grow buffer from %u to %u bytes.\n", conn->size, new_size);
+                close_connection(conn);
+                return;
+            }
+            conn->buffer = new_buf;
+            conn->size = new_size;
+            TRACE("Grew buffer to %u bytes.\n", new_size);
         }
+
+        /* Try to read more data (non-blocking) */
+        len = recv(conn->socket, conn->buffer + conn->len, conn->size - conn->len, 0);
+        if (len <= 0)
+        {
+            if (len == 0)
+            {
+                TRACE("Connection was shut down by peer.\n");
+                close_connection(conn);
+                return;
+            }
+            if (WSAGetLastError() == WSAEWOULDBLOCK)
+            {
+                TRACE("No more data available right now, waiting for next FD_READ.\n");
+                return; /* Will be called again on next FD_READ */
+            }
+            ERR("recv error %u; shutting down connection.\n", WSAGetLastError());
+            close_connection(conn);
+            return;
+        }
+        conn->len += len;
+        TRACE("Read %u more bytes, total buffered: %u\n", len, conn->len);
     }
-    if (!ret)
-        TRACE("Request is incomplete, waiting for more data.\n");
-    else if (ret < 0)
+
+    if (ret < 0)
     {
         WARN("Failed to parse request; shutting down connection.\n");
         send_400(conn);
