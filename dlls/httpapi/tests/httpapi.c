@@ -1015,6 +1015,109 @@ static void test_v1_entity_body(void)
     ok(ret, "Failed to close queue handle, error %lu.\n", GetLastError());
 }
 
+static void test_v1_large_entity_body(void)
+{
+    char DECLSPEC_ALIGN(8) req_buffer[4096];
+    HTTP_REQUEST_V1 *req = (HTTP_REQUEST_V1 *)req_buffer;
+    unsigned short port;
+    int ret;
+    char *body, *recv_body;
+    char req_text[200];
+    DWORD ret_size;
+    HANDLE queue;
+    SOCKET s;
+    static const unsigned int test_sizes[] = { 65536, 262144, 524288 };
+    unsigned int i, t;
+
+    ret = HttpCreateHttpHandle(&queue, 0);
+    ok(!ret, "Got error %u.\n", ret);
+    port = add_url_v1(queue);
+
+    for (t = 0; t < ARRAY_SIZE(test_sizes); t++)
+    {
+        unsigned int body_size = test_sizes[t];
+
+        body = malloc(body_size);
+        ok(body != NULL, "Failed to allocate %u byte body.\n", body_size);
+        for (i = 0; i < body_size; i++)
+            body[i] = (char)(i % 251);
+
+        s = create_client_socket(port);
+
+        sprintf(req_text,
+            "POST /large_body_test HTTP/1.1\r\n"
+            "Host: localhost:%u\r\n"
+            "Connection: close\r\n"
+            "Content-Length: %u\r\n"
+            "\r\n", port, body_size);
+
+        ret = send(s, req_text, strlen(req_text), 0);
+        ok(ret == strlen(req_text), "[%uKB] header send() returned %d.\n", body_size / 1024, ret);
+
+        {
+            unsigned int sent = 0;
+            while (sent < body_size)
+            {
+                unsigned int chunk = min(8192, body_size - sent);
+                ret = send(s, body + sent, chunk, 0);
+                ok(ret == chunk, "[%uKB] body send() returned %d at offset %u.\n",
+                   body_size / 1024, ret, sent);
+                if (ret <= 0) break;
+                sent += ret;
+            }
+        }
+
+        Sleep(200);
+
+        memset(req_buffer, 0xcc, sizeof(req_buffer));
+        ret = HttpReceiveHttpRequest(queue, HTTP_NULL_ID, 0,
+                (HTTP_REQUEST *)req, sizeof(req_buffer), &ret_size, NULL);
+        ok(!ret, "[%uKB] HttpReceiveHttpRequest got error %u.\n", body_size / 1024, ret);
+
+        if (!ret)
+        {
+            ok(req->Flags == HTTP_REQUEST_FLAG_MORE_ENTITY_BODY_EXISTS,
+               "[%uKB] Got flags %#lx.\n", body_size / 1024, req->Flags);
+
+            recv_body = malloc(body_size);
+            ok(recv_body != NULL, "Failed to allocate recv buffer.\n");
+            if (recv_body)
+            {
+                unsigned int total_recv = 0;
+                while (total_recv < body_size)
+                {
+                    unsigned int to_recv = min(32768, body_size - total_recv);
+                    ret_size = 0;
+                    ret = HttpReceiveRequestEntityBody(queue, req->RequestId, 0,
+                            recv_body + total_recv, to_recv, &ret_size, NULL);
+                    if (ret == ERROR_HANDLE_EOF) break;
+                    ok(!ret, "[%uKB] HttpReceiveRequestEntityBody got error %u at offset %u.\n",
+                       body_size / 1024, ret, total_recv);
+                    if (ret) break;
+                    total_recv += ret_size;
+                }
+
+                ok(total_recv == body_size,
+                   "[%uKB] Received %u bytes, expected %u.\n",
+                   body_size / 1024, total_recv, body_size);
+
+                if (total_recv == body_size)
+                    ok(!memcmp(recv_body, body, body_size),
+                       "[%uKB] Body data mismatch.\n", body_size / 1024);
+
+                free(recv_body);
+            }
+
+            send_response_v1(queue, req->RequestId, s);
+        }
+
+        closesocket(s);
+        free(body);
+    }
+
+    CloseHandle(queue);
+}
+
 static void test_v1_bad_request(void)
 {
     char response_buffer[2048];
@@ -1913,6 +2016,7 @@ START_TEST(httpapi)
     test_v1_multiple_requests();
     test_v1_short_buffer();
     test_v1_entity_body();
+    test_v1_large_entity_body();
     test_v1_bad_request();
     test_v1_cooked_url();
     test_v1_unknown_tokens();
