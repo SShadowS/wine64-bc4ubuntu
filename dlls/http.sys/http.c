@@ -285,11 +285,6 @@ static void accept_connection(SOCKET socket)
     conn->size = 8192;
     WSAEventSelect(peer, request_event, FD_READ | FD_CLOSE);
     ioctlsocket(peer, FIONBIO, &one);
-    /* Increase socket receive buffer for large HTTP request bodies */
-    {
-        int rcvbuf = 1048576; /* 1MB */
-        setsockopt(peer, SOL_SOCKET, SO_RCVBUF, (const char *)&rcvbuf, sizeof(rcvbuf));
-    }
     conn->socket = peer;
     conn->shutdown = FALSE;  /* Ensure connection is marked as active */
     conn->refcount = 1;
