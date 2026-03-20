@@ -258,6 +258,8 @@ static const struct algorithm pseudo_algorithms[] =
     {{ MAGIC_ALG }, ALG_ID_ECDSA_P384, 0, 0, ECC_CURVE_P384R1 },
     {{ MAGIC_ALG }, ALG_ID_ECDSA_P521, 0, 0, ECC_CURVE_P521R1 },
     {{ MAGIC_ALG }, ALG_ID_RSA_SIGN },
+    {{ 0 }}, /* index 51 - unused */
+    {{ MAGIC_ALG }, ALG_ID_SP800_108_CTR_HMAC },  /* index 52 (0x34) - BCRYPT_SP800108_CTR_HMAC_ALG_HANDLE */
 };
 
 /* Algorithm pseudo-handles are denoted by having the lowest bit set.
@@ -388,6 +390,10 @@ NTSTATUS WINAPI BCryptOpenAlgorithmProvider( BCRYPT_ALG_HANDLE *handle, const WC
         if (!wcscmp( id, builtin_algorithms[i].name))
         {
             alg_id = i;
+            if (alg_id == ALG_ID_SP800_108_CTR_HMAC)
+            {
+                FIXME( "Opening SP800-108 CTR HMAC algorithm provider\n" );
+            }
             break;
         }
     }
@@ -821,6 +827,29 @@ static NTSTATUS set_alg_property( struct algorithm *alg, const WCHAR *prop, UCHA
 
 static NTSTATUS set_key_property( struct key *key, const WCHAR *prop, UCHAR *value, ULONG size, ULONG flags )
 {
+    /* Special handling for SP800-108 keys */
+    if (key->alg_id == ALG_ID_SP800_108_CTR_HMAC)
+    {
+        TRACE( "set_key_property for SP800-108: prop=%s\n", debugstr_w(prop) );
+
+        /* SP800-108 keys don't support most properties, just return success for compatibility */
+        if (!wcscmp( prop, BCRYPT_CHAINING_MODE ))
+        {
+            TRACE( "Ignoring chaining mode for SP800-108 key\n" );
+            return STATUS_SUCCESS;
+        }
+        else if (!wcscmp( prop, BCRYPT_KEY_LENGTH ))
+        {
+            if (size < sizeof(DWORD)) return STATUS_INVALID_PARAMETER;
+            /* Accept but ignore key length for SP800-108 */
+            TRACE( "Accepting key length %u for SP800-108\n", *(DWORD*)value );
+            return STATUS_SUCCESS;
+        }
+        /* Other properties are not applicable to SP800-108 */
+        TRACE( "Ignoring property %s for SP800-108 key\n", debugstr_w(prop) );
+        return STATUS_SUCCESS;
+    }
+
     if (!wcscmp( prop, BCRYPT_CHAINING_MODE ))
     {
         if (!wcscmp( (WCHAR *)value, BCRYPT_CHAIN_MODE_ECB ))
@@ -1280,9 +1309,16 @@ static NTSTATUS key_symmetric_generate( struct algorithm *alg, BCRYPT_KEY_HANDLE
     if ((alg->id == ALG_ID_PBKDF2 || alg->id == ALG_ID_SP800_108_CTR_HMAC) &&
             !get_alg_property( alg, BCRYPT_KEY_LENGTHS, (UCHAR *)&key_lengths, sizeof(key_lengths), &size ))
     {
-        if (secret_len > key_lengths.dwMaxLength / 8 || secret_len < key_lengths.dwMinLength / 8)
+        /* SP800-108 allows zero-length keys for placeholder/template keys */
+        if (alg->id == ALG_ID_SP800_108_CTR_HMAC && secret_len == 0)
+        {
+            TRACE( "SP800-108: Creating placeholder key with zero length\n" );
+            block_size = 64; /* Use a default block size for placeholder */
+        }
+        else if (secret_len > key_lengths.dwMaxLength / 8 || secret_len < key_lengths.dwMinLength / 8)
             return STATUS_INVALID_PARAMETER;
-        block_size = secret_len;
+        else
+            block_size = secret_len;
     }
     else if (!(block_size = get_block_size( alg ))) return STATUS_INVALID_PARAMETER;
     else if (!get_alg_property( alg, BCRYPT_KEY_LENGTHS, (UCHAR *)&key_lengths, sizeof(key_lengths), &size ))
@@ -1478,6 +1514,8 @@ static NTSTATUS key_import( struct algorithm *alg, struct key *decrypt_key, cons
     {
         BCRYPT_KEY_DATA_BLOB_HEADER *header = (BCRYPT_KEY_DATA_BLOB_HEADER *)input;
 
+        TRACE( "Importing KEY_DATA_BLOB for algorithm %d (SP800-108=%d)\n", alg->id, ALG_ID_SP800_108_CTR_HMAC );
+
         if (input_len < sizeof(BCRYPT_KEY_DATA_BLOB_HEADER)) return STATUS_BUFFER_TOO_SMALL;
         if (header->dwMagic != BCRYPT_KEY_DATA_BLOB_MAGIC) return STATUS_INVALID_PARAMETER;
         if (header->dwVersion != BCRYPT_KEY_DATA_BLOB_VERSION1)
@@ -1488,13 +1526,25 @@ static NTSTATUS key_import( struct algorithm *alg, struct key *decrypt_key, cons
         len = header->cbKeyData;
         if (len + sizeof(BCRYPT_KEY_DATA_BLOB_HEADER) > input_len) return STATUS_INVALID_PARAMETER;
 
+        if (alg->id == ALG_ID_SP800_108_CTR_HMAC)
+        {
+            FIXME( "Importing SP800-108 CTR HMAC key, key length=%lu\n", len );
+        }
+
         return key_symmetric_generate( alg, key, (UCHAR *)&header[1], len );
     }
     else if (!wcscmp( type, BCRYPT_OPAQUE_KEY_BLOB ))
     {
+        TRACE( "Importing OPAQUE_KEY_BLOB for algorithm %d (SP800-108=%d)\n", alg->id, ALG_ID_SP800_108_CTR_HMAC );
+
         if (input_len < sizeof(len)) return STATUS_BUFFER_TOO_SMALL;
         len = *(ULONG *)input;
         if (len + sizeof(len) > input_len) return STATUS_INVALID_PARAMETER;
+
+        if (alg->id == ALG_ID_SP800_108_CTR_HMAC)
+        {
+            FIXME( "Importing SP800-108 CTR HMAC key from OPAQUE_KEY_BLOB, key length=%lu\n", len );
+        }
 
         return key_symmetric_generate( alg, key, input + sizeof(len), len );
     }
@@ -2121,6 +2171,12 @@ NTSTATUS WINAPI BCryptGenerateSymmetricKey( BCRYPT_ALG_HANDLE handle, BCRYPT_KEY
     NTSTATUS status;
 
     TRACE( "%p, %p, %p, %lu, %p, %lu, %#lx\n", handle, ret_handle, object, object_len, secret, secret_len, flags );
+
+    if (alg && alg->id == ALG_ID_SP800_108_CTR_HMAC)
+    {
+        FIXME( "BCryptGenerateSymmetricKey called for SP800-108 CTR HMAC algorithm, secret_len=%lu\n", secret_len );
+    }
+
     if (object) FIXME( "ignoring object buffer\n" );
     if (!__wine_unixlib_handle)
     {
@@ -2482,6 +2538,10 @@ NTSTATUS WINAPI BCryptSetProperty( BCRYPT_HANDLE handle, const WCHAR *prop, UCHA
     case MAGIC_KEY:
     {
         struct key *key = (struct key *)object;
+        if (key->alg_id == ALG_ID_SP800_108_CTR_HMAC)
+        {
+            FIXME( "BCryptSetProperty called on SP800-108 key, property=%s, size=%lu\n", debugstr_w(prop), size );
+        }
         return set_key_property( key, prop, value, size, flags );
     }
     default:
@@ -2624,10 +2684,14 @@ static NTSTATUS derive_key_sp800_108_ctr_hmac( struct algorithm *alg, UCHAR *key
     ULONG hash_len, block_count, i;
     UCHAR counter_be[4], length_be[4];
     UCHAR separator = 0x00;
-    ULONG output_bits;
+    ULONGLONG output_bits;
     NTSTATUS status;
 
+    TRACE( "SP800-108 CTR HMAC: alg_id=%d, key_len=%lu, label_len=%lu, context_len=%lu, output_len=%lu\n",
+           alg->id, key_len, label_len, context_len, output_len );
+
     hash_len = builtin_algorithms[alg->id].hash_length;
+    if (!hash_len) return STATUS_INVALID_PARAMETER;
     if (output_len == 0 || output_len > ((ULONGLONG)1 << 29)) return STATUS_INVALID_PARAMETER;
 
     /* Calculate number of iterations needed */
@@ -2865,8 +2929,76 @@ NTSTATUS WINAPI BCryptDeriveKey( BCRYPT_SECRET_HANDLE handle, const WCHAR *kdf, 
     {
         return derive_key_hash( secret, desc, output, output_len, ret_len );
     }
+    else if (!wcscmp(kdf, BCRYPT_SP800_108_CTR_HMAC_ALGORITHM))
+    {
+        /* SP800-108 CTR HMAC KDF support for ASP.NET Core Data Protection */
+        struct key_asymmetric_derive_key_params params;
+        ULONG derived_key_len = len_from_bitlen( secret->privkey->u.a.bitlen );
+        struct algorithm *alg = NULL;
+        UCHAR *label = NULL, *context = NULL;
+        ULONG label_size = 0, context_size = 0;
+        UCHAR *derived_key;
+        NTSTATUS status;
+        ULONG i;
 
-    FIXME( "kdf %s not supportedi\n", debugstr_w(kdf) );
+        FIXME("SP800-108 CTR HMAC KDF requested in BCryptDeriveKey\n");
+
+        if (!desc) return STATUS_INVALID_PARAMETER;
+
+        /* Parse buffer descriptors for required parameters */
+        for (i = 0; i < desc->cBuffers; i++)
+        {
+            switch (desc->pBuffers[i].BufferType)
+            {
+            case KDF_HASH_ALGORITHM:
+                alg = get_hash_alg( desc->pBuffers + i, TRUE );
+                break;
+            case KDF_LABEL:
+                label = desc->pBuffers[i].pvBuffer;
+                label_size = desc->pBuffers[i].cbBuffer;
+                break;
+            case KDF_CONTEXT:
+                context = desc->pBuffers[i].pvBuffer;
+                context_size = desc->pBuffers[i].cbBuffer;
+                break;
+            default:
+                TRACE( "SP800-108: ignoring buffer type %lu\n", desc->pBuffers[i].BufferType );
+                break;
+            }
+        }
+
+        if (!alg)
+        {
+            FIXME( "SP800-108 CTR HMAC requires hash algorithm to be specified\n" );
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        /* First derive the shared secret from the key agreement */
+        if (!(derived_key = malloc( derived_key_len ))) return STATUS_NO_MEMORY;
+
+        params.privkey    = secret->privkey;
+        params.pubkey     = secret->pubkey;
+        params.output     = derived_key;
+        params.output_len = derived_key_len;
+        params.ret_len    = ret_len;
+
+        if ((status = UNIX_CALL( key_asymmetric_derive_key, &params )))
+        {
+            free( derived_key );
+            return status;
+        }
+
+        /* Now use the derived key for SP800-108 */
+        if (!output) { free( derived_key ); *ret_len = output_len; return STATUS_SUCCESS; }
+        status = derive_key_sp800_108_ctr_hmac( alg, derived_key, *params.ret_len,
+                                                 label, label_size, context, context_size,
+                                                 output, output_len );
+        free( derived_key );
+        if (!status) *ret_len = output_len;
+        return status;
+    }
+
+    FIXME( "kdf %s not supported\n", debugstr_w(kdf) );
     return STATUS_NOT_SUPPORTED;
 }
 
@@ -2923,14 +3055,19 @@ NTSTATUS WINAPI BCryptKeyDerivation( BCRYPT_KEY_HANDLE handle, BCryptBufferDesc 
 
     if (key->alg_id == ALG_ID_SP800_108_CTR_HMAC)
     {
+        FIXME( "SP800-108 CTR HMAC requested in BCryptKeyDerivation with key handle %p\n", key );
         if (!alg)
         {
             FIXME( "SP800-108 CTR HMAC requires hash algorithm to be specified\n" );
             return STATUS_INVALID_PARAMETER;
         }
+        FIXME( "Calling derive_key_sp800_108_ctr_hmac with secret_len=%u, label_size=%lu, context_size=%lu, output_size=%lu\n",
+               key->u.s.secret_len, label_size, context_size, output_size );
+        if (!output) { *ret_len = output_size; return STATUS_SUCCESS; }
         status = derive_key_sp800_108_ctr_hmac( alg, key->u.s.secret, key->u.s.secret_len,
                                                  label, label_size, context, context_size,
                                                  output, output_size );
+        FIXME( "derive_key_sp800_108_ctr_hmac returned status %#lx\n", status );
     }
     else
     {

@@ -41,6 +41,7 @@ static ULONG (WINAPI *pHttpCloseRequestQueue)(HANDLE queue);
 static ULONG (WINAPI *pHttpCloseServerSession)(HTTP_SERVER_SESSION_ID session_id);
 static ULONG (WINAPI *pHttpCloseUrlGroup)(HTTP_URL_GROUP_ID group_id);
 static ULONG (WINAPI *pHttpRemoveUrlFromUrlGroup)(HTTP_URL_GROUP_ID id, const WCHAR *url, ULONG flags);
+static ULONG (WINAPI *pHttpSetServerSessionProperty)(HTTP_SERVER_SESSION_ID id, HTTP_SERVER_PROPERTY property, void *value, ULONG length);
 static ULONG (WINAPI *pHttpSetUrlGroupProperty)(HTTP_URL_GROUP_ID id, HTTP_SERVER_PROPERTY property, void *value, ULONG length);
 
 static void init(void)
@@ -56,6 +57,7 @@ static void init(void)
     X(HttpCloseServerSession);
     X(HttpCloseUrlGroup);
     X(HttpRemoveUrlFromUrlGroup);
+    X(HttpSetServerSessionProperty);
     X(HttpSetUrlGroupProperty);
 #undef X
 }
@@ -1859,6 +1861,30 @@ static void test_v2_completion_port(void)
     ok(!ret, "Failed to close group, error %u.\n", ret);
 }
 
+static void test_HttpServerSessionProperty(void)
+{
+    HTTP_SERVER_SESSION_ID session;
+    HTTPAPI_VERSION version;
+    ULONG ret;
+
+    version.HttpApiMajorVersion = 2;
+    version.HttpApiMinorVersion = 0;
+    ret = pHttpCreateServerSession(version, &session, 0);
+    ok(!ret, "Unexpected return value %u.\n", ret);
+
+    /* Set QoS property - should succeed and not leak refcount */
+    if (pHttpSetServerSessionProperty)
+    {
+        HTTP_QOS_SETTING_INFO qos_info = {0};
+        ret = pHttpSetServerSessionProperty(session, HttpServerQosProperty, &qos_info, sizeof(qos_info));
+        ok(!ret, "Unexpected return value %u.\n", ret);
+    }
+
+    /* Close session - if refcount leaked, this would fail or leak memory */
+    ret = pHttpCloseServerSession(session);
+    ok(!ret, "Unexpected return value %u.\n", ret);
+}
+
 START_TEST(httpapi)
 {
     HTTPAPI_VERSION version = { 1, 0 };
@@ -1891,6 +1917,7 @@ START_TEST(httpapi)
     if (!HttpInitialize(version, HTTP_INITIALIZE_SERVER, NULL))
     {
         test_HttpCreateServerSession();
+        test_HttpServerSessionProperty();
         test_HttpCreateUrlGroup();
         test_v2_server();
         test_v2_queue_after_url();

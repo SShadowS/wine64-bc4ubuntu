@@ -20,6 +20,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
 
@@ -267,23 +268,26 @@ BOOL WINAPI LogonUserW( LPCWSTR lpszUsername, LPCWSTR lpszDomain, LPCWSTR lpszPa
     TRACE("%s %s %p 0x%08lx 0x%08lx %p\n", debugstr_w(lpszUsername),
           debugstr_w(lpszDomain), lpszPassword, dwLogonType, dwLogonProvider, phToken);
 
-    /* BC Management API Fix: Return impersonation token from current process token */
-    if (OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE, &process_token))
+    if (getenv("WINE_BC_AUTH_BYPASS"))
     {
-        /* Duplicate as impersonation token so CheckTokenMembership works */
-        if (DuplicateTokenEx(process_token, TOKEN_ALL_ACCESS, NULL,
-                            SecurityImpersonation, TokenImpersonation, &impersonation_token))
+        /* BC Management API Fix: Return impersonation token from current process token */
+        if (OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE, &process_token))
         {
+            /* Duplicate as impersonation token so CheckTokenMembership works */
+            if (DuplicateTokenEx(process_token, TOKEN_ALL_ACCESS, NULL,
+                                SecurityImpersonation, TokenImpersonation, &impersonation_token))
+            {
+                CloseHandle(process_token);
+                FIXME("BC AUTH: LogonUserW returning impersonation token for user %s\n",
+                      debugstr_w(lpszUsername));
+                *phToken = impersonation_token;
+                return TRUE;
+            }
             CloseHandle(process_token);
-            FIXME("BC AUTH: LogonUserW returning impersonation token for user %s\n",
-                  debugstr_w(lpszUsername));
-            *phToken = impersonation_token;
-            return TRUE;
         }
-        CloseHandle(process_token);
     }
 
-    /* Fallback to stub behavior if token creation fails */
+    /* Fallback to stub behavior */
     FIXME("%s %s %p 0x%08lx 0x%08lx %p - stub (token creation failed)\n",
           debugstr_w(lpszUsername), debugstr_w(lpszDomain), lpszPassword,
           dwLogonType, dwLogonProvider, phToken);

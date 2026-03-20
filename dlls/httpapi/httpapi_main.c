@@ -125,20 +125,17 @@ static CRITICAL_SECTION_DEBUG ws_meta_cs_debug =
 };
 static CRITICAL_SECTION ws_meta_cs = { &ws_meta_cs_debug, -1, 0, 0, 0, 0 };
 
-static struct request_ws_meta *get_ws_meta(HTTP_REQUEST_ID id)
+static BOOL get_ws_meta_copy(HTTP_REQUEST_ID id, struct request_ws_meta *out)
 {
     struct request_ws_meta *m;
+    BOOL found = FALSE;
     EnterCriticalSection(&ws_meta_cs);
     LIST_FOR_EACH_ENTRY(m, &ws_meta_list, struct request_ws_meta, entry)
     {
-        if (m->request_id == id)
-        {
-            LeaveCriticalSection(&ws_meta_cs);
-            return m;
-        }
+        if (m->request_id == id) { *out = *m; found = TRUE; break; }
     }
     LeaveCriticalSection(&ws_meta_cs);
-    return NULL;
+    return found;
 }
 
 static void remove_ws_meta(HTTP_REQUEST_ID id)
@@ -205,7 +202,7 @@ static void maybe_store_ws_meta_from_request(HTTP_REQUEST *request)
             USHORT cpy = min((USHORT)(sizeof(key_buf) - 1), uh->RawValueLength);
             memcpy(key_buf, uh->pRawValue, cpy); key_buf[cpy] = '\0';
         }
-        else if (uh->NameLength == 21 && !_strnicmp(uh->pName, "Sec-WebSocket-Protocol", uh->NameLength))
+        else if (uh->NameLength == 22 && !_strnicmp(uh->pName, "Sec-WebSocket-Protocol", uh->NameLength))
         {
             USHORT cpy = min((USHORT)(sizeof(proto_buf) - 1), uh->RawValueLength);
             memcpy(proto_buf, uh->pRawValue, cpy); proto_buf[cpy] = '\0';
@@ -279,7 +276,7 @@ done:
     return ok;
 }
 static void remove_request_mapping(HTTP_REQUEST_ID request_id);
-static void cleanup_stale_mappings(void);
+
 
 /* Define HTTP performance counter IDs */
 typedef enum _HTTP_PERFORMANCE_COUNTER_ID {
@@ -764,9 +761,10 @@ static ULONG add_url(HANDLE queue, const WCHAR *urlW, HTTP_URL_CONTEXT context)
 {
     struct http_add_url_params *params;
     ULONG ret = ERROR_SUCCESS;
-    OVERLAPPED ovl;
-    HANDLE hEvent;
+    DWORD bytes = 0;
     int len;
+
+    TRACE("add_url called: queue=%p, url=%s, context=%s\n", queue, debugstr_w(urlW), wine_dbgstr_longlong(context));
 
     len = WideCharToMultiByte(CP_ACP, 0, urlW, -1, NULL, 0, NULL, NULL);
     if (!(params = malloc(sizeof(struct http_add_url_params) + len)))
@@ -774,19 +772,18 @@ static ULONG add_url(HANDLE queue, const WCHAR *urlW, HTTP_URL_CONTEXT context)
     WideCharToMultiByte(CP_ACP, 0, urlW, -1, params->url, len, NULL, NULL);
     params->context = context;
 
-    /* Store original handle separately before setting alertable bit */
-    hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
-    if (!hEvent)
-    {
-        free(params);
-        return ERROR_OUTOFMEMORY;
-    }
-    ovl.hEvent = (HANDLE)((ULONG_PTR)hEvent | 1);
-
+    TRACE("Calling SYNCHRONOUS DeviceIoControl: queue=%p, IOCTL=0x%x\n", queue, IOCTL_HTTP_ADD_URL);
     if (!DeviceIoControl(queue, IOCTL_HTTP_ADD_URL, params,
-            (DWORD)(sizeof(struct http_add_url_params) + len), NULL, 0, NULL, &ovl))
+            (DWORD)(sizeof(struct http_add_url_params) + len), NULL, 0, &bytes, NULL))
+    {
         ret = GetLastError();
-    CloseHandle(hEvent);  /* Close the original handle, not the modified one */
+        TRACE("DeviceIoControl failed: %u\n", ret);
+    }
+    else
+    {
+        TRACE("DeviceIoControl succeeded synchronously\n");
+    }
+
     free(params);
     return ret;
 }
@@ -1216,20 +1213,21 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
     /* Gate behind explicit opt-in environment variable */
     if (getenv("WINE_HTTP_WS_POC") && response->s.StatusCode == 401)
     {
-        struct request_ws_meta *m = get_ws_meta(id);
-        
+        struct request_ws_meta ws_meta;
+        BOOL has_ws_meta = get_ws_meta_copy(id, &ws_meta);
+
         /* Only convert if this was actually a WebSocket upgrade request */
-        if (m && m->upgrade_requested)
+        if (has_ws_meta && ws_meta.upgrade_requested)
         {
             char *accept_val = NULL; USHORT accept_len = 0;
             
             /* Preserve original status for debugging */
-            m->original_status_code = response->s.StatusCode;
-            
-            FIXME("POC MODE: Converting %d to 101 for WebSocket upgrade (WINE_HTTP_WS_POC enabled)\n", 
-                  m->original_status_code);
-            TRACE("Original status: %d, changing to 101 for WebSocket request %s\n", 
-                  m->original_status_code, wine_dbgstr_longlong(id));
+            ws_meta.original_status_code = response->s.StatusCode;
+
+            FIXME("POC MODE: Converting %d to 101 for WebSocket upgrade (WINE_HTTP_WS_POC enabled)\n",
+                  ws_meta.original_status_code);
+            TRACE("Original status: %d, changing to 101 for WebSocket request %s\n",
+                  ws_meta.original_status_code, wine_dbgstr_longlong(id));
 
             /* Change status to 101 Switching Protocols */
             response->s.StatusCode = 101;
@@ -1247,7 +1245,7 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
             response->s.Headers.KnownHeaders[HttpHeaderWwwAuthenticate].RawValueLength = 0;
 
             /* If we captured a client key, compute and add Sec-WebSocket-Accept */
-            if (m->sec_ws_key[0] && compute_websocket_accept(m->sec_ws_key, &accept_val, &accept_len))
+            if (ws_meta.sec_ws_key[0] && compute_websocket_accept(ws_meta.sec_ws_key, &accept_val, &accept_len))
             {
                 HTTP_UNKNOWN_HEADER *old = response->s.Headers.pUnknownHeaders;
                 USHORT old_cnt = response->s.Headers.UnknownHeaderCount;
@@ -1256,7 +1254,7 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
                 {
                     if (old_cnt && old) memcpy(arr, old, old_cnt * sizeof(*arr));
                     arr[old_cnt].pName = "Sec-WebSocket-Accept";
-                    arr[old_cnt].NameLength = 19;
+                    arr[old_cnt].NameLength = 20;
                     arr[old_cnt].pRawValue = accept_val;
                     arr[old_cnt].RawValueLength = accept_len;
 
@@ -1391,119 +1389,6 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
         }
         TRACE("*** END BC RESPONSE DEBUG ***\n");
     }
-
-    /* === WINE BC RESPONSE WORKAROUND - DISABLED === */
-    /* This workaround was causing incorrect responses for different endpoints */
-    /* The async I/O fix should resolve the underlying issue */
-#if 0
-    static HTTP_DATA_CHUNK synthetic_chunk;
-    static char synthetic_soap_xml[] =
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
-        "<discovery xmlns=\"http://schemas.xmlsoap.org/disco/\" "
-        "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" "
-        "xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">"
-        "<contractRef ref=\"http://localhost:7047/BC/WS/SystemService\" "
-        "xmlns=\"http://schemas.xmlsoap.org/disco/scl/\"/>"
-        "</discovery>";
-
-    static char synthetic_api_json[] =
-        "{\"@odata.context\":\"http://localhost:7048/BC/api/v2.0/$metadata#companies\","
-        "\"value\":[{\"id\":\"00000000-0000-0000-0000-000000000001\","
-        "\"systemVersion\":\"1\",\"name\":\"CRONUS USA, Inc.\","
-        "\"displayName\":\"CRONUS USA, Inc.\",\"businessProfileId\":\"\"}]}";
-
-    if (response && response->s.StatusCode == 200 && response->s.EntityChunkCount == 0)
-    {
-        /* Check if this looks like a BC endpoint that should have a body */
-        int needs_workaround = 0;
-        int is_api_endpoint = 0;
-
-        /* Check Content-Type header for XML (SOAP) */
-        if (response->s.Headers.KnownHeaders[HttpHeaderContentType].pRawValue)
-        {
-            const char *content_type = response->s.Headers.KnownHeaders[HttpHeaderContentType].pRawValue;
-            if (strstr(content_type, "xml") || strstr(content_type, "soap"))
-            {
-                needs_workaround = 1;
-                TRACE("BC workaround: Detected XML/SOAP Content-Type\n");
-            }
-            else if (strstr(content_type, "json") || strstr(content_type, "odata"))
-            {
-                needs_workaround = 1;
-                is_api_endpoint = 1;
-                TRACE("BC workaround: Detected JSON/OData Content-Type\n");
-            }
-        }
-        /* For API endpoints without Content-Type, check for OData headers */
-        else if (response->s.Headers.UnknownHeaderCount > 0)
-        {
-            ULONG i;
-            for (i = 0; i < response->s.Headers.UnknownHeaderCount; i++)
-            {
-                if (response->s.Headers.pUnknownHeaders[i].pName &&
-                    strstr(response->s.Headers.pUnknownHeaders[i].pName, "OData"))
-                {
-                    needs_workaround = 1;
-                    is_api_endpoint = 1;
-                    TRACE("BC workaround: Detected OData header\n");
-                    break;
-                }
-            }
-        }
-
-        /* Fallback: If no Content-Type and it's a 200 with no body, likely BC API endpoint */
-        if (!needs_workaround && !response->s.Headers.KnownHeaders[HttpHeaderContentType].pRawValue)
-        {
-            needs_workaround = 1;
-            is_api_endpoint = 1;
-            TRACE("BC workaround: No Content-Type on 200 response, assuming API endpoint\n");
-        }
-
-        /* Apply workaround if this endpoint should have a body */
-        if (needs_workaround)
-        {
-            TRACE("*** BC RESPONSE WORKAROUND ACTIVATED ***\n");
-
-            /* Setup synthetic chunk based on endpoint type */
-            synthetic_chunk.DataChunkType = HttpDataChunkFromMemory;
-
-            if (is_api_endpoint)
-            {
-                TRACE("Injecting synthetic API/OData JSON response\n");
-                synthetic_chunk.FromMemory.pBuffer = synthetic_api_json;
-                synthetic_chunk.FromMemory.BufferLength = strlen(synthetic_api_json);
-
-                /* Ensure Content-Type is set for API responses */
-                if (!response->s.Headers.KnownHeaders[HttpHeaderContentType].pRawValue)
-                {
-                    ((HTTP_RESPONSE_V1*)response)->Headers.KnownHeaders[HttpHeaderContentType].pRawValue = "application/json; odata.metadata=minimal; charset=utf-8";
-                    ((HTTP_RESPONSE_V1*)response)->Headers.KnownHeaders[HttpHeaderContentType].RawValueLength = strlen("application/json; odata.metadata=minimal; charset=utf-8");
-                }
-            }
-            else
-            {
-                TRACE("Injecting synthetic SOAP XML response\n");
-                synthetic_chunk.FromMemory.pBuffer = synthetic_soap_xml;
-                synthetic_chunk.FromMemory.BufferLength = strlen(synthetic_soap_xml);
-            }
-
-            /* Inject into response - modify the const response temporarily */
-            ((HTTP_RESPONSE_V1*)response)->EntityChunkCount = 1;
-            ((HTTP_RESPONSE_V1*)response)->pEntityChunks = &synthetic_chunk;
-
-            /* Fix Content-Length header to match injected body */
-            static char content_length_value[20];
-            snprintf(content_length_value, sizeof(content_length_value), "%lu", synthetic_chunk.FromMemory.BufferLength);
-            ((HTTP_RESPONSE_V1*)response)->Headers.KnownHeaders[HttpHeaderContentLength].pRawValue = content_length_value;
-            ((HTTP_RESPONSE_V1*)response)->Headers.KnownHeaders[HttpHeaderContentLength].RawValueLength = strlen(content_length_value);
-
-            TRACE("Injected %lu bytes of %s\n", synthetic_chunk.FromMemory.BufferLength,
-                  is_api_endpoint ? "JSON" : "XML");
-            TRACE("Updated Content-Length to: %s\n", content_length_value);
-        }
-    }
-#endif
-    /* === END BC SOAP WORKAROUND (DISABLED) === */
 
     status_len = snprintf(dummy, sizeof(dummy), "%hu", response->s.StatusCode);
     if (status_len < 0 || status_len >= sizeof(dummy))
@@ -1827,10 +1712,10 @@ ULONG WINAPI HttpSendHttpResponse(HANDLE queue, HTTP_REQUEST_ID id, ULONG flags,
             TRACE("HttpSendHttpResponse: Async DeviceIoControl failed, GetLastError() = %u\n", ret);
             if (ret == ERROR_IO_PENDING)
             {
-                /* Operation is pending - buffer must stay alive until completion */
+                /* Operation is pending - driver copied buffer synchronously */
                 ovl->InternalHigh = body_len;
-                TRACE("HttpSendHttpResponse: Async operation pending, buffer ownership transferred\n");
-                /* Do NOT free buffer here - it will be freed by the completion handler or caller */
+                TRACE("HttpSendHttpResponse: Async operation pending\n");
+                free(buffer);
             }
             else
             {
@@ -2046,10 +1931,10 @@ ULONG WINAPI HttpSendResponseEntityBody(HANDLE queue, HTTP_REQUEST_ID id,
             TRACE("HttpSendResponseEntityBody: Async DeviceIoControl failed, GetLastError() = %u\n", ret);
             if (ret == ERROR_IO_PENDING)
             {
-                /* Operation is pending - buffer must stay alive until completion */
+                /* Operation is pending - driver copied buffer synchronously */
                 ovl->InternalHigh = len;
-                TRACE("HttpSendResponseEntityBody: Async operation pending, %u bytes queued, buffer ownership transferred\n", len);
-                /* Do NOT free buffer here - it will be freed by the completion handler or caller */
+                TRACE("HttpSendResponseEntityBody: Async operation pending, %u bytes queued\n", len);
+                free(buffer);
             }
             else
             {
@@ -2263,29 +2148,6 @@ static void remove_request_mapping(HTTP_REQUEST_ID request_id)
     LeaveCriticalSection(&request_mapping_cs);
 }
 
-/* Clean up stale mappings (older than 5 minutes) */
-static void cleanup_stale_mappings(void)
-{
-    struct request_url_group_mapping *mapping, *next;
-    ULONGLONG current_time = GetTickCount64();
-    const ULONGLONG STALE_TIMEOUT = 300000; /* 5 minutes */
-    
-    EnterCriticalSection(&request_mapping_cs);
-    LIST_FOR_EACH_ENTRY_SAFE(mapping, next, &request_mappings,
-                            struct request_url_group_mapping, entry)
-    {
-        if (current_time - mapping->timestamp > STALE_TIMEOUT)
-        {
-            TRACE("Removing stale mapping for request %s\n",
-                  wine_dbgstr_longlong(mapping->request_id));
-            list_remove(&mapping->entry);
-            url_group_release(mapping->group);
-            free(mapping);
-        }
-    }
-    LeaveCriticalSection(&request_mapping_cs);
-}
-
 struct server_session
 {
     struct list entry;
@@ -2461,7 +2323,6 @@ ULONG WINAPI HttpCreateUrlGroup(HTTP_SERVER_SESSION_ID session_id, HTTP_URL_GROU
 ULONG WINAPI HttpCloseUrlGroup(HTTP_URL_GROUP_ID id)
 {
     struct url_group *group;
-    struct url_group_url *url_entry, *url_next;
 
     TRACE("id %s.\n", wine_dbgstr_longlong(id));
 
@@ -2471,17 +2332,39 @@ ULONG WINAPI HttpCloseUrlGroup(HTTP_URL_GROUP_ID id)
     /* Remove all URLs from the queue first */
     if (group->queue)
     {
+        struct url_group_url *url_entry;
+        int count = 0, i = 0;
+        WCHAR **urls = NULL;
+
         EnterCriticalSection(&g_httpapi_cs);
-        LIST_FOR_EACH_ENTRY_SAFE(url_entry, url_next, &group->urls, struct url_group_url, entry)
+        LIST_FOR_EACH_ENTRY(url_entry, &group->urls, struct url_group_url, entry)
         {
-            if (url_entry->url)
+            if (url_entry->url) count++;
+        }
+        if (count)
+        {
+            urls = calloc(count, sizeof(WCHAR *));
+            if (urls)
             {
-                LeaveCriticalSection(&g_httpapi_cs);
-                remove_url(group->queue, url_entry->url);
-                EnterCriticalSection(&g_httpapi_cs);
+                LIST_FOR_EACH_ENTRY(url_entry, &group->urls, struct url_group_url, entry)
+                {
+                    if (url_entry->url && i < count)
+                        urls[i++] = wcsdup(url_entry->url);
+                }
             }
         }
         LeaveCriticalSection(&g_httpapi_cs);
+
+        /* Remove URLs without holding lock */
+        for (i = 0; i < count && urls; i++)
+        {
+            if (urls[i])
+            {
+                remove_url(group->queue, urls[i]);
+                free(urls[i]);
+            }
+        }
+        free(urls);
     }
 
     url_group_release(group);  /* Release reference from get_url_group() */
@@ -2842,71 +2725,22 @@ static struct url_group *get_url_group_for_request(HTTP_REQUEST_ID id)
  */
 static void inject_auth_header_if_needed(HTTP_RESPONSE *response, HTTP_REQUEST_ID id)
 {
-    struct url_group *group;
-    
-    TRACE("inject_auth_header_if_needed called for request %s, status %d\n", 
+    TRACE("inject_auth_header_if_needed called for request %s, status %d\n",
           wine_dbgstr_longlong(id), response->s.StatusCode);
-    
-    /* Only inject for 401 responses without existing WWW-Authenticate */
-    if (response->s.StatusCode != 401)
+
+    /* BC Management API Fix: Skip NTLM injection for all 401 responses
+     * This allows BC's managed authentication (including NavAdministratorViaBasicAuthValidator)
+     * to handle authentication via the Authorization header instead of Wine forcing NTLM.
+     * BC will add its own WWW-Authenticate header if needed. */
+    if (response->s.StatusCode == 401)
     {
-        TRACE("Not a 401 response (status=%d), skipping auth header injection\n", response->s.StatusCode);
+        TRACE("BC AUTH FIX: Skipping NTLM injection for 401 response %s - letting BC handle auth\n",
+              wine_dbgstr_longlong(id));
         return;
     }
-        
-    if (response->s.Headers.KnownHeaders[HttpHeaderWwwAuthenticate].pRawValue)
-    {
-        TRACE("401 response already has WWW-Authenticate: %s\n", 
-              response->s.Headers.KnownHeaders[HttpHeaderWwwAuthenticate].pRawValue);
-        return;
-    }
-    
-    /* Get URL group to check auth settings */
-    group = get_url_group_for_request(id);
-    if (!group)
-    {
-        TRACE("No URL group found for request %s, cannot inject auth header\n", wine_dbgstr_longlong(id));
-        return;
-    }
-    
-    if (!group->auth_enabled)
-    {
-        TRACE("URL group for request %s has auth_enabled=%d, forcing NTLM for BC compatibility\n", 
-              wine_dbgstr_longlong(id), group->auth_enabled);
-        /* HACK: Force NTLM authentication for Business Central compatibility 
-         * BC Server expects Wine to add WWW-Authenticate header but doesn't configure auth */
-        EnterCriticalSection(&g_httpapi_cs);
-        group->auth_enabled = TRUE;
-        group->auth_schemes = HTTP_AUTH_SCHEME_NTLM;
-        LeaveCriticalSection(&g_httpapi_cs);
-    }
-    else if (!(group->auth_schemes & HTTP_AUTH_SCHEME_NTLM))
-    {
-        TRACE("URL group has auth but not NTLM (schemes=0x%lx), adding NTLM for BC compatibility\n", 
-              group->auth_schemes);
-        /* Add NTLM to existing auth schemes for BC compatibility */
-        EnterCriticalSection(&g_httpapi_cs);
-        group->auth_schemes |= HTTP_AUTH_SCHEME_NTLM;
-        LeaveCriticalSection(&g_httpapi_cs);
-    }
-    
-    /* Inject appropriate authentication header */
-    TRACE("URL group auth_schemes = 0x%lx, HTTP_AUTH_SCHEME_NTLM = 0x%x\n", 
-          group->auth_schemes, HTTP_AUTH_SCHEME_NTLM);
-    
-    if (group->auth_schemes & HTTP_AUTH_SCHEME_NTLM)
-    {
-        TRACE("Auto-injecting WWW-Authenticate: NTLM for 401 response\n");
-        response->s.Headers.KnownHeaders[HttpHeaderWwwAuthenticate].pRawValue = "NTLM";
-        response->s.Headers.KnownHeaders[HttpHeaderWwwAuthenticate].RawValueLength = 4;
-    }
-    else
-    {
-        TRACE("NTLM not in auth_schemes, not injecting header\n");
-    }
-    /* Add other schemes as needed */
-    
-    url_group_release(group);
+
+    /* Non-401 responses don't need auth header injection */
+    TRACE("Not a 401 response (status=%d), skipping auth header injection\n", response->s.StatusCode);
 }
 
 /***********************************************************************
@@ -3145,13 +2979,18 @@ ULONG WINAPI HttpSetServerSessionProperty(HTTP_SERVER_SESSION_ID id,
         {
             const HTTP_QOS_SETTING_INFO *info = value;
             if (length < sizeof(HTTP_QOS_SETTING_INFO))
+            {
+                server_session_release(session);
                 return ERROR_INSUFFICIENT_BUFFER;
-                
+            }
+
             FIXME("Ignoring QoS setting %u.\n", info->QosType);
+            server_session_release(session);
             return ERROR_SUCCESS;
         }
         default:
             FIXME("Unhandled property %u.\n", property);
+            server_session_release(session);
             return ERROR_CALL_NOT_IMPLEMENTED;
     }
 }
@@ -3180,10 +3019,12 @@ ULONG WINAPI HttpQueryServerSessionProperty(HTTP_SERVER_SESSION_ID id,
     {
         case HttpServerQosProperty:
             FIXME("Unimplemented QoS property query.\n");
+            server_session_release(session);
             return ERROR_CALL_NOT_IMPLEMENTED;
-            
+
         default:
             FIXME("Unhandled property %u.\n", property);
+            server_session_release(session);
             return ERROR_CALL_NOT_IMPLEMENTED;
     }
 }

@@ -4790,6 +4790,138 @@ static void test_PBKDF2(void)
     ok(status == STATUS_SUCCESS, "got %#lx\n", status);
 }
 
+static void test_SP800_108(void)
+{
+    static UCHAR label[] = "TestLabel";
+    static UCHAR context[] = "TestContext";
+    static BCryptBuffer sp800_108_param_buffers[] =
+    {
+        {
+            sizeof(BCRYPT_SHA256_ALGORITHM),
+            KDF_HASH_ALGORITHM,
+            (void *)BCRYPT_SHA256_ALGORITHM,
+        },
+        {
+            sizeof(label) - 1,
+            KDF_LABEL,
+            label,
+        },
+        {
+            sizeof(context) - 1,
+            KDF_CONTEXT,
+            context,
+        }
+    };
+    static BCryptBufferDesc sp800_108_params =
+    {
+        BCRYPTBUFFER_VERSION,
+        ARRAY_SIZE(sp800_108_param_buffers),
+        sp800_108_param_buffers,
+    };
+
+    BCRYPT_KEY_LENGTHS_STRUCT key_lengths;
+    BCRYPT_ALG_HANDLE alg;
+    BCRYPT_KEY_HANDLE key;
+    NTSTATUS status;
+    ULONG val, size;
+    BYTE buf[64];
+
+    status = BCryptOpenAlgorithmProvider(&alg, BCRYPT_SP800_108_CTR_HMAC_ALGORITHM, NULL, 0);
+    if (status == STATUS_NOT_FOUND)
+    {
+        win_skip("SP800_108_CTR_HMAC not available\n");
+        return;
+    }
+    ok(!status, "got %#lx\n", status);
+    ok(pBCryptKeyDerivation != NULL, "BCryptKeyDerivation not available\n");
+
+    val = size = 0;
+    status = BCryptGetProperty(alg, BCRYPT_OBJECT_LENGTH, (UCHAR *)&val, sizeof(val), &size, 0);
+    ok(!status, "got %#lx\n", status);
+    ok(val, "got %lu\n", val);
+    ok(size == sizeof(val), "got %lu\n", size);
+
+    val = size = 0;
+    status = BCryptGetProperty(alg, BCRYPT_BLOCK_LENGTH, (UCHAR *)&val, sizeof(val), &size, 0);
+    ok(status == STATUS_NOT_SUPPORTED, "got %#lx\n", status);
+
+    memset(&key_lengths, 0xfe, sizeof(key_lengths));
+    size = 0;
+    status = BCryptGetProperty(alg, BCRYPT_KEY_LENGTHS, (UCHAR *)&key_lengths, sizeof(key_lengths), &size, 0);
+    ok(!status, "got %#lx\n", status);
+    ok(size == sizeof(key_lengths), "got %lu\n", size);
+    ok(key_lengths.dwMinLength == 8, "got %lu\n", key_lengths.dwMinLength);
+    ok(key_lengths.dwMaxLength == 16384, "got %lu\n", key_lengths.dwMaxLength);
+    ok(key_lengths.dwIncrement == 8, "got %lu\n", key_lengths.dwIncrement);
+
+    key = 0;
+    status = BCryptGenerateSymmetricKey(alg, &key, NULL, 0, (UCHAR *)"testkey", 7, 0);
+    ok(!status, "got %#lx\n", status);
+
+    val = size = 0;
+    status = BCryptGetProperty(key, BCRYPT_KEY_STRENGTH, (UCHAR *)&val, sizeof(val), &size, 0);
+    ok(!status, "got %#lx\n", status);
+    ok(val == 7 * 8, "got %lu\n", val);
+
+    /* Test derivation with label and context */
+    memset(buf, 0, sizeof(buf));
+    status = pBCryptKeyDerivation(key, &sp800_108_params, buf, 32, &size, 0);
+    ok(!status, "got %#lx\n", status);
+    ok(size == 32, "size = %lu\n", size);
+
+    /* Verify output is not all zeros */
+    for (val = 0; val < 32; val++)
+        if (buf[val] != 0) break;
+    ok(val < 32, "derived key is all zeros\n");
+
+    /* Test without label/context (only hash algorithm) */
+    sp800_108_params.cBuffers = 1;
+    memset(buf, 0, sizeof(buf));
+    status = pBCryptKeyDerivation(key, &sp800_108_params, buf, 64, &size, 0);
+    ok(!status, "got %#lx\n", status);
+    ok(size == 64, "size = %lu\n", size);
+
+    /* Verify deterministic output */
+    {
+        BYTE buf2[64];
+        memset(buf2, 0, sizeof(buf2));
+        status = pBCryptKeyDerivation(key, &sp800_108_params, buf2, 64, &size, 0);
+        ok(!status, "got %#lx\n", status);
+        ok(!memcmp(buf, buf2, 64), "outputs don't match\n");
+    }
+
+    /* Test with NULL output to get required size */
+    sp800_108_params.cBuffers = 3;  /* restore full params */
+    size = 0;
+    status = pBCryptKeyDerivation(key, &sp800_108_params, NULL, 32, &size, 0);
+    ok(status == STATUS_SUCCESS, "got %#lx\n", status);
+    ok(size == 32, "expected size 32, got %lu\n", size);
+
+    /* Test with output_size = 0 */
+    status = pBCryptKeyDerivation(key, &sp800_108_params, buf, 0, &size, 0);
+    ok(status == STATUS_INVALID_PARAMETER, "got %#lx\n", status);
+
+    /* Verify deterministic output with full params */
+    {
+        BYTE buf2[32];
+        sp800_108_params.cBuffers = 3;
+        memset(buf, 0, sizeof(buf));
+        status = pBCryptKeyDerivation(key, &sp800_108_params, buf, 32, &size, 0);
+        ok(!status, "got %#lx\n", status);
+        ok(size == 32, "size = %lu\n", size);
+
+        memset(buf2, 0, sizeof(buf2));
+        status = pBCryptKeyDerivation(key, &sp800_108_params, buf2, 32, &size, 0);
+        ok(!status, "got %#lx\n", status);
+        ok(!memcmp(buf, buf2, 32), "deterministic output mismatch with full params\n");
+    }
+
+    status = BCryptDestroyKey(key);
+    ok(!status, "got %#lx\n", status);
+    status = BCryptCloseAlgorithmProvider(alg, 0);
+    ok(status == STATUS_SUCCESS, "got %#lx\n", status);
+}
+
 START_TEST(bcrypt)
 {
     HMODULE module;
@@ -4830,6 +4962,7 @@ START_TEST(bcrypt)
     test_rsa_encrypt();
     test_RC4();
     test_PBKDF2();
+    test_SP800_108();
 
     FreeLibrary(module);
 }

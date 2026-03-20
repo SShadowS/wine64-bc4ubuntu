@@ -23,12 +23,14 @@
 #include <stdlib.h>
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
+#include <winsock2.h>
 #include "wine/http.h"
 #include "winternl.h"
 #include "ddk/wdm.h"
 #include "wine/debug.h"
 #include <stdint.h>
 #include "wine/list.h"
+#include "bcrypt.h"
 #include "http.h"
 
 /* WebSocket limits and timeouts */
@@ -96,56 +98,6 @@ static BOOL async_send_enabled = TRUE;  /* Async send enabled by default */
 
 static HTTP_REQUEST_ID req_id_counter;
 static HTTP_CONNECTION_ID conn_id_counter;
-
-/* --- Minimal SHA1 implementation (for WebSocket Accept computation) --- */
-typedef struct { uint32_t state[5]; uint64_t count; unsigned char buffer[64]; } sha1_ctx;
-
-static void sha1_transform(uint32_t state[5], const unsigned char buffer[64])
-{
-    uint32_t a, b, c, d, e, t, W[80]; int i;
-    for (i = 0; i < 16; i++)
-        W[i] = (buffer[4*i]<<24) | (buffer[4*i+1]<<16) | (buffer[4*i+2]<<8) | buffer[4*i+3];
-    for (; i < 80; i++) { uint32_t x = (W[i-3]^W[i-8]^W[i-14]^W[i-16]); W[i] = (x<<1) | (x>>31); }
-    a = state[0]; b = state[1]; c = state[2]; d = state[3]; e = state[4];
-    for (i = 0; i < 80; i++)
-    {
-        uint32_t f, k;
-        if (i < 20) { f = (b & c) | ((~b) & d); k = 0x5a827999; }
-        else if (i < 40) { f = b ^ c ^ d; k = 0x6ed9eba1; }
-        else if (i < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8f1bbcdc; }
-        else { f = b ^ c ^ d; k = 0xca62c1d6; }
-        t = ((a<<5) | (a>>27)) + f + e + k + W[i];
-        e = d; d = c; c = (b<<30) | (b>>2); b = a; a = t;
-    }
-    state[0] += a; state[1] += b; state[2] += c; state[3] += d; state[4] += e;
-}
-
-static void sha1_init(sha1_ctx *ctx)
-{ ctx->state[0]=0x67452301; ctx->state[1]=0xEFCDAB89; ctx->state[2]=0x98BADCFE; ctx->state[3]=0x10325476; ctx->state[4]=0xC3D2E1F0; ctx->count=0; }
-
-static void sha1_update(sha1_ctx *ctx, const unsigned char *data, size_t len)
-{
-    size_t i, j = (size_t)((ctx->count >> 3) & 63);
-    ctx->count += ((uint64_t)len) << 3;
-    if ((j + len) > 63)
-    {
-        size_t part = 64 - j;
-        memcpy(&ctx->buffer[j], data, part);
-        sha1_transform(ctx->state, ctx->buffer);
-        for (i = part; i + 63 < len; i += 64) sha1_transform(ctx->state, &data[i]);
-        j = 0; len -= i; data += i;
-    }
-    memcpy(&ctx->buffer[j], data, len);
-}
-
-static void sha1_final(sha1_ctx *ctx, unsigned char digest[20])
-{
-    unsigned char finalcount[8]; unsigned char c80 = 0x80, czero = 0x00; size_t i;
-    for (i = 0; i < 8; i++) finalcount[i] = (unsigned char)((ctx->count >> ((7 - i) * 8)) & 255);
-    sha1_update(ctx, &c80, 1); while ((ctx->count & 504) != 448) sha1_update(ctx, &czero, 1);
-    sha1_update(ctx, finalcount, 8);
-    for (i = 0; i < 20; i++) digest[i] = (unsigned char)((ctx->state[i>>2] >> ((3 - (i & 3)) * 8)) & 255);
-}
 
 struct connection
 {
@@ -234,6 +186,12 @@ struct connection
         size_t capacity;
     } ws_app_in;
 
+    /* Dispatch tracking for complete_pending_irps */
+    BOOL dispatched;
+
+    /* Reference counting for send worker thread safety */
+    LONG refcount;
+
     /* List of IRPs waiting for disconnect notification */
     LIST_ENTRY wait_queue;
 
@@ -300,7 +258,7 @@ static void accept_connection(SOCKET socket)
     ULONG one = 1;
     SOCKET peer;
 
-    if ((peer = accept(socket, NULL, NULL)) == INVALID_SOCKET)
+    if ((peer = WSAAccept(socket, NULL, NULL, NULL, 0)) == INVALID_SOCKET)
     {
         if (WSAGetLastError() != WSAEWOULDBLOCK)
             TRACE("accept() failed with error %u on socket %#Ix\n", WSAGetLastError(), (ULONG_PTR)socket);
@@ -329,6 +287,7 @@ static void accept_connection(SOCKET socket)
     ioctlsocket(peer, FIONBIO, &one);
     conn->socket = peer;
     conn->shutdown = FALSE;  /* Ensure connection is marked as active */
+    conn->refcount = 1;
     InitializeListHead(&conn->wait_queue);
     InitializeListHead(&conn->ws_recv_irp_queue);
 
@@ -400,11 +359,23 @@ static void shutdown_connection(struct connection *conn)
 }
 
 /* Forward declarations for async send infrastructure */
+static void close_connection(struct connection *conn);
 static void cleanup_pending_sends(struct connection *conn);
 static void start_send_worker(void);
 static NTSTATUS http_complete_send(struct request_queue *queue, struct connection *conn,
                                      const struct http_response *response, IRP *irp,
                                      DWORD bytes_sent, BOOL have_lock);
+
+static void conn_addref(struct connection *conn)
+{
+    InterlockedIncrement(&conn->refcount);
+}
+
+static void conn_release(struct connection *conn)
+{
+    if (!InterlockedDecrement(&conn->refcount))
+        close_connection(conn);
+}
 
 static void close_connection(struct connection *conn)
 {
@@ -869,9 +840,6 @@ static void complete_pending_irps(struct request_queue *queue)
     int completed = 0;
     LIST_ENTRY *irp_entry;
     struct connection *conn;
-    struct connection *used_conns[100];  /* POC: Track used connections */
-    int used_count = 0;
-    int i;
     
     if (!queue)
         return;
@@ -891,7 +859,7 @@ static void complete_pending_irps(struct request_queue *queue)
             TRACE("Available connection %p for queue %p (req_id: %I64x)\n", conn, queue, conn->req_id);
         }
     }
-    TRACE("Found %d available connections (out of %d total) for queue %p, used %d so far\n", available_count, total_conns, queue, used_count);
+    TRACE("Found %d available connections (out of %d total) for queue %p\n", available_count, total_conns, queue);
 
     /* Process all available connections with parsed requests */
     /* POC FIX: Process ALL available connections, not just one */
@@ -904,38 +872,23 @@ static void complete_pending_irps(struct request_queue *queue)
         {
             search_count++;
             /* Connection must be available and already assigned to this queue */
-            if (conn->available && conn->queue == queue)
+            if (conn->available && conn->queue == queue && !conn->dispatched)
             {
                 TRACE("Checking connection %p (search #%d): available=%d, queue match=%d\n", conn, search_count, conn->available, (conn->queue == queue));
-                /* Check if we already used this connection in this call */
-                int already_used = 0;
-                for (i = 0; i < used_count; i++)
-                {
-                    if (used_conns[i] == conn)
-                    {
-                        already_used = 1;
-                        TRACE("Connection %p already used in this call\n", conn);
-                        break;
-                    }
-                }
-                if (!already_used)
-                {
-                    TRACE("Found unused available connection %p for processing\n", conn);
-                    break;  /* Found an unused available connection */
-                }
+                TRACE("Found unused available connection %p for processing\n", conn);
+                break;  /* Found an undispatched available connection */
             }
         }
 
         /* No available connections with requests? Stop */
-        if (!conn || !conn->available || conn->queue != queue)
+        if (!conn || !conn->available || conn->queue != queue || conn->dispatched)
         {
             TRACE("No more available connections: conn=%p, available=%d, queue_match=%d\n", conn, conn ? conn->available : 0, conn ? (conn->queue == queue) : 0);
             break;
         }
-            
-        /* Track this connection as used */
-        if (used_count < 100)
-            used_conns[used_count++] = conn;
+
+        /* Mark this connection as dispatched for this call */
+        conn->dispatched = TRUE;
             
         /* Remove IRP from queue in FIFO order */
         irp_entry = RemoveHeadList(&queue->irp_queue);
@@ -968,7 +921,7 @@ static void complete_pending_irps(struct request_queue *queue)
         irp->IoStatus.Status = complete_irp(conn, irp);
 
         /* IMPORTANT: We do NOT modify conn->available or conn->req_id here!
-         * The tracking array (used_conns) already prevents this connection
+         * The conn->dispatched flag already prevents this connection
          * from being reused in THIS call to complete_pending_irps().
          *
          * Setting conn->available = FALSE was wrong because:
@@ -976,8 +929,8 @@ static void complete_pending_irps(struct request_queue *queue)
          * 2. The 'available' flag means 'has request ready', not 'is processing'
          * 3. It could cause a connection leak if never reset
          *
-         * The connection tracking array is sufficient to prevent the
-         * request fan-out bug where one request was assigned to all threads.
+         * The dispatched flag is sufficient to prevent the request fan-out bug
+         * where one request was assigned to all threads.
          */
 
         IoCompleteRequest(irp, IO_NO_INCREMENT);
@@ -988,6 +941,10 @@ static void complete_pending_irps(struct request_queue *queue)
               irp, conn, completed);
     }
     
+    /* Reset dispatched flags on all connections for next call */
+    LIST_FOR_EACH_ENTRY(conn, &connections, struct connection, entry)
+        conn->dispatched = FALSE;
+
     if (completed > 0)
     {
         TRACE("complete_pending_irps: completed %d IRPs for queue %p\n",
@@ -1006,33 +963,6 @@ static void try_complete_irp(struct connection *conn)
         /* Complete any pending IRPs using this and other available connections */
         complete_pending_irps(conn->queue);
     }
-}
-
-/* Debug function to dump queue state */
-static void dump_queue_state(struct request_queue *queue)
-{
-    int irp_count = 0;
-    int conn_count = 0;
-    LIST_ENTRY *entry;
-    struct connection *conn;
-    
-    /* Count pending IRPs */
-    for (entry = queue->irp_queue.Flink; 
-         entry != &queue->irp_queue; 
-         entry = entry->Flink)
-    {
-        irp_count++;
-    }
-    
-    /* Count available connections */
-    LIST_FOR_EACH_ENTRY(conn, &connections, struct connection, entry)
-    {
-        if (conn->available && conn->queue == queue)
-            conn_count++;
-    }
-    
-    TRACE("Queue %p state: %d pending IRPs, %d available connections\n",
-          queue, irp_count, conn_count);
 }
 
 /* Return 1 if str matches expect, 0 if str is incomplete, -1 if they don't match. */
@@ -1148,11 +1078,11 @@ static BOOL host_matches(const struct url *url, const char *conn_host, size_t co
         }
     }
 
-    /* Handle wildcard matching */
-    if (url->url[7] == '+')
+    /* Handle wildcard matching - both + (strong wildcard) and * (weak wildcard) */
+    if (url->url[7] == '+' || url->url[7] == '*')
     {
         const char *queue_port = strchr(url->url + 7, ':');
-        
+
         if (queue_port && conn_port)
         {
             /* For wildcard hosts, compare only the port part */
@@ -1160,19 +1090,19 @@ static BOOL host_matches(const struct url *url, const char *conn_host, size_t co
             const char *conn_port_end = memchr(conn_port, '/',
                 conn_host_len - (conn_port - conn_host));
             size_t queue_port_len, conn_port_len;
-            
+
             if (!queue_port_end) queue_port_end = queue_port + strlen(queue_port);
-            if (!conn_port_end) 
+            if (!conn_port_end)
                 conn_port_end = conn_host + conn_host_len;
-            
+
             /* Skip the colon in queue_port to compare just the port number */
             queue_port++;  /* Skip ':' */
             queue_port_len = queue_port_end - queue_port;
             conn_port_len = conn_port_end - conn_port;
-            
+
             TRACE("Comparing wildcard port '%.*s' with connection port '%.*s'\n",
                   (int)queue_port_len, queue_port, (int)conn_port_len, conn_port);
-            
+
             if (queue_port_len == conn_port_len && !memcmp(queue_port, conn_port, queue_port_len))
                 return TRUE;
         }
@@ -1507,20 +1437,20 @@ static int parse_websocket_frame(struct connection *conn)
     memcpy(mask, data + pos, 4);
     pos += 4;
     
+    /* ===== SECURITY VALIDATION 7: Check for integer overflow ===== */
+    if (pos + payload_len < pos)
+    {
+        WARN("Integer overflow in frame size calculation\n");
+        send_close_frame(conn, WS_CLOSE_PROTOCOL_ERROR, "Invalid size");
+        return -1;
+    }
+
     /* Check if we have complete payload */
     if (available < pos + payload_len)
     {
-        TRACE("Incomplete payload (have %u, need %llu)\n", 
+        TRACE("Incomplete payload (have %u, need %llu)\n",
               available - pos, payload_len);
-        
-        /* ===== SECURITY VALIDATION 7: Check for integer overflow ===== */
-        if (pos + payload_len < pos)
-        {
-            WARN("Integer overflow in frame size calculation\n");
-            send_close_frame(conn, WS_CLOSE_PROTOCOL_ERROR, "Invalid size");
-            return -1;
-        }
-        
+
         /* Check if we can even fit this in our buffer */
         if (pos + payload_len > MAX_WS_FRAME_SIZE + 14)
         {
@@ -1528,7 +1458,7 @@ static int parse_websocket_frame(struct connection *conn)
             send_close_frame(conn, WS_CLOSE_MESSAGE_TOO_BIG, "Frame too large");
             return -1;
         }
-        
+
         return 0; /* Need more data */
     }
     
@@ -2206,7 +2136,7 @@ static BOOL send_close_frame(struct connection *conn, UINT16 code, const char *r
     conn->shutdown = TRUE;
     
     /* Build close frame with code */
-    unsigned char frame[125];
+    unsigned char frame[129];
     int frame_len = 2; /* Header */
     int payload_len = 2; /* Code */
     
@@ -2368,17 +2298,6 @@ static int parse_request(struct connection *conn)
             size_t copy_len = min((size_t)(t - val), sizeof(conn->sec_ws_key) - 1);
             memcpy(conn->sec_ws_key, val, copy_len);
             conn->sec_ws_key[copy_len] = '\0';
-        }
-        else if (!strncmp(name, "Sec-WebSocket-Protocol", len))
-        {
-            /* Copy protocol value (trim trailing whitespace) */
-            const char *val = p; const char *v = val;
-            while (v < end && (isprint(*v) || *v == '\t')) ++v;
-            const char *t = v;
-            while (t > val && (t[-1] == ' ' || t[-1] == '\t')) --t;
-            size_t copy_len = min((size_t)(t - val), sizeof(conn->sec_ws_protocol) - 1);
-            memcpy(conn->sec_ws_protocol, val, copy_len);
-            conn->sec_ws_protocol[copy_len] = '\0';
         }
         else if (!strncmp(name, "Sec-WebSocket-Protocol", len))
         {
@@ -2892,12 +2811,12 @@ static void receive_data(struct connection *conn)
         ioctlsocket(conn->socket, FIONREAD, &available);
         if (available)
         {
-            TRACE("%lu more bytes of data available, trying with larger buffer.\n", available);
-            TRACE("Reallocating buffer: current_size=%u, current_len=%u, available=%lu, new_size=%lu\n",
+            TRACE("%u more bytes of data available, trying with larger buffer.\n", available);
+            TRACE("Reallocating buffer: current_size=%u, current_len=%u, available=%u, new_size=%u\n",
                   conn->size, conn->len, available, conn->len + available);
             if (!(conn->buffer = realloc(conn->buffer, conn->len + available)))
             {
-                ERR("Failed to reallocate buffer from %u to %lu bytes.\n", conn->size, conn->len + available);
+                ERR("Failed to reallocate buffer from %u to %u bytes.\n", conn->size, conn->len + available);
                 close_connection(conn);
                 return;
             }
@@ -3006,6 +2925,7 @@ static DWORD WINAPI request_thread_proc(void *arg)
 
     while (!WaitForSingleObject(request_event, INFINITE))
     {
+        TRACE("request_thread_proc: Event signaled, processing sockets...\n");
         EnterCriticalSection(&http_cs);
 
         LIST_FOR_EACH_ENTRY(queue, &request_queues, struct request_queue, entry)
@@ -3019,7 +2939,14 @@ static DWORD WINAPI request_thread_proc(void *arg)
                     {
                         if (events.lNetworkEvents & FD_ACCEPT)
                         {
-                            accept_connection(url->listening_sock->socket);
+                            /* Accept all pending connections to avoid losing any under one event signal */
+                            while (1)
+                            {
+                                accept_connection(url->listening_sock->socket);
+                                /* accept_connection returns early on WSAEWOULDBLOCK */
+                                if (WSAGetLastError() == WSAEWOULDBLOCK)
+                                    break;
+                            }
                         }
                     }
                 }
@@ -3028,7 +2955,26 @@ static DWORD WINAPI request_thread_proc(void *arg)
 
         LIST_FOR_EACH_ENTRY_SAFE(conn, cursor, &connections, struct connection, entry)
         {
-            receive_data(conn);
+            WSANETWORKEVENTS events;
+
+            /* Enumerate and clear events for this connection.
+             * This also resets the manual-reset event when no events remain. */
+            if (WSAEnumNetworkEvents(conn->socket, request_event, &events) == 0)
+            {
+                if (events.lNetworkEvents & FD_CLOSE)
+                {
+                    receive_data(conn);  /* Handles close */
+                    continue;
+                }
+                if (events.lNetworkEvents & FD_READ)
+                {
+                    receive_data(conn);
+                }
+                if ((events.lNetworkEvents & FD_WRITE) && conn->ws_send_queue.in_progress)
+                {
+                    process_send_queue(conn);
+                }
+            }
         }
 
         /* BATCH PROCESSING FIX: After processing all socket events, distribute all available requests.
@@ -3069,12 +3015,18 @@ static struct listening_socket *get_listening_socket(unsigned short port)
 {
     struct listening_socket *listening_sock;
 
+    TRACE("get_listening_socket: Looking for port %u\n", port);
+
     LIST_FOR_EACH_ENTRY(listening_sock, &listening_sockets, struct listening_socket, entry)
     {
         if (listening_sock->port == port)
+        {
+            TRACE("get_listening_socket: Found existing socket for port %u\n", port);
             return listening_sock;
+        }
     }
 
+    TRACE("get_listening_socket: No existing socket for port %u\n", port);
     return NULL;
 }
 
@@ -3145,14 +3097,17 @@ static NTSTATUS http_add_url(struct request_queue *queue, IRP *irp)
 
     if (!listening_sock)
     {
-        if ((s = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET)
+        TRACE("Creating listening socket using WSASocketW...\n");
+        if ((s = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, 0)) == INVALID_SOCKET)
         {
             ERR("Failed to create socket, error %u.\n", WSAGetLastError());
             LeaveCriticalSection(&http_cs);
+
             free(url);
             free(new_entry);
             return STATUS_UNSUCCESSFUL;
         }
+        TRACE("WSASocketW succeeded, socket handle = %#Ix\n", (ULONG_PTR)s);
 
         addr.sin_family = AF_INET;
         addr.sin_addr.S_un.S_addr = INADDR_ANY;
@@ -3371,7 +3326,7 @@ static NTSTATUS http_receive_request(struct request_queue *queue, IRP *irp)
     struct connection *conn;
     NTSTATUS ret;
 
-    TRACE("addr %s, id %s, flags %#lx, bits %lu.\n", wine_dbgstr_longlong(params->addr),
+    TRACE("addr %s, id %s, flags %#x, bits %u.\n", wine_dbgstr_longlong(params->addr),
             wine_dbgstr_longlong(params->id), params->flags, params->bits);
 
     EnterCriticalSection(&http_cs);
@@ -3471,23 +3426,6 @@ static NTSTATUS winsock_error_to_status(int wsa_error)
 }
 
 /* Helper function: Find pending send by request ID */
-static struct http_pending_send* find_pending_send(struct connection *conn, HTTP_REQUEST_ID id)
-{
-    struct http_pending_send *send;
-
-    EnterCriticalSection(&conn->send_cs);
-    LIST_FOR_EACH_ENTRY(send, &conn->pending_sends, struct http_pending_send, entry)
-    {
-        if (send->request_id == id)
-        {
-            LeaveCriticalSection(&conn->send_cs);
-            return send;
-        }
-    }
-    LeaveCriticalSection(&conn->send_cs);
-    return NULL;
-}
-
 /* Helper function: Free pending send structure */
 static void free_pending_send(struct http_pending_send *send)
 {
@@ -3699,6 +3637,13 @@ static void cleanup_pending_sends(struct connection *conn)
 
             list_remove(&send->entry);
 
+            if (!IoSetCancelRoutine(send->irp, NULL))
+            {
+                /* Cancel routine already running, skip completion */
+                free_pending_send(send);
+                continue;
+            }
+
             send->irp->IoStatus.Status = STATUS_CANCELLED;
             send->irp->IoStatus.Information = 0;
             IoCompleteRequest(send->irp, IO_NO_INCREMENT);
@@ -3740,6 +3685,7 @@ static DWORD WINAPI send_worker_thread_proc(void *arg)
             LIST_FOR_EACH_ENTRY(conn, &connections, struct connection, entry)
             {
                 EnterCriticalSection(&conn->send_cs);
+                conn_addref(conn);
 
                 /* Check each pending send on this connection */
                 LIST_FOR_EACH_ENTRY_SAFE(send, send_next, &conn->pending_sends, struct http_pending_send, entry)
@@ -3835,6 +3781,7 @@ static DWORD WINAPI send_worker_thread_proc(void *arg)
                 }
 
                 LeaveCriticalSection(&conn->send_cs);
+                conn_release(conn);
             }
 
             LeaveCriticalSection(&http_cs);
@@ -3876,7 +3823,7 @@ static void start_send_worker(void)
     }
 
     /* Create work event (manual-reset, initially non-signaled) */
-    send_work_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    send_work_event = CreateEventW(NULL, FALSE, FALSE, NULL);
     if (!send_work_event)
     {
         ERR("Failed to create send work event\n");
@@ -4236,12 +4183,22 @@ static NTSTATUS http_send_response(struct request_queue *queue, IRP *irp)
                 /* Compute Sec-WebSocket-Accept = base64( SHA1(key + GUID) ) */
                 static const char guid[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
                 unsigned char hash[20];
-                /* Minimal SHA1 implementation */
                 {
-                    sha1_ctx c; sha1_init(&c);
-                    sha1_update(&c, (const unsigned char *)conn->sec_ws_key, strlen(conn->sec_ws_key));
-                    sha1_update(&c, (const unsigned char *)guid, sizeof(guid) - 1);
-                    sha1_final(&c, hash);
+                    BCRYPT_ALG_HANDLE sha1_alg;
+                    size_t key_len = strlen(conn->sec_ws_key);
+                    size_t concat_len = key_len + sizeof(guid) - 1;
+                    unsigned char *concat = malloc(concat_len);
+                    if (concat)
+                    {
+                        memcpy(concat, conn->sec_ws_key, key_len);
+                        memcpy(concat + key_len, guid, sizeof(guid) - 1);
+                        if (!BCryptOpenAlgorithmProvider(&sha1_alg, BCRYPT_SHA1_ALGORITHM, NULL, 0))
+                        {
+                            BCryptHash(sha1_alg, NULL, 0, concat, (ULONG)concat_len, hash, sizeof(hash));
+                            BCryptCloseAlgorithmProvider(sha1_alg, 0);
+                        }
+                        free(concat);
+                    }
                 }
                 /* Base64 encode (no CRLF) */
                 {
@@ -4457,7 +4414,7 @@ static NTSTATUS http_receive_body(struct request_queue *queue, IRP *irp)
     struct connection *conn;
     NTSTATUS ret;
 
-    TRACE("id %s, bits %lu.\n", wine_dbgstr_longlong(params->id), params->bits);
+    TRACE("id %s, bits %u.\n", wine_dbgstr_longlong(params->id), params->bits);
 
     EnterCriticalSection(&http_cs);
 
@@ -4498,7 +4455,7 @@ static NTSTATUS http_receive_body(struct request_queue *queue, IRP *irp)
             return ret;
         }
 
-        TRACE("%lu bits remaining.\n", conn->content_len);
+        TRACE("%u bits remaining.\n", conn->content_len);
 
         if (conn->content_len)
         {
@@ -4751,7 +4708,6 @@ static NTSTATUS WINAPI dispatch_create(DEVICE_OBJECT *device, IRP *irp)
 static void close_queue(struct request_queue *queue)
 {
     struct url *url, *url_next;
-    struct listening_socket *listening_sock, *listening_sock_next;
     LIST_ENTRY *cur, *next;
 
     EnterCriticalSection(&http_cs);
@@ -4759,16 +4715,17 @@ static void close_queue(struct request_queue *queue)
 
     LIST_FOR_EACH_ENTRY_SAFE(url, url_next, &queue->urls, struct url, entry)
     {
+        /* Check if this URL's listening socket is still used by other queues */
+        if (url->listening_sock && !is_listening_socket_used(url->listening_sock))
+        {
+            TRACE("Closing unused listening socket for port %u\n", url->listening_sock->port);
+            shutdown(url->listening_sock->socket, SD_BOTH);
+            closesocket(url->listening_sock->socket);
+            list_remove(&url->listening_sock->entry);
+            free(url->listening_sock);
+        }
         free(url->url);
         free(url);
-    }
-
-    LIST_FOR_EACH_ENTRY_SAFE(listening_sock, listening_sock_next, &listening_sockets, struct listening_socket, entry)
-    {
-        shutdown(listening_sock->socket, SD_BOTH);
-        closesocket(listening_sock->socket);
-        list_remove(&listening_sock->entry);
-        free(listening_sock);
     }
 
     /* Free all request entries to prevent memory leak */
@@ -4832,7 +4789,7 @@ static void WINAPI unload(DRIVER_OBJECT *driver)
     SetEvent(request_event);
     WaitForSingleObject(request_thread, INFINITE);
     CloseHandle(request_thread);
-    CloseHandle(request_event);
+    WSACloseEvent(request_event);
 
     /* Stop async send worker thread */
     stop_send_worker();
@@ -4884,7 +4841,7 @@ NTSTATUS WINAPI DriverEntry(DRIVER_OBJECT *driver, UNICODE_STRING *path)
 
     WSAStartup(MAKEWORD(1,1), &wsadata);
 
-    request_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    request_event = WSACreateEvent(); /* Manual-reset event for winsock */
     request_thread = CreateThread(NULL, 0, request_thread_proc, NULL, 0, NULL);
 
     /* Initialize async send worker critical section */

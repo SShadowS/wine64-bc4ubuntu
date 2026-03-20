@@ -275,17 +275,17 @@ SECURITY_STATUS WINAPI AcceptSecurityContext(
      fContextReq, TargetDataRep, phNewContext, pOutput, pfContextAttr,
      ptsExpiry);
 
-    /* BC NTLM BYPASS: ALWAYS accept any authentication for BC testing - NO ENV CHECK */
+    if (getenv("WINE_BC_NTLM_BYPASS"))
     {
         static int auth_stage = 0;
-        
+
         FIXME("*** BC NTLM BYPASS ACTIVE: AcceptSecurityContext - accepting ANY auth (stage %d) ***\n", auth_stage);
-        
+
         if (!phContext) /* First call - return challenge */
         {
             auth_stage = 1;
             /* Set a dummy context handle */
-            if (phNewContext) 
+            if (phNewContext)
             {
                 phNewContext->dwLower = 0xDEADBEEF;
                 phNewContext->dwUpper = 0xCAFEBABE;
